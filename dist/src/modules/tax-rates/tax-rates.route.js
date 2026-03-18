@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.taxRatesRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const tax_rates_controller_1 = require("./tax-rates.controller");
+const tax_rates_validation_1 = require("./tax-rates.validation");
+exports.taxRatesRouter = (0, express_1.Router)();
+exports.taxRatesRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
+exports.taxRatesRouter.get("/", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: tax_rates_validation_1.taxRateQuerySchema }), (0, asyncHandler_1.asyncHandler)(tax_rates_controller_1.listTaxRatesController));
+exports.taxRatesRouter.post("/", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: tax_rates_validation_1.createTaxRateSchema }), (0, asyncHandler_1.asyncHandler)(tax_rates_controller_1.createTaxRateController));
+exports.taxRatesRouter.patch("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: tax_rates_validation_1.updateTaxRateSchema }), (0, asyncHandler_1.asyncHandler)(tax_rates_controller_1.updateTaxRateController));

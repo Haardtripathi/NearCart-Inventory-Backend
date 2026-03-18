@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.unitsRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const units_controller_1 = require("./units.controller");
+const units_validation_1 = require("./units.validation");
+exports.unitsRouter = (0, express_1.Router)();
+exports.unitsRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
+exports.unitsRouter.get("/", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: units_validation_1.unitQuerySchema }), (0, asyncHandler_1.asyncHandler)(units_controller_1.listUnitsController));
+exports.unitsRouter.post("/", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: units_validation_1.createUnitSchema }), (0, asyncHandler_1.asyncHandler)(units_controller_1.createUnitController));

@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.branchesRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const branches_controller_1 = require("./branches.controller");
+const branches_validation_1 = require("./branches.validation");
+exports.branchesRouter = (0, express_1.Router)();
+exports.branchesRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
+exports.branchesRouter.get("/", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: branches_validation_1.branchQuerySchema }), (0, asyncHandler_1.asyncHandler)(branches_controller_1.listBranchesController));
+exports.branchesRouter.post("/", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: branches_validation_1.createBranchSchema }), (0, asyncHandler_1.asyncHandler)(branches_controller_1.createBranchController));
+exports.branchesRouter.get("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, asyncHandler_1.asyncHandler)(branches_controller_1.getBranchController));
+exports.branchesRouter.patch("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: branches_validation_1.updateBranchSchema }), (0, asyncHandler_1.asyncHandler)(branches_controller_1.updateBranchController));
+exports.branchesRouter.delete("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, asyncHandler_1.asyncHandler)(branches_controller_1.deleteBranchController));

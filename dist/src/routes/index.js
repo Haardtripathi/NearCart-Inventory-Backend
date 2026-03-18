@@ -1,0 +1,44 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.apiRouter = void 0;
+const express_1 = require("express");
+const ApiResponse_1 = require("../utils/ApiResponse");
+const auth_route_1 = require("../modules/auth/auth.route");
+const platform_route_1 = require("../modules/platform/platform.route");
+const organizations_route_1 = require("../modules/organizations/organizations.route");
+const branches_route_1 = require("../modules/branches/branches.route");
+const categories_route_1 = require("../modules/categories/categories.route");
+const brands_route_1 = require("../modules/brands/brands.route");
+const units_route_1 = require("../modules/units/units.route");
+const tax_rates_route_1 = require("../modules/tax-rates/tax-rates.route");
+const suppliers_route_1 = require("../modules/suppliers/suppliers.route");
+const customers_route_1 = require("../modules/customers/customers.route");
+const products_route_1 = require("../modules/products/products.route");
+const inventory_route_1 = require("../modules/inventory/inventory.route");
+const purchases_route_1 = require("../modules/purchases/purchases.route");
+const sales_orders_route_1 = require("../modules/sales-orders/sales-orders.route");
+const stock_transfers_route_1 = require("../modules/stock-transfers/stock-transfers.route");
+const audit_route_1 = require("../modules/audit/audit.route");
+exports.apiRouter = (0, express_1.Router)();
+exports.apiRouter.get("/health", (_req, res) => {
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "NearCart Inventory backend is healthy", {
+        status: "ok",
+        timestamp: new Date().toISOString(),
+    });
+});
+exports.apiRouter.use("/auth", auth_route_1.authRouter);
+exports.apiRouter.use("/platform", platform_route_1.platformRouter);
+exports.apiRouter.use("/organizations", organizations_route_1.organizationsRouter);
+exports.apiRouter.use("/branches", branches_route_1.branchesRouter);
+exports.apiRouter.use("/categories", categories_route_1.categoriesRouter);
+exports.apiRouter.use("/brands", brands_route_1.brandsRouter);
+exports.apiRouter.use("/units", units_route_1.unitsRouter);
+exports.apiRouter.use("/tax-rates", tax_rates_route_1.taxRatesRouter);
+exports.apiRouter.use("/suppliers", suppliers_route_1.suppliersRouter);
+exports.apiRouter.use("/customers", customers_route_1.customersRouter);
+exports.apiRouter.use("/products", products_route_1.productsRouter);
+exports.apiRouter.use("/inventory", inventory_route_1.inventoryRouter);
+exports.apiRouter.use("/purchases", purchases_route_1.purchasesRouter);
+exports.apiRouter.use("/sales-orders", sales_orders_route_1.salesOrdersRouter);
+exports.apiRouter.use("/stock-transfers", stock_transfers_route_1.stockTransfersRouter);
+exports.apiRouter.use("/audit-logs", audit_route_1.auditRouter);

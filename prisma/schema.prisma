@@ -1,0 +1,970 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ORG_ADMIN
+  MANAGER
+  STAFF
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum BranchType {
+  STORE
+  WAREHOUSE
+  DARK_STORE
+}
+
+enum ProductType {
+  SIMPLE
+  VARIABLE
+  BUNDLE
+  SERVICE
+  RAW_MATERIAL
+  FINISHED_GOOD
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum LanguageCode {
+  EN
+  HI
+  GU
+}
+
+enum ProductSourceType {
+  MANUAL
+  MASTER_TEMPLATE
+}
+
+enum TrackMethod {
+  PIECE
+  WEIGHT
+  VOLUME
+  LENGTH
+}
+
+enum OrderSource {
+  APP
+  WALK_IN
+  PHONE
+  WHATSAPP
+  OTHER
+}
+
+enum SalesOrderStatus {
+  DRAFT
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELLED
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  RETURNED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum PurchaseReceiptStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+enum StockMovementType {
+  OPENING
+  PURCHASE
+  SALE
+  SALE_CANCEL
+  RETURN_IN
+  RETURN_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  TRANSFER_IN
+  TRANSFER_OUT
+  RESERVE
+  RELEASE_RESERVE
+  DAMAGE
+  EXPIRED
+}
+
+enum ReferenceType {
+  PURCHASE_RECEIPT
+  SALES_ORDER
+  STOCK_ADJUSTMENT
+  STOCK_TRANSFER
+  MANUAL
+  SYSTEM
+}
+
+enum SerialStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  RETURNED
+  DAMAGED
+}
+
+enum BatchStatus {
+  ACTIVE
+  EXPIRED
+  CONSUMED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  STOCK_POST
+  ORDER_CONFIRM
+  ORDER_REJECT
+  ORDER_DELIVER
+  TRANSFER_APPROVE
+}
+
+enum StockTransferStatus {
+  DRAFT
+  APPROVED
+  CANCELLED
+}
+
+model User {
+  id                      String                    @id @default(cuid())
+  fullName                String
+  email                   String                    @unique
+  passwordHash            String
+  platformRole            UserRole?
+  preferredLanguage       LanguageCode              @default(EN)
+  isActive                Boolean                   @default(true)
+  lastLoginAt             DateTime?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  memberships             OrganizationMembership[]
+  createdProducts         Product[]                 @relation("ProductCreatedBy")
+  updatedProducts         Product[]                 @relation("ProductUpdatedBy")
+  inventoryLedgers        InventoryLedger[]         @relation("InventoryLedgerCreatedBy")
+  createdPurchaseReceipts PurchaseReceipt[]         @relation("PurchaseReceiptCreatedBy")
+  createdSalesOrders      SalesOrder[]              @relation("SalesOrderCreatedBy")
+  confirmedSalesOrders    SalesOrder[]              @relation("SalesOrderConfirmedBy")
+  deliveredSalesOrders    SalesOrder[]              @relation("SalesOrderDeliveredBy")
+  createdStockTransfers   StockTransfer[]           @relation("StockTransferCreatedBy")
+  approvedStockTransfers  StockTransfer[]           @relation("StockTransferApprovedBy")
+  auditLogs               AuditLog[]                @relation("AuditActor")
+
+  @@index([platformRole])
+}
+
+model Organization {
+  id               String                       @id @default(cuid())
+  name             String
+  slug             String                       @unique
+  legalName        String?
+  phone            String?
+  email            String?
+  status           OrganizationStatus           @default(ACTIVE)
+  currencyCode     String                       @default("INR")
+  timezone         String                       @default("Asia/Kolkata")
+  defaultLanguage  LanguageCode                 @default(EN)
+  enabledLanguages Json?                        @default("[\"EN\", \"HI\", \"GU\"]")
+  settings         Json?
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+  deletedAt        DateTime?
+  memberships      OrganizationMembership[]
+  industryConfigs  OrganizationIndustryConfig[]
+  branches         Branch[]
+  categories       Category[]
+  brands           Brand[]
+  units            Unit[]
+  taxRates         TaxRate[]
+  suppliers        Supplier[]
+  customers        Customer[]
+  products         Product[]
+  variants         ProductVariant[]
+  balances         InventoryBalance[]
+  inventoryLedger  InventoryLedger[]
+  inventoryBatches InventoryBatch[]
+  serialNumbers    SerialNumber[]
+  purchaseReceipts PurchaseReceipt[]
+  salesOrders      SalesOrder[]
+  stockTransfers   StockTransfer[]
+  auditLogs        AuditLog[]
+
+  @@index([deletedAt])
+}
+
+model OrganizationMembership {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           UserRole
+  isDefault      Boolean      @default(false)
+  branchAccess   Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model Industry {
+  id                     String                       @id @default(cuid())
+  code                   String                       @unique
+  name                   String                       @unique
+  description            String?
+  isActive               Boolean                      @default(true)
+  defaultFeatures        Json
+  defaultSettings        Json?
+  customFieldDefinitions Json?
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime                     @updatedAt
+  organizationConfigs    OrganizationIndustryConfig[]
+  translations           IndustryTranslation[]
+  masterCatalogCategories MasterCatalogCategory[]
+  masterCatalogItems     MasterCatalogItem[]
+  products               Product[]
+}
+
+model OrganizationIndustryConfig {
+  id              String       @id @default(cuid())
+  organizationId  String
+  industryId      String
+  isPrimary       Boolean      @default(false)
+  enabledFeatures Json
+  customSettings  Json?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  industry        Industry     @relation(fields: [industryId], references: [id])
+
+  @@unique([organizationId, industryId])
+  @@index([organizationId])
+  @@index([industryId])
+}
+
+model Branch {
+  id               String             @id @default(cuid())
+  organizationId   String
+  code             String
+  name             String
+  type             BranchType
+  phone            String?
+  email            String?
+  addressLine1     String?
+  addressLine2     String?
+  city             String?
+  state            String?
+  country          String?
+  postalCode       String?
+  isActive         Boolean            @default(true)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  deletedAt        DateTime?
+  organization     Organization       @relation(fields: [organizationId], references: [id])
+  balances         InventoryBalance[]
+  inventoryLedger  InventoryLedger[]
+  inventoryBatches InventoryBatch[]
+  serialNumbers    SerialNumber[]
+  purchaseReceipts PurchaseReceipt[]
+  salesOrders      SalesOrder[]
+  transfersFrom    StockTransfer[]    @relation("TransferFromBranch")
+  transfersTo      StockTransfer[]    @relation("TransferToBranch")
+
+  @@unique([organizationId, code])
+  @@index([organizationId, deletedAt])
+}
+
+model Category {
+  id             String      @id @default(cuid())
+  organizationId String
+  parentId       String?
+  name           String
+  slug           String
+  description    String?
+  isActive       Boolean     @default(true)
+  sortOrder      Int         @default(0)
+  customFields   Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  parent         Category?    @relation("CategoryToCategory", fields: [parentId], references: [id])
+  children       Category[]   @relation("CategoryToCategory")
+  translations   CategoryTranslation[]
+  products       Product[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, parentId])
+  @@index([organizationId, deletedAt])
+}
+
+model Brand {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  products       Product[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, deletedAt])
+}
+
+model Unit {
+  id             String       @id @default(cuid())
+  organizationId String?
+  code           String
+  name           String
+  symbol         String?
+  isSystem       Boolean      @default(false)
+  allowsDecimal  Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  primaryProducts Product[]   @relation("ProductPrimaryUnit")
+  variants       ProductVariant[] @relation("VariantUnit")
+
+  @@unique([organizationId, code])
+  @@index([code])
+}
+
+model TaxRate {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  code           String?
+  rate           Decimal      @db.Decimal(10, 4)
+  isInclusive    Boolean      @default(false)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  products       Product[]
+
+  @@index([organizationId, isActive])
+}
+
+model Supplier {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  code           String?
+  phone          String?
+  email          String?
+  taxNumber      String?
+  address        Json?
+  notes          String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  purchaseReceipts PurchaseReceipt[]
+
+  @@index([organizationId, deletedAt])
+}
+
+model Customer {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  phone          String?
+  email          String?
+  address        Json?
+  notes          String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  salesOrders    SalesOrder[]
+
+  @@index([organizationId, deletedAt])
+}
+
+model Product {
+  id                  String            @id @default(cuid())
+  organizationId      String
+  categoryId          String?
+  brandId             String?
+  taxRateId           String?
+  industryId          String?
+  masterCatalogItemId String?
+  name                String
+  slug                String
+  description         String?
+  productType         ProductType
+  sourceType          ProductSourceType @default(MANUAL)
+  status              ProductStatus     @default(ACTIVE)
+  hasVariants         Boolean           @default(false)
+  trackInventory      Boolean           @default(true)
+  allowBackorder      Boolean           @default(false)
+  allowNegativeStock  Boolean           @default(false)
+  trackMethod         TrackMethod       @default(PIECE)
+  primaryUnitId       String?
+  imageUrl            String?
+  tags                Json?
+  customFields        Json?
+  metadata            Json?
+  createdById         String?
+  updatedById         String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  deletedAt           DateTime?
+  organization        Organization      @relation(fields: [organizationId], references: [id])
+  category            Category?         @relation(fields: [categoryId], references: [id])
+  brand               Brand?            @relation(fields: [brandId], references: [id])
+  taxRate             TaxRate?          @relation(fields: [taxRateId], references: [id])
+  industry            Industry?         @relation(fields: [industryId], references: [id])
+  masterCatalogItem   MasterCatalogItem? @relation(fields: [masterCatalogItemId], references: [id])
+  primaryUnit         Unit?             @relation("ProductPrimaryUnit", fields: [primaryUnitId], references: [id])
+  createdBy           User?             @relation("ProductCreatedBy", fields: [createdById], references: [id])
+  updatedBy           User?             @relation("ProductUpdatedBy", fields: [updatedById], references: [id])
+  translations        ProductTranslation[]
+  variants            ProductVariant[]
+  balances            InventoryBalance[]
+  inventoryLedger     InventoryLedger[]
+  purchaseReceiptItems PurchaseReceiptItem[]
+  salesOrderItems SalesOrderItem[]
+  stockTransferItems StockTransferItem[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, deletedAt])
+  @@index([organizationId, status])
+  @@index([organizationId, masterCatalogItemId])
+}
+
+model ProductVariant {
+  id               String                     @id @default(cuid())
+  organizationId   String
+  productId        String
+  name             String
+  sku              String
+  barcode          String?
+  attributes       Json?
+  costPrice        Decimal                    @db.Decimal(18, 4)
+  sellingPrice     Decimal                    @db.Decimal(18, 4)
+  mrp              Decimal?                   @db.Decimal(18, 4)
+  reorderLevel     Decimal                    @default(0) @db.Decimal(18, 6)
+  minStockLevel    Decimal                    @default(0) @db.Decimal(18, 6)
+  maxStockLevel    Decimal?                   @db.Decimal(18, 6)
+  weight           Decimal?                   @db.Decimal(18, 6)
+  unitId           String?
+  isDefault        Boolean                    @default(false)
+  isActive         Boolean                    @default(true)
+  imageUrl         String?
+  customFields     Json?
+  metadata         Json?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  deletedAt        DateTime?
+  organization     Organization               @relation(fields: [organizationId], references: [id])
+  product          Product                    @relation(fields: [productId], references: [id])
+  unit             Unit?                      @relation("VariantUnit", fields: [unitId], references: [id])
+  translations     ProductVariantTranslation[]
+  balances         InventoryBalance[]
+  inventoryLedger  InventoryLedger[]
+  inventoryBatches InventoryBatch[]
+  serialNumbers    SerialNumber[]
+  purchaseReceiptItems PurchaseReceiptItem[]
+  salesOrderItems SalesOrderItem[]
+  stockTransferItems StockTransferItem[]
+
+  @@unique([organizationId, sku])
+  @@unique([organizationId, barcode])
+  @@index([productId, deletedAt])
+  @@index([organizationId, deletedAt])
+}
+
+model IndustryTranslation {
+  id          String       @id @default(cuid())
+  industryId  String
+  language    LanguageCode
+  name        String
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  industry    Industry     @relation(fields: [industryId], references: [id])
+
+  @@unique([industryId, language])
+  @@index([language])
+}
+
+model CategoryTranslation {
+  id          String       @id @default(cuid())
+  categoryId   String
+  language    LanguageCode
+  name        String
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  category    Category     @relation(fields: [categoryId], references: [id])
+
+  @@unique([categoryId, language])
+  @@index([language])
+}
+
+model ProductTranslation {
+  id          String       @id @default(cuid())
+  productId   String
+  language    LanguageCode
+  name        String
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  product     Product      @relation(fields: [productId], references: [id])
+
+  @@unique([productId, language])
+  @@index([language])
+}
+
+model ProductVariantTranslation {
+  id        String       @id @default(cuid())
+  variantId String
+  language  LanguageCode
+  name      String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([variantId, language])
+  @@index([language])
+}
+
+model MasterCatalogCategory {
+  id           String                           @id @default(cuid())
+  industryId   String
+  parentId     String?
+  code         String
+  slug         String
+  sortOrder    Int                              @default(0)
+  iconKey      String?
+  imageUrl     String?
+  isActive     Boolean                          @default(true)
+  metadata     Json?
+  createdAt    DateTime                         @default(now())
+  updatedAt    DateTime                         @updatedAt
+  industry     Industry                         @relation(fields: [industryId], references: [id])
+  parent       MasterCatalogCategory?           @relation("MasterCatalogCategoryToCategory", fields: [parentId], references: [id])
+  children     MasterCatalogCategory[]          @relation("MasterCatalogCategoryToCategory")
+  translations MasterCatalogCategoryTranslation[]
+  items        MasterCatalogItem[]
+
+  @@unique([industryId, code])
+  @@unique([industryId, slug])
+  @@index([industryId, parentId])
+  @@index([industryId, isActive])
+}
+
+model MasterCatalogCategoryTranslation {
+  id               String                @id @default(cuid())
+  masterCategoryId String
+  language         LanguageCode
+  name             String
+  description      String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  masterCategory   MasterCatalogCategory @relation(fields: [masterCategoryId], references: [id])
+
+  @@unique([masterCategoryId, language])
+  @@index([language])
+}
+
+model MasterCatalogItem {
+  id                   String                         @id @default(cuid())
+  industryId           String
+  masterCategoryId     String?
+  code                 String                         @unique
+  slug                 String                         @unique
+  canonicalName        String
+  canonicalDescription String?
+  productType          ProductType
+  defaultTrackMethod   TrackMethod
+  defaultUnitCode      String?
+  defaultBrandName     String?
+  defaultTaxCode       String?
+  hasVariants          Boolean                        @default(false)
+  trackInventory       Boolean                        @default(true)
+  allowBackorder       Boolean                        @default(false)
+  allowNegativeStock   Boolean                        @default(false)
+  defaultImageUrl      String?
+  tags                 Json?
+  customFieldsTemplate Json?
+  metadata             Json?
+  searchText           String
+  isActive             Boolean                        @default(true)
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+  industry             Industry                       @relation(fields: [industryId], references: [id])
+  category             MasterCatalogCategory?         @relation(fields: [masterCategoryId], references: [id])
+  translations         MasterCatalogItemTranslation[]
+  aliases              MasterCatalogItemAlias[]
+  variantTemplates     MasterCatalogVariantTemplate[]
+  importedProducts     Product[]
+
+  @@index([industryId, masterCategoryId])
+  @@index([industryId, isActive])
+}
+
+model MasterCatalogItemTranslation {
+  id          String            @id @default(cuid())
+  masterItemId String
+  language    LanguageCode
+  name        String
+  shortName   String?
+  description String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  masterItem  MasterCatalogItem @relation(fields: [masterItemId], references: [id])
+
+  @@unique([masterItemId, language])
+  @@index([language])
+}
+
+model MasterCatalogItemAlias {
+  id           String            @id @default(cuid())
+  masterItemId String
+  language     LanguageCode
+  value        String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  masterItem   MasterCatalogItem @relation(fields: [masterItemId], references: [id])
+
+  @@index([masterItemId])
+  @@index([language, value])
+}
+
+model MasterCatalogVariantTemplate {
+  id            String                        @id @default(cuid())
+  masterItemId  String
+  code          String
+  name          String
+  skuSuffix     String?
+  barcode       String?
+  attributes    Json?
+  defaultCostPrice Decimal?                  @db.Decimal(18, 4)
+  defaultSellingPrice Decimal?               @db.Decimal(18, 4)
+  defaultMrp    Decimal?                     @db.Decimal(18, 4)
+  reorderLevel  Decimal                      @default(0) @db.Decimal(18, 6)
+  minStockLevel Decimal                      @default(0) @db.Decimal(18, 6)
+  maxStockLevel Decimal?                     @db.Decimal(18, 6)
+  weight        Decimal?                     @db.Decimal(18, 6)
+  unitCode      String?
+  isDefault     Boolean                      @default(false)
+  isActive      Boolean                      @default(true)
+  sortOrder     Int                          @default(0)
+  metadata      Json?
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
+  masterItem    MasterCatalogItem            @relation(fields: [masterItemId], references: [id])
+  translations  MasterCatalogVariantTranslation[]
+
+  @@unique([masterItemId, code])
+  @@index([masterItemId, isActive])
+}
+
+model MasterCatalogVariantTranslation {
+  id                      String                     @id @default(cuid())
+  masterVariantTemplateId String
+  language                LanguageCode
+  name                    String
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+  masterVariantTemplate   MasterCatalogVariantTemplate @relation(fields: [masterVariantTemplateId], references: [id])
+
+  @@unique([masterVariantTemplateId, language])
+  @@index([language])
+}
+
+model InventoryBalance {
+  id             String       @id @default(cuid())
+  organizationId String
+  branchId       String
+  productId      String
+  variantId      String
+  onHand         Decimal      @default(0) @db.Decimal(18, 6)
+  reserved       Decimal      @default(0) @db.Decimal(18, 6)
+  incoming       Decimal      @default(0) @db.Decimal(18, 6)
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  branch         Branch       @relation(fields: [branchId], references: [id])
+  product        Product      @relation(fields: [productId], references: [id])
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([organizationId, branchId, variantId])
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([variantId])
+}
+
+model InventoryLedger {
+  id             String          @id @default(cuid())
+  organizationId String
+  branchId       String
+  productId      String
+  variantId      String
+  movementType   StockMovementType
+  referenceType  ReferenceType
+  referenceId    String?
+  quantityDelta  Decimal         @db.Decimal(18, 6)
+  unitCost       Decimal?        @db.Decimal(18, 4)
+  beforeOnHand   Decimal         @db.Decimal(18, 6)
+  afterOnHand    Decimal         @db.Decimal(18, 6)
+  beforeReserved Decimal         @db.Decimal(18, 6)
+  afterReserved  Decimal         @db.Decimal(18, 6)
+  note           String?
+  batchId        String?
+  createdById    String?
+  createdAt      DateTime        @default(now())
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  branch         Branch          @relation(fields: [branchId], references: [id])
+  product        Product         @relation(fields: [productId], references: [id])
+  variant        ProductVariant  @relation(fields: [variantId], references: [id])
+  batch          InventoryBatch? @relation(fields: [batchId], references: [id])
+  createdBy      User?           @relation("InventoryLedgerCreatedBy", fields: [createdById], references: [id])
+
+  @@index([organizationId])
+  @@index([branchId])
+  @@index([variantId])
+  @@index([createdAt])
+}
+
+model InventoryBatch {
+  id             String        @id @default(cuid())
+  organizationId String
+  branchId       String
+  variantId      String
+  batchNumber    String
+  manufactureDate DateTime?
+  expiryDate     DateTime?
+  quantityOnHand Decimal       @default(0) @db.Decimal(18, 6)
+  purchasePrice  Decimal?      @db.Decimal(18, 4)
+  sellingPrice   Decimal?      @db.Decimal(18, 4)
+  status         BatchStatus   @default(ACTIVE)
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  branch         Branch        @relation(fields: [branchId], references: [id])
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+  inventoryLedger InventoryLedger[]
+
+  @@unique([organizationId, branchId, variantId, batchNumber])
+  @@index([organizationId, expiryDate])
+}
+
+model SerialNumber {
+  id             String       @id @default(cuid())
+  organizationId String
+  branchId       String
+  variantId      String
+  serialNumber   String
+  status         SerialStatus @default(AVAILABLE)
+  referenceType  ReferenceType?
+  referenceId    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  branch         Branch       @relation(fields: [branchId], references: [id])
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([organizationId, serialNumber])
+  @@index([branchId, variantId])
+}
+
+model PurchaseReceipt {
+  id             String                @id @default(cuid())
+  organizationId String
+  branchId       String
+  supplierId     String?
+  receiptNumber  String
+  status         PurchaseReceiptStatus @default(DRAFT)
+  invoiceDate    DateTime?
+  receivedAt     DateTime?
+  subtotal       Decimal               @default(0) @db.Decimal(18, 4)
+  taxTotal       Decimal               @default(0) @db.Decimal(18, 4)
+  discountTotal  Decimal               @default(0) @db.Decimal(18, 4)
+  total          Decimal               @default(0) @db.Decimal(18, 4)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  organization   Organization          @relation(fields: [organizationId], references: [id])
+  branch         Branch                @relation(fields: [branchId], references: [id])
+  supplier       Supplier?             @relation(fields: [supplierId], references: [id])
+  createdBy      User?                 @relation("PurchaseReceiptCreatedBy", fields: [createdById], references: [id])
+  items          PurchaseReceiptItem[]
+
+  @@unique([organizationId, receiptNumber])
+  @@index([organizationId, status])
+}
+
+model PurchaseReceiptItem {
+  id                String          @id @default(cuid())
+  purchaseReceiptId String
+  productId         String
+  variantId         String
+  quantity          Decimal         @db.Decimal(18, 6)
+  unitCost          Decimal         @db.Decimal(18, 4)
+  taxRate           Decimal         @default(0) @db.Decimal(10, 4)
+  taxAmount         Decimal         @default(0) @db.Decimal(18, 4)
+  discountAmount    Decimal         @default(0) @db.Decimal(18, 4)
+  lineTotal         Decimal         @db.Decimal(18, 4)
+  batchNumber       String?
+  expiryDate        DateTime?
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  purchaseReceipt   PurchaseReceipt @relation(fields: [purchaseReceiptId], references: [id])
+  product           Product         @relation(fields: [productId], references: [id])
+  variant           ProductVariant  @relation(fields: [variantId], references: [id])
+
+  @@index([purchaseReceiptId])
+}
+
+model SalesOrder {
+  id              String            @id @default(cuid())
+  organizationId  String
+  branchId        String
+  customerId      String?
+  orderNumber     String
+  source          OrderSource
+  status          SalesOrderStatus  @default(PENDING)
+  paymentStatus   PaymentStatus     @default(UNPAID)
+  subtotal        Decimal           @default(0) @db.Decimal(18, 4)
+  taxTotal        Decimal           @default(0) @db.Decimal(18, 4)
+  discountTotal   Decimal           @default(0) @db.Decimal(18, 4)
+  total           Decimal           @default(0) @db.Decimal(18, 4)
+  notes           String?
+  rejectionReason String?
+  createdById     String?
+  confirmedById   String?
+  deliveredById   String?
+  confirmedAt     DateTime?
+  deliveredAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  organization    Organization      @relation(fields: [organizationId], references: [id])
+  branch          Branch            @relation(fields: [branchId], references: [id])
+  customer        Customer?         @relation(fields: [customerId], references: [id])
+  createdBy       User?             @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
+  confirmedBy     User?             @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id])
+  deliveredBy     User?             @relation("SalesOrderDeliveredBy", fields: [deliveredById], references: [id])
+  items           SalesOrderItem[]
+
+  @@unique([organizationId, orderNumber])
+  @@index([organizationId, status])
+}
+
+model SalesOrderItem {
+  id                  String      @id @default(cuid())
+  salesOrderId        String
+  productId           String
+  variantId           String
+  productNameSnapshot String
+  variantNameSnapshot String
+  skuSnapshot         String
+  quantity            Decimal     @db.Decimal(18, 6)
+  unitPrice           Decimal     @db.Decimal(18, 4)
+  taxRate             Decimal     @default(0) @db.Decimal(10, 4)
+  taxAmount           Decimal     @default(0) @db.Decimal(18, 4)
+  discountAmount      Decimal     @default(0) @db.Decimal(18, 4)
+  lineTotal           Decimal     @db.Decimal(18, 4)
+  metadata            Json?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  salesOrder          SalesOrder  @relation(fields: [salesOrderId], references: [id])
+  product             Product     @relation(fields: [productId], references: [id])
+  variant             ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@index([salesOrderId])
+}
+
+model StockTransfer {
+  id             String              @id @default(cuid())
+  organizationId String
+  fromBranchId   String
+  toBranchId     String
+  transferNumber String
+  status         StockTransferStatus @default(DRAFT)
+  notes          String?
+  createdById    String?
+  approvedById   String?
+  approvedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  organization   Organization        @relation(fields: [organizationId], references: [id])
+  fromBranch     Branch              @relation("TransferFromBranch", fields: [fromBranchId], references: [id])
+  toBranch       Branch              @relation("TransferToBranch", fields: [toBranchId], references: [id])
+  createdBy      User?               @relation("StockTransferCreatedBy", fields: [createdById], references: [id])
+  approvedBy     User?               @relation("StockTransferApprovedBy", fields: [approvedById], references: [id])
+  items          StockTransferItem[]
+
+  @@unique([organizationId, transferNumber])
+  @@index([organizationId, status])
+}
+
+model StockTransferItem {
+  id              String        @id @default(cuid())
+  stockTransferId String
+  productId       String
+  variantId       String
+  quantity        Decimal       @db.Decimal(18, 6)
+  unitCost        Decimal?      @db.Decimal(18, 4)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  stockTransfer   StockTransfer @relation(fields: [stockTransferId], references: [id])
+  product         Product       @relation(fields: [productId], references: [id])
+  variant         ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@index([stockTransferId])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String?
+  actorUserId    String?
+  action         AuditAction
+  entityType     String
+  entityId       String?
+  before         Json?
+  after          Json?
+  meta           Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime     @default(now())
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  actorUser      User?        @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([action, createdAt])
+}

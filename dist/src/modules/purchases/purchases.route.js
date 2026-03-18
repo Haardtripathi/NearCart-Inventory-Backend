@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.purchasesRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const purchases_controller_1 = require("./purchases.controller");
+const purchases_validation_1 = require("./purchases.validation");
+exports.purchasesRouter = (0, express_1.Router)();
+exports.purchasesRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
+exports.purchasesRouter.get("/", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: purchases_validation_1.purchaseQuerySchema }), (0, asyncHandler_1.asyncHandler)(purchases_controller_1.listPurchasesController));
+exports.purchasesRouter.post("/", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: purchases_validation_1.createPurchaseSchema }), (0, asyncHandler_1.asyncHandler)(purchases_controller_1.createPurchaseController));
+exports.purchasesRouter.get("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, asyncHandler_1.asyncHandler)(purchases_controller_1.getPurchaseController));
+exports.purchasesRouter.patch("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: purchases_validation_1.updatePurchaseSchema }), (0, asyncHandler_1.asyncHandler)(purchases_controller_1.updatePurchaseController));
+exports.purchasesRouter.post("/:id/post", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, asyncHandler_1.asyncHandler)(purchases_controller_1.postPurchaseController));

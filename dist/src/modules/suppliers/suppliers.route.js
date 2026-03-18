@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.suppliersRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const suppliers_controller_1 = require("./suppliers.controller");
+const suppliers_validation_1 = require("./suppliers.validation");
+exports.suppliersRouter = (0, express_1.Router)();
+exports.suppliersRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
+exports.suppliersRouter.get("/", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: suppliers_validation_1.supplierQuerySchema }), (0, asyncHandler_1.asyncHandler)(suppliers_controller_1.listSuppliersController));
+exports.suppliersRouter.post("/", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: suppliers_validation_1.createSupplierSchema }), (0, asyncHandler_1.asyncHandler)(suppliers_controller_1.createSupplierController));
+exports.suppliersRouter.get("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, asyncHandler_1.asyncHandler)(suppliers_controller_1.getSupplierController));
+exports.suppliersRouter.patch("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: suppliers_validation_1.updateSupplierSchema }), (0, asyncHandler_1.asyncHandler)(suppliers_controller_1.updateSupplierController));
+exports.suppliersRouter.delete("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, asyncHandler_1.asyncHandler)(suppliers_controller_1.deleteSupplierController));

@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inventoryRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const inventory_controller_1 = require("./inventory.controller");
+const inventory_validation_1 = require("./inventory.validation");
+exports.inventoryRouter = (0, express_1.Router)();
+exports.inventoryRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
+exports.inventoryRouter.get("/balances", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: inventory_validation_1.inventoryBalanceQuerySchema }), (0, asyncHandler_1.asyncHandler)(inventory_controller_1.getBalancesController));
+exports.inventoryRouter.get("/ledger", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: inventory_validation_1.inventoryLedgerQuerySchema }), (0, asyncHandler_1.asyncHandler)(inventory_controller_1.getLedgerController));
+exports.inventoryRouter.post("/adjustments", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: inventory_validation_1.createAdjustmentSchema }), (0, asyncHandler_1.asyncHandler)(inventory_controller_1.createAdjustmentController));

@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.platformRouter = void 0;
+const express_1 = require("express");
+const client_1 = require("@prisma/client");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const platform_controller_1 = require("./platform.controller");
+const platform_validation_1 = require("./platform.validation");
+exports.platformRouter = (0, express_1.Router)();
+exports.platformRouter.use(auth_middleware_1.authenticate, (0, auth_middleware_1.requireRoles)(client_1.UserRole.SUPER_ADMIN));
+exports.platformRouter.get("/industries", (0, asyncHandler_1.asyncHandler)(platform_controller_1.getIndustriesController));
+exports.platformRouter.post("/industries", (0, validate_middleware_1.validateRequest)({ body: platform_validation_1.createIndustrySchema }), (0, asyncHandler_1.asyncHandler)(platform_controller_1.createIndustryController));
+exports.platformRouter.patch("/industries/:id", (0, validate_middleware_1.validateRequest)({ body: platform_validation_1.updateIndustrySchema }), (0, asyncHandler_1.asyncHandler)(platform_controller_1.updateIndustryController));

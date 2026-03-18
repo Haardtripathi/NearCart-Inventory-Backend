@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.authRouter = void 0;
+const express_1 = require("express");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const auth_controller_1 = require("./auth.controller");
+const auth_validation_1 = require("./auth.validation");
+exports.authRouter = (0, express_1.Router)();
+exports.authRouter.post("/bootstrap-super-admin", (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.bootstrapSuperAdminSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.bootstrapSuperAdminController));
+exports.authRouter.post("/login", (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.loginSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.loginController));
+exports.authRouter.get("/me", auth_middleware_1.authenticate, (0, asyncHandler_1.asyncHandler)(auth_controller_1.meController));

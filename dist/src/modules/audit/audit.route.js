@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.auditRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const audit_controller_1 = require("./audit.controller");
+const audit_validation_1 = require("./audit.validation");
+exports.auditRouter = (0, express_1.Router)();
+exports.auditRouter.get("/", auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext, (0, auth_middleware_1.requireRoles)(...roles_1.ADMIN_ROLES), (0, validate_middleware_1.validateRequest)({ query: audit_validation_1.auditLogQuerySchema }), (0, asyncHandler_1.asyncHandler)(audit_controller_1.getAuditLogs));

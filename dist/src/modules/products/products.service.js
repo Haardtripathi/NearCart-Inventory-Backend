@@ -14,10 +14,77 @@ const prisma_1 = require("../../config/prisma");
 const decimal_1 = require("../../utils/decimal");
 const ApiError_1 = require("../../utils/ApiError");
 const guards_1 = require("../../utils/guards");
+const localization_1 = require("../../utils/localization");
 const pagination_1 = require("../../utils/pagination");
 const slug_1 = require("../../utils/slug");
+const translations_1 = require("../../utils/translations");
 const json_1 = require("../../utils/json");
 const audit_service_1 = require("../audit/audit.service");
+const productInclude = {
+    translations: {
+        orderBy: {
+            language: "asc",
+        },
+    },
+    category: {
+        include: {
+            translations: {
+                orderBy: {
+                    language: "asc",
+                },
+            },
+        },
+    },
+    brand: true,
+    taxRate: true,
+    primaryUnit: true,
+    masterCatalogItem: {
+        select: {
+            id: true,
+            code: true,
+            slug: true,
+            canonicalName: true,
+        },
+    },
+    variants: {
+        where: {
+            deletedAt: null,
+        },
+        include: {
+            translations: {
+                orderBy: {
+                    language: "asc",
+                },
+            },
+        },
+        orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    },
+};
+function serializeVariant(variant, localeContext) {
+    return (0, localization_1.serializeLocalizedEntity)(variant, localeContext);
+}
+function serializeProduct(product, localeContext) {
+    const localizedProduct = (0, localization_1.serializeLocalizedEntity)(product, localeContext);
+    return {
+        ...localizedProduct,
+        category: product.category ? (0, localization_1.serializeLocalizedEntity)(product.category, localeContext) : null,
+        variants: product.variants.map((variant) => serializeVariant(variant, localeContext)),
+    };
+}
+async function getProductRecordById(organizationId, productId) {
+    const product = await prisma_1.prisma.product.findFirst({
+        where: {
+            id: productId,
+            organizationId,
+            deletedAt: null,
+        },
+        include: productInclude,
+    });
+    if (!product) {
+        throw ApiError_1.ApiError.notFound("Product not found");
+    }
+    return product;
+}
 async function validateProductReferences(organizationId, input) {
     if (input.categoryId) {
         await (0, guards_1.assertCategoryInOrg)(prisma_1.prisma, organizationId, input.categoryId);
@@ -103,8 +170,8 @@ function normalizeVariantPayload(productName, hasVariants, variants) {
         costPrice: (0, decimal_1.toDecimal)(variant.costPrice),
         sellingPrice: (0, decimal_1.toDecimal)(variant.sellingPrice),
         mrp: variant.mrp !== undefined ? (0, decimal_1.toDecimal)(variant.mrp) : null,
-        reorderLevel: variant.reorderLevel !== undefined ? (0, decimal_1.toDecimal)(variant.reorderLevel) : 0,
-        minStockLevel: variant.minStockLevel !== undefined ? (0, decimal_1.toDecimal)(variant.minStockLevel) : 0,
+        reorderLevel: variant.reorderLevel !== undefined ? (0, decimal_1.toDecimal)(variant.reorderLevel) : new client_1.Prisma.Decimal(0),
+        minStockLevel: variant.minStockLevel !== undefined ? (0, decimal_1.toDecimal)(variant.minStockLevel) : new client_1.Prisma.Decimal(0),
         maxStockLevel: variant.maxStockLevel !== undefined ? (0, decimal_1.toDecimal)(variant.maxStockLevel) : null,
         weight: variant.weight !== undefined ? (0, decimal_1.toDecimal)(variant.weight) : null,
         unitId: variant.unitId ?? null,
@@ -113,9 +180,97 @@ function normalizeVariantPayload(productName, hasVariants, variants) {
         imageUrl: variant.imageUrl ?? null,
         customFields: (0, json_1.toNullableJsonValue)(variant.customFields),
         metadata: (0, json_1.toNullableJsonValue)(variant.metadata),
+        translations: variant.translations ?? [],
     }));
 }
-async function listProducts(organizationId, query) {
+async function upsertProductTranslations(db, productId, translations) {
+    await (0, translations_1.upsertTranslations)({
+        entries: translations,
+        listExisting: () => db.productTranslation.findMany({
+            where: {
+                productId,
+            },
+            select: {
+                id: true,
+                language: true,
+            },
+        }),
+        create: (translation) => db.productTranslation.create({
+            data: {
+                productId,
+                language: translation.language,
+                name: translation.name.trim(),
+                description: translation.description?.trim() ?? null,
+            },
+        }),
+        update: (existing, translation) => db.productTranslation.update({
+            where: {
+                id: existing.id,
+            },
+            data: {
+                name: translation.name.trim(),
+                description: translation.description?.trim() ?? null,
+            },
+        }),
+    });
+}
+async function upsertVariantTranslations(db, variantId, translations) {
+    await (0, translations_1.upsertTranslations)({
+        entries: translations,
+        listExisting: () => db.productVariantTranslation.findMany({
+            where: {
+                variantId,
+            },
+            select: {
+                id: true,
+                language: true,
+            },
+        }),
+        create: (translation) => db.productVariantTranslation.create({
+            data: {
+                variantId,
+                language: translation.language,
+                name: translation.name.trim(),
+            },
+        }),
+        update: (existing, translation) => db.productVariantTranslation.update({
+            where: {
+                id: existing.id,
+            },
+            data: {
+                name: translation.name.trim(),
+            },
+        }),
+    });
+}
+async function createVariantRecord(db, organizationId, productId, input) {
+    const variant = await db.productVariant.create({
+        data: {
+            organizationId,
+            productId,
+            name: input.name,
+            sku: input.sku,
+            barcode: input.barcode,
+            attributes: input.attributes,
+            costPrice: input.costPrice,
+            sellingPrice: input.sellingPrice,
+            mrp: input.mrp,
+            reorderLevel: input.reorderLevel,
+            minStockLevel: input.minStockLevel,
+            maxStockLevel: input.maxStockLevel,
+            weight: input.weight,
+            unitId: input.unitId,
+            isDefault: input.isDefault,
+            isActive: input.isActive,
+            imageUrl: input.imageUrl,
+            customFields: input.customFields,
+            metadata: input.metadata,
+        },
+    });
+    await upsertVariantTranslations(db, variant.id, input.translations);
+    return variant;
+}
+async function listProducts(organizationId, query, localeContext) {
     const { page, limit, skip } = (0, pagination_1.getPagination)(query.page, query.limit);
     const where = {
         organizationId,
@@ -130,6 +285,13 @@ async function listProducts(organizationId, query) {
                     { name: { contains: query.search, mode: "insensitive" } },
                     { slug: { contains: query.search, mode: "insensitive" } },
                     {
+                        translations: {
+                            some: {
+                                name: { contains: query.search, mode: "insensitive" },
+                            },
+                        },
+                    },
+                    {
                         variants: {
                             some: {
                                 deletedAt: null,
@@ -137,6 +299,13 @@ async function listProducts(organizationId, query) {
                                     { name: { contains: query.search, mode: "insensitive" } },
                                     { sku: { contains: query.search, mode: "insensitive" } },
                                     { barcode: { contains: query.search, mode: "insensitive" } },
+                                    {
+                                        translations: {
+                                            some: {
+                                                name: { contains: query.search, mode: "insensitive" },
+                                            },
+                                        },
+                                    },
                                 ],
                             },
                         },
@@ -148,18 +317,7 @@ async function listProducts(organizationId, query) {
     const [items, totalItems] = await prisma_1.prisma.$transaction([
         prisma_1.prisma.product.findMany({
             where,
-            include: {
-                category: true,
-                brand: true,
-                taxRate: true,
-                primaryUnit: true,
-                variants: {
-                    where: {
-                        deletedAt: null,
-                    },
-                    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-                },
-            },
+            include: productInclude,
             orderBy: {
                 createdAt: "desc",
             },
@@ -169,11 +327,11 @@ async function listProducts(organizationId, query) {
         prisma_1.prisma.product.count({ where }),
     ]);
     return {
-        items,
+        items: items.map((item) => serializeProduct(item, localeContext)),
         pagination: (0, pagination_1.buildPagination)(page, limit, totalItems),
     };
 }
-async function createProduct(organizationId, actorUserId, input) {
+async function createProduct(organizationId, actorUserId, input, localeContext) {
     await validateProductReferences(organizationId, input);
     const computedHasVariants = input.productType === client_1.ProductType.VARIABLE || input.hasVariants === true;
     if (computedHasVariants && input.productType !== client_1.ProductType.VARIABLE) {
@@ -211,6 +369,7 @@ async function createProduct(organizationId, actorUserId, input) {
                 slug,
                 description: input.description ?? null,
                 productType: input.productType,
+                sourceType: client_1.ProductSourceType.MANUAL,
                 status: input.status ?? client_1.ProductStatus.ACTIVE,
                 hasVariants: computedHasVariants,
                 trackInventory: input.trackInventory ?? true,
@@ -226,16 +385,13 @@ async function createProduct(organizationId, actorUserId, input) {
                 updatedById: actorUserId,
             },
         });
-        await tx.productVariant.createMany({
-            data: normalizedVariants.map((variant) => ({
-                organizationId,
-                productId: product.id,
-                ...variant,
-            })),
-        });
+        await upsertProductTranslations(tx, product.id, input.translations ?? []);
+        for (const variant of normalizedVariants) {
+            await createVariantRecord(tx, organizationId, product.id, variant);
+        }
         return product.id;
     });
-    const product = await getProductById(organizationId, productId);
+    const product = await getProductRecordById(organizationId, productId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -244,76 +400,51 @@ async function createProduct(organizationId, actorUserId, input) {
         entityId: product.id,
         after: product,
     });
-    return product;
+    return serializeProduct(product, localeContext);
 }
-async function getProductById(organizationId, productId) {
-    const product = await prisma_1.prisma.product.findFirst({
-        where: {
-            id: productId,
-            organizationId,
-            deletedAt: null,
-        },
-        include: {
-            category: true,
-            brand: true,
-            taxRate: true,
-            primaryUnit: true,
-            variants: {
-                where: {
-                    deletedAt: null,
-                },
-                orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-            },
-        },
-    });
-    if (!product) {
-        throw ApiError_1.ApiError.notFound("Product not found");
-    }
-    return product;
+async function getProductById(organizationId, productId, localeContext) {
+    return serializeProduct(await getProductRecordById(organizationId, productId), localeContext);
 }
-async function updateProduct(organizationId, productId, actorUserId, input) {
-    const existing = await getProductById(organizationId, productId);
+async function updateProduct(organizationId, productId, actorUserId, input, localeContext) {
+    const existing = await getProductRecordById(organizationId, productId);
     await validateProductReferences(organizationId, input);
     const nextHasVariants = input.hasVariants ?? existing.hasVariants;
     const nextProductType = input.productType ?? existing.productType;
     if (nextHasVariants && nextProductType !== client_1.ProductType.VARIABLE) {
         throw ApiError_1.ApiError.badRequest("Products with variants must use productType VARIABLE");
     }
-    if (!nextHasVariants && existing.variants.filter((variant) => !variant.deletedAt).length > 1) {
+    if (!nextHasVariants && existing.variants.length > 1) {
         throw ApiError_1.ApiError.badRequest("Cannot convert a product with multiple variants into a simple product");
     }
-    const updated = await prisma_1.prisma.product.update({
-        where: { id: productId },
-        data: {
-            ...(input.categoryId !== undefined ? { categoryId: input.categoryId || null } : {}),
-            ...(input.brandId !== undefined ? { brandId: input.brandId || null } : {}),
-            ...(input.taxRateId !== undefined ? { taxRateId: input.taxRateId || null } : {}),
-            ...(input.industryId !== undefined ? { industryId: input.industryId || null } : {}),
-            ...(input.name ? { name: input.name.trim() } : {}),
-            ...(input.slug ? { slug: (0, slug_1.slugify)(input.slug) } : {}),
-            ...(input.description !== undefined ? { description: input.description || null } : {}),
-            ...(input.productType ? { productType: input.productType } : {}),
-            ...(input.status ? { status: input.status } : {}),
-            ...(input.hasVariants !== undefined ? { hasVariants: input.hasVariants } : {}),
-            ...(input.trackInventory !== undefined ? { trackInventory: input.trackInventory } : {}),
-            ...(input.allowBackorder !== undefined ? { allowBackorder: input.allowBackorder } : {}),
-            ...(input.allowNegativeStock !== undefined ? { allowNegativeStock: input.allowNegativeStock } : {}),
-            ...(input.trackMethod ? { trackMethod: input.trackMethod } : {}),
-            ...(input.primaryUnitId !== undefined ? { primaryUnitId: input.primaryUnitId || null } : {}),
-            ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl || null } : {}),
-            ...(input.tags !== undefined ? { tags: (0, json_1.toNullableJsonValue)(input.tags) } : {}),
-            ...(input.customFields !== undefined ? { customFields: (0, json_1.toNullableJsonValue)(input.customFields) } : {}),
-            ...(input.metadata !== undefined ? { metadata: (0, json_1.toNullableJsonValue)(input.metadata) } : {}),
-            updatedById: actorUserId,
-        },
-        include: {
-            variants: {
-                where: {
-                    deletedAt: null,
-                },
+    await prisma_1.prisma.$transaction(async (tx) => {
+        await tx.product.update({
+            where: { id: productId },
+            data: {
+                ...(input.categoryId !== undefined ? { categoryId: input.categoryId || null } : {}),
+                ...(input.brandId !== undefined ? { brandId: input.brandId || null } : {}),
+                ...(input.taxRateId !== undefined ? { taxRateId: input.taxRateId || null } : {}),
+                ...(input.industryId !== undefined ? { industryId: input.industryId || null } : {}),
+                ...(input.name ? { name: input.name.trim() } : {}),
+                ...(input.slug ? { slug: (0, slug_1.slugify)(input.slug) } : {}),
+                ...(input.description !== undefined ? { description: input.description || null } : {}),
+                ...(input.productType ? { productType: input.productType } : {}),
+                ...(input.status ? { status: input.status } : {}),
+                ...(input.hasVariants !== undefined ? { hasVariants: input.hasVariants } : {}),
+                ...(input.trackInventory !== undefined ? { trackInventory: input.trackInventory } : {}),
+                ...(input.allowBackorder !== undefined ? { allowBackorder: input.allowBackorder } : {}),
+                ...(input.allowNegativeStock !== undefined ? { allowNegativeStock: input.allowNegativeStock } : {}),
+                ...(input.trackMethod ? { trackMethod: input.trackMethod } : {}),
+                ...(input.primaryUnitId !== undefined ? { primaryUnitId: input.primaryUnitId || null } : {}),
+                ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl || null } : {}),
+                ...(input.tags !== undefined ? { tags: (0, json_1.toNullableJsonValue)(input.tags) } : {}),
+                ...(input.customFields !== undefined ? { customFields: (0, json_1.toNullableJsonValue)(input.customFields) } : {}),
+                ...(input.metadata !== undefined ? { metadata: (0, json_1.toNullableJsonValue)(input.metadata) } : {}),
+                updatedById: actorUserId,
             },
-        },
+        });
+        await upsertProductTranslations(tx, productId, input.translations ?? []);
     });
+    const updated = await getProductRecordById(organizationId, productId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -323,10 +454,10 @@ async function updateProduct(organizationId, productId, actorUserId, input) {
         before: existing,
         after: updated,
     });
-    return updated;
+    return serializeProduct(updated, localeContext);
 }
 async function deleteProduct(organizationId, productId, actorUserId) {
-    const existing = await getProductById(organizationId, productId);
+    const existing = await getProductRecordById(organizationId, productId);
     const deleted = await prisma_1.prisma.$transaction(async (tx) => {
         await tx.productVariant.updateMany({
             where: {
@@ -358,19 +489,12 @@ async function deleteProduct(organizationId, productId, actorUserId) {
     });
     return deleted;
 }
-async function listVariants(organizationId, productId) {
-    await (0, guards_1.assertProductInOrg)(prisma_1.prisma, organizationId, productId);
-    return prisma_1.prisma.productVariant.findMany({
-        where: {
-            organizationId,
-            productId,
-            deletedAt: null,
-        },
-        orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-    });
+async function listVariants(organizationId, productId, localeContext) {
+    const product = await getProductRecordById(organizationId, productId);
+    return product.variants.map((variant) => serializeVariant(variant, localeContext));
 }
-async function createVariant(organizationId, productId, actorUserId, input) {
-    const product = await getProductById(organizationId, productId);
+async function createVariant(organizationId, productId, actorUserId, input, localeContext) {
+    const product = await getProductRecordById(organizationId, productId);
     if (product.status === client_1.ProductStatus.ARCHIVED) {
         throw ApiError_1.ApiError.badRequest("Cannot create variant for archived product");
     }
@@ -395,13 +519,17 @@ async function createVariant(organizationId, productId, actorUserId, input) {
                 },
             });
         }
-        return tx.productVariant.create({
-            data: {
-                organizationId,
-                productId,
-                ...normalized,
+        return createVariantRecord(tx, organizationId, productId, normalized);
+    });
+    const createdVariant = await prisma_1.prisma.productVariant.findUniqueOrThrow({
+        where: { id: created.id },
+        include: {
+            translations: {
+                orderBy: {
+                    language: "asc",
+                },
             },
-        });
+        },
     });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
@@ -409,12 +537,12 @@ async function createVariant(organizationId, productId, actorUserId, input) {
         action: client_1.AuditAction.CREATE,
         entityType: "ProductVariant",
         entityId: created.id,
-        after: created,
+        after: createdVariant,
     });
-    return created;
+    return serializeVariant(createdVariant, localeContext);
 }
-async function updateVariant(organizationId, productId, variantId, actorUserId, input) {
-    const product = await getProductById(organizationId, productId);
+async function updateVariant(organizationId, productId, variantId, actorUserId, input, localeContext) {
+    const product = await getProductRecordById(organizationId, productId);
     const existing = await (0, guards_1.assertVariantInOrg)(prisma_1.prisma, organizationId, variantId);
     if (existing.productId !== productId) {
         throw ApiError_1.ApiError.badRequest("Variant does not belong to the selected product");
@@ -450,7 +578,7 @@ async function updateVariant(organizationId, productId, variantId, actorUserId, 
         if (!product.hasVariants && input.isActive === false) {
             throw ApiError_1.ApiError.badRequest("Simple products must keep one active default variant");
         }
-        return tx.productVariant.update({
+        const variant = await tx.productVariant.update({
             where: { id: variantId },
             data: {
                 ...(input.name !== undefined ? { name: input.name || product.name } : {}),
@@ -476,6 +604,20 @@ async function updateVariant(organizationId, productId, variantId, actorUserId, 
                 ...(input.metadata !== undefined ? { metadata: (0, json_1.toNullableJsonValue)(input.metadata) } : {}),
             },
         });
+        await upsertVariantTranslations(tx, variantId, input.translations ?? []);
+        return variant;
+    });
+    const updatedVariant = await prisma_1.prisma.productVariant.findUniqueOrThrow({
+        where: {
+            id: updated.id,
+        },
+        include: {
+            translations: {
+                orderBy: {
+                    language: "asc",
+                },
+            },
+        },
     });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
@@ -484,17 +626,17 @@ async function updateVariant(organizationId, productId, variantId, actorUserId, 
         entityType: "ProductVariant",
         entityId: updated.id,
         before: existing,
-        after: updated,
+        after: updatedVariant,
     });
-    return updated;
+    return serializeVariant(updatedVariant, localeContext);
 }
 async function deleteVariant(organizationId, productId, variantId, actorUserId) {
-    const product = await getProductById(organizationId, productId);
+    const product = await getProductRecordById(organizationId, productId);
     const existing = await (0, guards_1.assertVariantInOrg)(prisma_1.prisma, organizationId, variantId);
     if (existing.productId !== productId) {
         throw ApiError_1.ApiError.badRequest("Variant does not belong to the selected product");
     }
-    const activeVariants = product.variants.filter((variant) => variant.deletedAt === null);
+    const activeVariants = product.variants;
     if (!product.hasVariants || activeVariants.length <= 1) {
         throw ApiError_1.ApiError.badRequest("Simple products must keep exactly one active default variant");
     }

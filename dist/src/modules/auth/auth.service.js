@@ -42,6 +42,7 @@ async function bootstrapSuperAdmin(input, meta) {
             fullName: true,
             email: true,
             platformRole: true,
+            preferredLanguage: true,
             createdAt: true,
         },
     });
@@ -132,6 +133,7 @@ async function login(input, meta) {
             fullName: user.fullName,
             email: user.email,
             platformRole: user.platformRole,
+            preferredLanguage: user.preferredLanguage,
             lastLoginAt: user.lastLoginAt,
         },
         activeOrganizationId,
@@ -175,6 +177,7 @@ async function getMe(userId, activeOrganizationId, role) {
         email: user.email,
         isActive: user.isActive,
         platformRole: user.platformRole,
+        preferredLanguage: user.preferredLanguage,
         activeOrganizationId,
         role,
         memberships: user.memberships.map((membership) => ({

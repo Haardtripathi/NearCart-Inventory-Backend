@@ -20,6 +20,7 @@ async function authenticate(req, _res, next) {
                 id: true,
                 isActive: true,
                 platformRole: true,
+                preferredLanguage: true,
             },
         });
         if (!user || !user.isActive) {
@@ -29,6 +30,8 @@ async function authenticate(req, _res, next) {
             userId: payload.userId,
             activeOrganizationId: payload.activeOrganizationId,
             role: user.platformRole === client_1.UserRole.SUPER_ADMIN ? client_1.UserRole.SUPER_ADMIN : payload.role,
+            userPreferredLanguage: user.preferredLanguage,
+            activeOrganizationDefaultLanguage: null,
         };
         next();
     }

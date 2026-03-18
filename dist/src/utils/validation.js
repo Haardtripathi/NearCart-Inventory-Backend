@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.idParamSchema = exports.optionalDateInputSchema = exports.dateInputSchema = exports.optionalDecimalInputSchema = exports.decimalInputSchema = exports.paginationQuerySchema = exports.optionalJsonSchema = exports.jsonValueSchema = exports.optionalEmailSchema = exports.nullableTrimmedString = exports.optionalTrimmedString = exports.trimmedString = void 0;
+exports.languageCodeSchema = exports.idParamSchema = exports.optionalDateInputSchema = exports.dateInputSchema = exports.optionalDecimalInputSchema = exports.decimalInputSchema = exports.paginationQuerySchema = exports.optionalJsonSchema = exports.jsonValueSchema = exports.optionalEmailSchema = exports.nullableTrimmedString = exports.optionalTrimmedString = exports.trimmedString = void 0;
+exports.uniqueLanguageArraySchema = uniqueLanguageArraySchema;
+const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 exports.trimmedString = zod_1.z.string().trim().min(1);
 exports.optionalTrimmedString = zod_1.z.preprocess((value) => {
@@ -41,3 +43,24 @@ exports.optionalDateInputSchema = zod_1.z.coerce.date().optional();
 exports.idParamSchema = zod_1.z.object({
     id: zod_1.z.string().trim().min(1),
 });
+exports.languageCodeSchema = zod_1.z.nativeEnum(client_1.LanguageCode);
+function uniqueLanguageArraySchema(itemSchema) {
+    return zod_1.z.array(itemSchema).superRefine((entries, ctx) => {
+        const seen = new Set();
+        entries.forEach((entry, index) => {
+            const language = entry.language;
+            if (!language) {
+                return;
+            }
+            if (seen.has(language)) {
+                ctx.addIssue({
+                    code: zod_1.z.ZodIssueCode.custom,
+                    message: `Duplicate translation for language ${language}`,
+                    path: [index, "language"],
+                });
+                return;
+            }
+            seen.add(language);
+        });
+    });
+}

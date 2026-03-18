@@ -19,14 +19,20 @@ async function requireOrganizationContext(req, _res, next) {
                 id: organizationId,
                 deletedAt: null,
             },
-            select: { id: true },
+            select: {
+                id: true,
+                defaultLanguage: true,
+                enabledLanguages: true,
+            },
         });
         if (!organization) {
             return next(ApiError_1.ApiError.notFound("Organization not found"));
         }
+        req.activeOrganization = organization;
         req.auth = {
             ...req.auth,
             activeOrganizationId: organizationId,
+            activeOrganizationDefaultLanguage: organization.defaultLanguage,
         };
         return next();
     }
@@ -41,15 +47,26 @@ async function requireOrganizationContext(req, _res, next) {
                 isActive: true,
             },
         },
+        include: {
+            organization: {
+                select: {
+                    id: true,
+                    defaultLanguage: true,
+                    enabledLanguages: true,
+                },
+            },
+        },
     });
     if (!membership) {
         return next(ApiError_1.ApiError.forbidden("You do not belong to the selected organization"));
     }
     req.membership = membership;
+    req.activeOrganization = membership.organization;
     req.auth = {
         ...req.auth,
         activeOrganizationId: organizationId,
         role: membership.role,
+        activeOrganizationDefaultLanguage: membership.organization.defaultLanguage,
     };
     next();
 }

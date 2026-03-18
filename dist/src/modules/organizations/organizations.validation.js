@@ -26,6 +26,8 @@ exports.createOrganizationSchema = zod_1.z.object({
     status: zod_1.z.nativeEnum(client_1.OrganizationStatus).optional(),
     currencyCode: validation_1.optionalTrimmedString,
     timezone: validation_1.optionalTrimmedString,
+    defaultLanguage: zod_1.z.nativeEnum(client_1.LanguageCode).optional(),
+    enabledLanguages: (0, validation_1.uniqueLanguageArraySchema)(validation_1.languageCodeSchema).optional(),
     settings: zod_1.z.unknown().optional(),
     ownerUserId: validation_1.optionalTrimmedString,
     primaryIndustryId: validation_1.trimmedString,

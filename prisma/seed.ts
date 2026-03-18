@@ -982,6 +982,7 @@ async function seedIndustryCatalog(industrySeed: IndustrySeed) {
   );
 
   for (const itemSeed of industrySeed.items) {
+    const masterItemSlug = slugify(`${industrySeed.code}-${itemSeed.canonicalName}`);
     const masterItem = await prisma.masterCatalogItem.upsert({
       where: {
         code: itemSeed.code,
@@ -989,7 +990,7 @@ async function seedIndustryCatalog(industrySeed: IndustrySeed) {
       update: {
         industryId: industry.id,
         masterCategoryId: categoriesByCode.get(itemSeed.categoryCode) ?? null,
-        slug: slugify(itemSeed.canonicalName),
+        slug: masterItemSlug,
         canonicalName: itemSeed.canonicalName,
         canonicalDescription: itemSeed.canonicalDescription ?? null,
         productType:
@@ -1014,7 +1015,7 @@ async function seedIndustryCatalog(industrySeed: IndustrySeed) {
         industryId: industry.id,
         masterCategoryId: categoriesByCode.get(itemSeed.categoryCode) ?? null,
         code: itemSeed.code,
-        slug: slugify(itemSeed.canonicalName),
+        slug: masterItemSlug,
         canonicalName: itemSeed.canonicalName,
         canonicalDescription: itemSeed.canonicalDescription ?? null,
         productType:
@@ -1137,7 +1138,7 @@ async function seedIndustryCatalog(industrySeed: IndustrySeed) {
     const searchText = buildMasterItemSearchText({
       canonicalName: itemSeed.canonicalName,
       code: itemSeed.code,
-      slug: slugify(itemSeed.canonicalName),
+      slug: masterItemSlug,
       translations: (Object.entries(itemSeed.translations) as Array<[keyof TranslationWithDescriptionTriple, TranslationWithDescriptionTriple[keyof TranslationWithDescriptionTriple]]>).map(
         ([, value]) => ({
           name: value.name,

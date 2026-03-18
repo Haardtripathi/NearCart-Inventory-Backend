@@ -4,6 +4,15 @@ exports.updateVariantSchema = exports.createVariantSchema = exports.updateProduc
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
+const productTranslationSchema = zod_1.z.object({
+    language: validation_1.languageCodeSchema,
+    name: validation_1.trimmedString,
+    description: validation_1.optionalTrimmedString,
+});
+const variantTranslationSchema = zod_1.z.object({
+    language: validation_1.languageCodeSchema,
+    name: validation_1.trimmedString,
+});
 const variantInputSchema = zod_1.z.object({
     name: validation_1.optionalTrimmedString,
     sku: validation_1.trimmedString,
@@ -22,6 +31,7 @@ const variantInputSchema = zod_1.z.object({
     imageUrl: validation_1.optionalTrimmedString,
     customFields: zod_1.z.unknown().optional(),
     metadata: zod_1.z.unknown().optional(),
+    translations: (0, validation_1.uniqueLanguageArraySchema)(variantTranslationSchema).optional(),
 });
 const productBaseSchema = zod_1.z.object({
     categoryId: validation_1.optionalTrimmedString,
@@ -43,12 +53,14 @@ const productBaseSchema = zod_1.z.object({
     tags: zod_1.z.unknown().optional(),
     customFields: zod_1.z.unknown().optional(),
     metadata: zod_1.z.unknown().optional(),
+    translations: (0, validation_1.uniqueLanguageArraySchema)(productTranslationSchema).optional(),
 });
 exports.productQuerySchema = validation_1.paginationQuerySchema.extend({
     status: zod_1.z.nativeEnum(client_1.ProductStatus).optional(),
     categoryId: validation_1.optionalTrimmedString,
     brandId: validation_1.optionalTrimmedString,
     hasVariants: zod_1.z.coerce.boolean().optional(),
+    lang: validation_1.optionalTrimmedString,
 });
 exports.createProductSchema = productBaseSchema.extend({
     defaultVariant: variantInputSchema.optional(),

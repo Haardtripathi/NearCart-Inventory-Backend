@@ -40,12 +40,44 @@ export async function listAuditLogs(organizationId: string, query: {
   limit: number;
   action?: AuditAction;
   entityType?: string;
+  actor?: string;
+  startDate?: Date;
+  endDate?: Date;
 }) {
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
     organizationId,
     ...(query.action ? { action: query.action } : {}),
     ...(query.entityType ? { entityType: query.entityType } : {}),
+    ...(query.actor
+      ? {
+          OR: [
+            { actorUserId: query.actor },
+            {
+              actorUser: {
+                is: {
+                  fullName: { contains: query.actor, mode: "insensitive" as const },
+                },
+              },
+            },
+            {
+              actorUser: {
+                is: {
+                  email: { contains: query.actor, mode: "insensitive" as const },
+                },
+              },
+            },
+          ],
+        }
+      : {}),
+    ...(query.startDate || query.endDate
+      ? {
+          createdAt: {
+            ...(query.startDate ? { gte: query.startDate } : {}),
+            ...(query.endDate ? { lte: query.endDate } : {}),
+          },
+        }
+      : {}),
   };
 
   const [items, totalItems] = await prisma.$transaction([

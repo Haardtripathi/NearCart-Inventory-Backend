@@ -281,16 +281,19 @@ export async function listLedger(
     page: number;
     limit: number;
     branchId?: string;
+    productId?: string;
     variantId?: string;
     movementType?: StockMovementType;
     startDate?: Date;
     endDate?: Date;
+    search?: string;
   },
 ) {
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
     organizationId,
     ...(query.branchId ? { branchId: query.branchId } : {}),
+    ...(query.productId ? { productId: query.productId } : {}),
     ...(query.variantId ? { variantId: query.variantId } : {}),
     ...(query.movementType ? { movementType: query.movementType } : {}),
     ...(query.startDate || query.endDate
@@ -299,6 +302,18 @@ export async function listLedger(
             ...(query.startDate ? { gte: query.startDate } : {}),
             ...(query.endDate ? { lte: query.endDate } : {}),
           },
+        }
+      : {}),
+    ...(query.search
+      ? {
+          OR: [
+            { note: { contains: query.search, mode: "insensitive" as const } },
+            { referenceId: { contains: query.search, mode: "insensitive" as const } },
+            { product: { name: { contains: query.search, mode: "insensitive" as const } } },
+            { variant: { name: { contains: query.search, mode: "insensitive" as const } } },
+            { variant: { sku: { contains: query.search, mode: "insensitive" as const } } },
+            { variant: { barcode: { contains: query.search, mode: "insensitive" as const } } },
+          ],
         }
       : {}),
   };

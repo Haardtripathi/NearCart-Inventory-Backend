@@ -12,6 +12,7 @@ exports.inventoryBalanceQuerySchema = validation_1.paginationQuerySchema.extend(
 });
 exports.inventoryLedgerQuerySchema = validation_1.paginationQuerySchema.extend({
     branchId: validation_1.optionalTrimmedString,
+    productId: validation_1.optionalTrimmedString,
     variantId: validation_1.optionalTrimmedString,
     movementType: zod_1.z.nativeEnum(client_1.StockMovementType).optional(),
     startDate: validation_1.optionalDateInputSchema,

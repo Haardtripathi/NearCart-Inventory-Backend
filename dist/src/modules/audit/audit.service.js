@@ -27,6 +27,35 @@ async function listAuditLogs(organizationId, query) {
         organizationId,
         ...(query.action ? { action: query.action } : {}),
         ...(query.entityType ? { entityType: query.entityType } : {}),
+        ...(query.actor
+            ? {
+                OR: [
+                    { actorUserId: query.actor },
+                    {
+                        actorUser: {
+                            is: {
+                                fullName: { contains: query.actor, mode: "insensitive" },
+                            },
+                        },
+                    },
+                    {
+                        actorUser: {
+                            is: {
+                                email: { contains: query.actor, mode: "insensitive" },
+                            },
+                        },
+                    },
+                ],
+            }
+            : {}),
+        ...(query.startDate || query.endDate
+            ? {
+                createdAt: {
+                    ...(query.startDate ? { gte: query.startDate } : {}),
+                    ...(query.endDate ? { lte: query.endDate } : {}),
+                },
+            }
+            : {}),
     };
     const [items, totalItems] = await prisma_1.prisma.$transaction([
         prisma_1.prisma.auditLog.findMany({

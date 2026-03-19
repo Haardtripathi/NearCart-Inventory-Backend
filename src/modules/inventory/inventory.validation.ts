@@ -19,6 +19,7 @@ export const inventoryBalanceQuerySchema = paginationQuerySchema.extend({
 
 export const inventoryLedgerQuerySchema = paginationQuerySchema.extend({
   branchId: optionalTrimmedString,
+  productId: optionalTrimmedString,
   variantId: optionalTrimmedString,
   movementType: z.nativeEnum(StockMovementType).optional(),
   startDate: optionalDateInputSchema,

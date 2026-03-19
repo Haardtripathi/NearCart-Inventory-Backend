@@ -212,6 +212,7 @@ async function listLedger(organizationId, query) {
     const where = {
         organizationId,
         ...(query.branchId ? { branchId: query.branchId } : {}),
+        ...(query.productId ? { productId: query.productId } : {}),
         ...(query.variantId ? { variantId: query.variantId } : {}),
         ...(query.movementType ? { movementType: query.movementType } : {}),
         ...(query.startDate || query.endDate
@@ -220,6 +221,18 @@ async function listLedger(organizationId, query) {
                     ...(query.startDate ? { gte: query.startDate } : {}),
                     ...(query.endDate ? { lte: query.endDate } : {}),
                 },
+            }
+            : {}),
+        ...(query.search
+            ? {
+                OR: [
+                    { note: { contains: query.search, mode: "insensitive" } },
+                    { referenceId: { contains: query.search, mode: "insensitive" } },
+                    { product: { name: { contains: query.search, mode: "insensitive" } } },
+                    { variant: { name: { contains: query.search, mode: "insensitive" } } },
+                    { variant: { sku: { contains: query.search, mode: "insensitive" } } },
+                    { variant: { barcode: { contains: query.search, mode: "insensitive" } } },
+                ],
             }
             : {}),
     };

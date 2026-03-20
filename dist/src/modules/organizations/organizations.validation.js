@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createOrganizationSchema = void 0;
+exports.addOrganizationIndustrySchema = exports.createOrganizationSchema = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
@@ -34,4 +34,10 @@ exports.createOrganizationSchema = zod_1.z.object({
     enabledFeatures: zod_1.z.record(zod_1.z.any()).optional(),
     customSettings: zod_1.z.unknown().optional(),
     firstBranch: branchInputSchema,
+});
+exports.addOrganizationIndustrySchema = zod_1.z.object({
+    industryId: validation_1.trimmedString,
+    isPrimary: zod_1.z.boolean().optional(),
+    enabledFeatures: zod_1.z.record(zod_1.z.any()).optional(),
+    customSettings: zod_1.z.unknown().optional(),
 });

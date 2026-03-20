@@ -50,6 +50,7 @@ const masterVariantTemplateSchema = zod_1.z.object({
 exports.masterCatalogCategoriesQuerySchema = validation_1.paginationQuerySchema.extend({
     industryId: validation_1.trimmedString,
     parentId: validation_1.optionalTrimmedString,
+    search: validation_1.optionalTrimmedString,
     lang: validation_1.optionalTrimmedString,
 });
 exports.masterCatalogCategoryTreeQuerySchema = zod_1.z.object({

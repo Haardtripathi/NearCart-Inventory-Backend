@@ -11,4 +11,5 @@ exports.organizationsRouter = (0, express_1.Router)();
 exports.organizationsRouter.use(auth_middleware_1.authenticate);
 exports.organizationsRouter.post("/", (0, validate_middleware_1.validateRequest)({ body: organizations_validation_1.createOrganizationSchema }), (0, asyncHandler_1.asyncHandler)(organizations_controller_1.createOrganizationController));
 exports.organizationsRouter.get("/my", (0, asyncHandler_1.asyncHandler)(organizations_controller_1.getMyOrganizationsController));
+exports.organizationsRouter.post("/:id/industries", (0, validate_middleware_1.validateRequest)({ body: organizations_validation_1.addOrganizationIndustrySchema }), (0, asyncHandler_1.asyncHandler)(organizations_controller_1.addIndustryToOrganizationController));
 exports.organizationsRouter.get("/:id", (0, asyncHandler_1.asyncHandler)(organizations_controller_1.getOrganizationByIdController));

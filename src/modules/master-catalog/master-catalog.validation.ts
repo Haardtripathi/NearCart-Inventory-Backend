@@ -64,6 +64,7 @@ const masterVariantTemplateSchema = z.object({
 export const masterCatalogCategoriesQuerySchema = paginationQuerySchema.extend({
   industryId: trimmedString,
   parentId: optionalTrimmedString,
+  search: optionalTrimmedString,
   lang: optionalTrimmedString,
 });
 

@@ -3,12 +3,30 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createOrganization = createOrganization;
 exports.getMyOrganizations = getMyOrganizations;
 exports.getOrganizationById = getOrganizationById;
+exports.addIndustryToOrganization = addIndustryToOrganization;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
 const slug_1 = require("../../utils/slug");
 const guards_1 = require("../../utils/guards");
 const json_1 = require("../../utils/json");
+async function assertOrganizationManageAccess(requesterUserId, requesterRole, organizationId) {
+    if (requesterRole === client_1.UserRole.SUPER_ADMIN) {
+        return;
+    }
+    const membership = await prisma_1.prisma.organizationMembership.findFirst({
+        where: {
+            userId: requesterUserId,
+            organizationId,
+        },
+        select: {
+            role: true,
+        },
+    });
+    if (!membership || membership.role !== client_1.UserRole.ORG_ADMIN) {
+        throw ApiError_1.ApiError.forbidden("Only org admins can update organization industries");
+    }
+}
 async function createOrganization(currentUserId, currentRole, input) {
     const industry = await (0, guards_1.assertIndustryExists)(prisma_1.prisma, input.primaryIndustryId);
     const ownerUserId = currentRole === client_1.UserRole.SUPER_ADMIN && input.ownerUserId ? input.ownerUserId : currentUserId;
@@ -152,4 +170,51 @@ async function getOrganizationById(requesterUserId, requesterRole, organizationI
         throw ApiError_1.ApiError.notFound("Organization not found");
     }
     return organization;
+}
+async function addIndustryToOrganization(requesterUserId, requesterRole, organizationId, input) {
+    await assertOrganizationManageAccess(requesterUserId, requesterRole, organizationId);
+    await (0, guards_1.assertOrganizationExists)(prisma_1.prisma, organizationId);
+    const industry = await (0, guards_1.assertIndustryExists)(prisma_1.prisma, input.industryId);
+    const currentConfigCount = await prisma_1.prisma.organizationIndustryConfig.count({
+        where: {
+            organizationId,
+        },
+    });
+    return prisma_1.prisma.$transaction(async (tx) => {
+        const shouldBePrimary = input.isPrimary ?? currentConfigCount === 0;
+        if (shouldBePrimary) {
+            await tx.organizationIndustryConfig.updateMany({
+                where: {
+                    organizationId,
+                },
+                data: {
+                    isPrimary: false,
+                },
+            });
+        }
+        const config = await tx.organizationIndustryConfig.upsert({
+            where: {
+                organizationId_industryId: {
+                    organizationId,
+                    industryId: industry.id,
+                },
+            },
+            update: {
+                isPrimary: shouldBePrimary,
+                enabledFeatures: (0, json_1.toJsonValue)(input.enabledFeatures ?? industry.defaultFeatures),
+                customSettings: (0, json_1.toNullableJsonValue)(input.customSettings ?? industry.defaultSettings),
+            },
+            create: {
+                organizationId,
+                industryId: industry.id,
+                isPrimary: shouldBePrimary,
+                enabledFeatures: (0, json_1.toJsonValue)(input.enabledFeatures ?? industry.defaultFeatures),
+                customSettings: (0, json_1.toNullableJsonValue)(input.customSettings ?? industry.defaultSettings),
+            },
+            include: {
+                industry: true,
+            },
+        });
+        return config;
+    });
 }

@@ -1,7 +1,12 @@
 import type { Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/ApiResponse";
-import { createOrganization, getMyOrganizations, getOrganizationById } from "./organizations.service";
+import {
+  addIndustryToOrganization,
+  createOrganization,
+  getMyOrganizations,
+  getOrganizationById,
+} from "./organizations.service";
 
 export async function createOrganizationController(req: Request, res: Response) {
   const data = await createOrganization(req.auth!.userId, req.auth!.role, req.body);
@@ -16,4 +21,9 @@ export async function getMyOrganizationsController(req: Request, res: Response) 
 export async function getOrganizationByIdController(req: Request, res: Response) {
   const data = await getOrganizationById(req.auth!.userId, req.auth!.role, req.params.id!);
   return sendSuccess(res, 200, "Organization fetched successfully", data);
+}
+
+export async function addIndustryToOrganizationController(req: Request, res: Response) {
+  const data = await addIndustryToOrganization(req.auth!.userId, req.auth!.role, req.params.id!, req.body);
+  return sendSuccess(res, 201, "Industry enabled for organization successfully", data);
 }

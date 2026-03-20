@@ -3,7 +3,7 @@ import { LanguageCode, OrganizationStatus, UserRole } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { slugify } from "../../utils/slug";
-import { assertIndustryExists } from "../../utils/guards";
+import { assertIndustryExists, assertOrganizationExists } from "../../utils/guards";
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 
 interface CreateOrganizationInput {
@@ -35,6 +35,37 @@ interface CreateOrganizationInput {
     country?: string;
     postalCode?: string;
   };
+}
+
+interface AddOrganizationIndustryInput {
+  industryId: string;
+  isPrimary?: boolean;
+  enabledFeatures?: Record<string, unknown>;
+  customSettings?: unknown;
+}
+
+async function assertOrganizationManageAccess(
+  requesterUserId: string,
+  requesterRole: UserRole,
+  organizationId: string,
+) {
+  if (requesterRole === UserRole.SUPER_ADMIN) {
+    return;
+  }
+
+  const membership = await prisma.organizationMembership.findFirst({
+    where: {
+      userId: requesterUserId,
+      organizationId,
+    },
+    select: {
+      role: true,
+    },
+  });
+
+  if (!membership || membership.role !== UserRole.ORG_ADMIN) {
+    throw ApiError.forbidden("Only org admins can update organization industries");
+  }
 }
 
 export async function createOrganization(
@@ -201,4 +232,62 @@ export async function getOrganizationById(requesterUserId: string, requesterRole
   }
 
   return organization;
+}
+
+export async function addIndustryToOrganization(
+  requesterUserId: string,
+  requesterRole: UserRole,
+  organizationId: string,
+  input: AddOrganizationIndustryInput,
+) {
+  await assertOrganizationManageAccess(requesterUserId, requesterRole, organizationId);
+  await assertOrganizationExists(prisma, organizationId);
+  const industry = await assertIndustryExists(prisma, input.industryId);
+
+  const currentConfigCount = await prisma.organizationIndustryConfig.count({
+    where: {
+      organizationId,
+    },
+  });
+
+  return prisma.$transaction(async (tx) => {
+    const shouldBePrimary = input.isPrimary ?? currentConfigCount === 0;
+
+    if (shouldBePrimary) {
+      await tx.organizationIndustryConfig.updateMany({
+        where: {
+          organizationId,
+        },
+        data: {
+          isPrimary: false,
+        },
+      });
+    }
+
+    const config = await tx.organizationIndustryConfig.upsert({
+      where: {
+        organizationId_industryId: {
+          organizationId,
+          industryId: industry.id,
+        },
+      },
+      update: {
+        isPrimary: shouldBePrimary,
+        enabledFeatures: toJsonValue(input.enabledFeatures ?? industry.defaultFeatures)!,
+        customSettings: toNullableJsonValue(input.customSettings ?? industry.defaultSettings),
+      },
+      create: {
+        organizationId,
+        industryId: industry.id,
+        isPrimary: shouldBePrimary,
+        enabledFeatures: toJsonValue(input.enabledFeatures ?? industry.defaultFeatures)!,
+        customSettings: toNullableJsonValue(input.customSettings ?? industry.defaultSettings),
+      },
+      include: {
+        industry: true,
+      },
+    });
+
+    return config;
+  });
 }

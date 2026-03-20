@@ -41,3 +41,10 @@ export const createOrganizationSchema = z.object({
   customSettings: z.unknown().optional(),
   firstBranch: branchInputSchema,
 });
+
+export const addOrganizationIndustrySchema = z.object({
+  industryId: trimmedString,
+  isPrimary: z.boolean().optional(),
+  enabledFeatures: z.record(z.any()).optional(),
+  customSettings: z.unknown().optional(),
+});

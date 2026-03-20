@@ -356,9 +356,6 @@ async function normalizeMasterVariantDefaults(db, masterItemId, preferredDefault
     });
 }
 async function upsertMasterVariantTemplates(db, masterItemId, templates) {
-    if (templates.length === 0) {
-        return;
-    }
     const existingTemplates = await db.masterCatalogVariantTemplate.findMany({
         where: {
             masterItemId,
@@ -368,6 +365,29 @@ async function upsertMasterVariantTemplates(db, masterItemId, templates) {
             code: true,
         },
     });
+    const desiredCodes = new Set(templates.map((template) => template.code.trim()));
+    const removedTemplateIds = existingTemplates
+        .filter((template) => !desiredCodes.has(template.code))
+        .map((template) => template.id);
+    if (removedTemplateIds.length) {
+        await db.masterCatalogVariantTranslation.deleteMany({
+            where: {
+                masterVariantTemplateId: {
+                    in: removedTemplateIds,
+                },
+            },
+        });
+        await db.masterCatalogVariantTemplate.deleteMany({
+            where: {
+                id: {
+                    in: removedTemplateIds,
+                },
+            },
+        });
+    }
+    if (templates.length === 0) {
+        return;
+    }
     const existingByCode = new Map(existingTemplates.map((template) => [template.code, template]));
     const preferredDefaultCode = templates.find((template) => template.isDefault)?.code;
     for (const template of templates) {

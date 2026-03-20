@@ -51,6 +51,449 @@ function sizeVariants() {
         },
     ];
 }
+function mirroredTranslations(name, description) {
+    return withDescriptions(names(name, name, name), description
+        ? {
+            EN: description,
+            HI: description,
+            GU: description,
+        }
+        : undefined);
+}
+const generatedIndustryFeatureSet = {
+    supportsVariants: true,
+    supportsExpiry: false,
+    supportsBatchTracking: false,
+    supportsSerialTracking: false,
+    supportsWeightBasedStock: true,
+    supportsTransfers: true,
+    supportsPurchaseReceipts: true,
+    supportsSalesOrders: true,
+    supportsTaxRates: true,
+};
+function buildGeneratedIndustry(spec) {
+    return {
+        code: spec.code,
+        canonicalName: spec.name,
+        canonicalDescription: spec.description,
+        translations: mirroredTranslations(spec.name, spec.description),
+        defaultFeatures: spec.defaultFeatures ?? generatedIndustryFeatureSet,
+        categories: spec.categories.map((category, index) => ({
+            code: category.code,
+            sortOrder: index + 1,
+            translations: mirroredTranslations(category.name),
+        })),
+        items: spec.items.map((item) => ({
+            code: `${spec.code}_${item.code}`,
+            categoryCode: item.categoryCode,
+            canonicalName: item.name,
+            canonicalDescription: item.description,
+            translations: mirroredTranslations(item.name, item.description),
+            defaultUnitCode: item.unitCode ?? "pcs",
+            defaultTrackMethod: item.trackMethod ?? client_1.TrackMethod.PIECE,
+            hasVariants: item.hasVariants,
+            variantTemplates: item.variantTemplates,
+        })),
+    };
+}
+const generatedIndustries = [
+    buildGeneratedIndustry({
+        code: "stationery",
+        name: "Stationery",
+        description: "Stationery inventory for notebooks, desk tools, and school essentials.",
+        categories: [
+            { code: "notebooks", name: "Notebooks" },
+            { code: "writing_tools", name: "Writing Tools" },
+            { code: "art_supply", name: "Art Supply" },
+            { code: "desk_accessories", name: "Desk Accessories" },
+        ],
+        items: [
+            { code: "spiral_notebook", categoryCode: "notebooks", name: "Spiral Notebook", description: "A4 spiral notebook for school and office use." },
+            { code: "daily_planner", categoryCode: "notebooks", name: "Daily Planner", description: "Undated daily planner for task tracking." },
+            { code: "ball_pen", categoryCode: "writing_tools", name: "Ball Pen", description: "Smooth-writing ball pen for everyday use." },
+            { code: "marker_set", categoryCode: "art_supply", name: "Marker Set", description: "Color marker set for charts and sketching.", unitCode: "box" },
+            { code: "stapler", categoryCode: "desk_accessories", name: "Stapler", description: "Compact stapler for office desks." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "beauty",
+        name: "Beauty",
+        description: "Beauty and personal grooming inventory for salons and retail counters.",
+        categories: [
+            { code: "skin_care", name: "Skin Care" },
+            { code: "hair_care", name: "Hair Care" },
+            { code: "makeup", name: "Makeup" },
+            { code: "fragrance", name: "Fragrance" },
+        ],
+        items: [
+            { code: "face_wash", categoryCode: "skin_care", name: "Face Wash", description: "Daily face wash suitable for normal skin.", unitCode: "pack" },
+            { code: "shampoo", categoryCode: "hair_care", name: "Shampoo", description: "Salon and home-use shampoo bottles.", unitCode: "pack" },
+            { code: "conditioner", categoryCode: "hair_care", name: "Conditioner", description: "Hair conditioner for smooth finishing.", unitCode: "pack" },
+            { code: "lipstick", categoryCode: "makeup", name: "Lipstick", description: "Retail lipstick units for beauty counters." },
+            { code: "perfume", categoryCode: "fragrance", name: "Perfume", description: "Fragrance bottles for gifting and personal use." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "auto_parts",
+        name: "Auto Parts",
+        description: "Auto spares inventory for service shops and parts counters.",
+        categories: [
+            { code: "lubricants", name: "Lubricants" },
+            { code: "batteries", name: "Batteries" },
+            { code: "filters", name: "Filters" },
+            { code: "accessories", name: "Accessories" },
+        ],
+        items: [
+            { code: "engine_oil", categoryCode: "lubricants", name: "Engine Oil", description: "Engine oil cans for scheduled maintenance.", unitCode: "l", trackMethod: client_1.TrackMethod.VOLUME },
+            { code: "car_battery", categoryCode: "batteries", name: "Car Battery", description: "Automotive battery for replacement service." },
+            { code: "air_filter", categoryCode: "filters", name: "Air Filter", description: "Vehicle air filter for engine intake." },
+            { code: "spark_plug", categoryCode: "filters", name: "Spark Plug", description: "Spark plug units for ignition systems." },
+            { code: "floor_mat", categoryCode: "accessories", name: "Floor Mat", description: "Car floor mat set for retail accessory sales.", unitCode: "pack" },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "pet_care",
+        name: "Pet Care",
+        description: "Pet care inventory for food, hygiene, and accessories.",
+        categories: [
+            { code: "food", name: "Food" },
+            { code: "grooming", name: "Grooming" },
+            { code: "litter", name: "Litter" },
+            { code: "accessories", name: "Accessories" },
+        ],
+        items: [
+            { code: "dog_food", categoryCode: "food", name: "Dog Food", description: "Dry dog food bags for daily feeding.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "cat_food", categoryCode: "food", name: "Cat Food", description: "Cat food packs for retail pet stores.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "pet_shampoo", categoryCode: "grooming", name: "Pet Shampoo", description: "Pet-safe shampoo bottles for grooming.", unitCode: "pack" },
+            { code: "litter_bag", categoryCode: "litter", name: "Litter Bag", description: "Cat litter refill bags.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "pet_collar", categoryCode: "accessories", name: "Pet Collar", description: "Adjustable pet collars in multiple sizes.", hasVariants: true, variantTemplates: sizeVariants() },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "baby_care",
+        name: "Baby Care",
+        description: "Baby care inventory for feeding, hygiene, and nursery essentials.",
+        categories: [
+            { code: "feeding", name: "Feeding" },
+            { code: "hygiene", name: "Hygiene" },
+            { code: "apparel", name: "Apparel" },
+            { code: "nursery", name: "Nursery" },
+        ],
+        items: [
+            { code: "baby_diapers", categoryCode: "hygiene", name: "Baby Diapers", description: "Disposable baby diaper packs.", unitCode: "pack" },
+            { code: "feeding_bottle", categoryCode: "feeding", name: "Feeding Bottle", description: "Baby feeding bottles for newborn care." },
+            { code: "baby_wipes", categoryCode: "hygiene", name: "Baby Wipes", description: "Soft wipes packs for baby hygiene.", unitCode: "pack" },
+            { code: "baby_lotion", categoryCode: "hygiene", name: "Baby Lotion", description: "Gentle body lotion for infant skin.", unitCode: "pack" },
+            { code: "swaddle_blanket", categoryCode: "nursery", name: "Swaddle Blanket", description: "Lightweight baby swaddle blanket." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "sports",
+        name: "Sports",
+        description: "Sports retail inventory for fitness gear and team game equipment.",
+        categories: [
+            { code: "fitness", name: "Fitness" },
+            { code: "outdoor", name: "Outdoor" },
+            { code: "team_sports", name: "Team Sports" },
+            { code: "accessories", name: "Accessories" },
+        ],
+        items: [
+            { code: "yoga_mat", categoryCode: "fitness", name: "Yoga Mat", description: "Workout yoga mat for home and studio use." },
+            { code: "cricket_bat", categoryCode: "team_sports", name: "Cricket Bat", description: "Cricket bat for practice and club games." },
+            { code: "football", categoryCode: "team_sports", name: "Football", description: "Standard football for turf and ground use." },
+            { code: "skipping_rope", categoryCode: "fitness", name: "Skipping Rope", description: "Jump rope for cardio routines." },
+            { code: "dumbbell", categoryCode: "fitness", name: "Dumbbell", description: "Single dumbbell unit for gym and home use." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "books_media",
+        name: "Books & Media",
+        description: "Books and media inventory for educational and retail bookstores.",
+        categories: [
+            { code: "textbooks", name: "Textbooks" },
+            { code: "fiction", name: "Fiction" },
+            { code: "kids_books", name: "Kids Books" },
+            { code: "reference", name: "Reference" },
+        ],
+        items: [
+            { code: "school_textbook", categoryCode: "textbooks", name: "School Textbook", description: "Academic textbook for school students." },
+            { code: "paperback_novel", categoryCode: "fiction", name: "Paperback Novel", description: "Popular fiction title in paperback format." },
+            { code: "coloring_book", categoryCode: "kids_books", name: "Coloring Book", description: "Coloring book for children and early learning." },
+            { code: "monthly_magazine", categoryCode: "reference", name: "Monthly Magazine", description: "Monthly subscription-style magazine issues." },
+            { code: "puzzle_book", categoryCode: "kids_books", name: "Puzzle Book", description: "Puzzle and activity book for kids." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "home_decor",
+        name: "Home Decor",
+        description: "Home decor inventory for decorative lighting and household styling.",
+        categories: [
+            { code: "lighting", name: "Lighting" },
+            { code: "wall_decor", name: "Wall Decor" },
+            { code: "soft_furnishing", name: "Soft Furnishing" },
+            { code: "storage", name: "Storage" },
+        ],
+        items: [
+            { code: "table_lamp", categoryCode: "lighting", name: "Table Lamp", description: "Decorative table lamp for bedrooms and work desks." },
+            { code: "wall_clock", categoryCode: "wall_decor", name: "Wall Clock", description: "Decor wall clock for homes and offices." },
+            { code: "curtain_set", categoryCode: "soft_furnishing", name: "Curtain Set", description: "Window curtain set for living spaces.", unitCode: "pack" },
+            { code: "storage_basket", categoryCode: "storage", name: "Storage Basket", description: "Woven storage basket for home organization." },
+            { code: "photo_frame", categoryCode: "wall_decor", name: "Photo Frame", description: "Photo frame for tabletop and wall display." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "furniture",
+        name: "Furniture",
+        description: "Furniture inventory for retail showrooms and workspace fit-outs.",
+        categories: [
+            { code: "seating", name: "Seating" },
+            { code: "tables", name: "Tables" },
+            { code: "storage", name: "Storage" },
+            { code: "office", name: "Office" },
+        ],
+        items: [
+            { code: "office_chair", categoryCode: "office", name: "Office Chair", description: "Adjustable office chair for workstation use." },
+            { code: "side_table", categoryCode: "tables", name: "Side Table", description: "Compact side table for living rooms and bedrooms." },
+            { code: "bookshelf", categoryCode: "storage", name: "Bookshelf", description: "Open bookshelf unit for storage and display." },
+            { code: "plastic_stool", categoryCode: "seating", name: "Plastic Stool", description: "Lightweight stool for daily household use." },
+            { code: "study_desk", categoryCode: "office", name: "Study Desk", description: "Study desk for students and home offices." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "bakery",
+        name: "Bakery",
+        description: "Bakery inventory for baked goods, mixes, and display counters.",
+        categories: [
+            { code: "bread", name: "Bread" },
+            { code: "cakes", name: "Cakes" },
+            { code: "snacks", name: "Snacks" },
+            { code: "ingredients", name: "Ingredients" },
+        ],
+        items: [
+            { code: "sandwich_bread", categoryCode: "bread", name: "Sandwich Bread", description: "Fresh loaf bread for retail bakery shelves.", unitCode: "pack" },
+            { code: "cupcake", categoryCode: "cakes", name: "Cupcake", description: "Single cupcake for bakery counter sales." },
+            { code: "cookies_pack", categoryCode: "snacks", name: "Cookies Pack", description: "Packaged bakery cookies.", unitCode: "pack" },
+            { code: "baking_flour", categoryCode: "ingredients", name: "Baking Flour", description: "Flour bag for baking production.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "cocoa_powder", categoryCode: "ingredients", name: "Cocoa Powder", description: "Cocoa powder for cakes and desserts.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "agriculture",
+        name: "Agriculture",
+        description: "Agriculture inventory for farm inputs, irrigation, and crop care.",
+        categories: [
+            { code: "seeds", name: "Seeds" },
+            { code: "fertilizers", name: "Fertilizers" },
+            { code: "irrigation", name: "Irrigation" },
+            { code: "tools", name: "Tools" },
+        ],
+        items: [
+            { code: "vegetable_seeds", categoryCode: "seeds", name: "Vegetable Seeds", description: "Seed packets for seasonal vegetable farming.", unitCode: "pack" },
+            { code: "bio_fertilizer", categoryCode: "fertilizers", name: "Bio Fertilizer", description: "Organic fertilizer for soil enrichment.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "spray_pump", categoryCode: "tools", name: "Spray Pump", description: "Manual spray pump for crop care and pesticides." },
+            { code: "drip_pipe", categoryCode: "irrigation", name: "Drip Pipe", description: "Drip irrigation pipe rolls.", unitCode: "m", trackMethod: client_1.TrackMethod.LENGTH },
+            { code: "garden_hoe", categoryCode: "tools", name: "Garden Hoe", description: "Farm hand tool for soil tilling and weeding." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "jewelry",
+        name: "Jewelry",
+        description: "Jewelry inventory for fashion accessories and retail display counters.",
+        categories: [
+            { code: "earrings", name: "Earrings" },
+            { code: "chains", name: "Chains" },
+            { code: "bracelets", name: "Bracelets" },
+            { code: "rings", name: "Rings" },
+        ],
+        items: [
+            { code: "stud_earrings", categoryCode: "earrings", name: "Stud Earrings", description: "Small stud earrings for fashion retail." },
+            { code: "silver_chain", categoryCode: "chains", name: "Silver Chain", description: "Silver-tone chain for gifting and daily wear." },
+            { code: "bracelet", categoryCode: "bracelets", name: "Bracelet", description: "Fashion bracelet for casual styling." },
+            { code: "finger_ring", categoryCode: "rings", name: "Finger Ring", description: "Retail ring unit for jewelry displays." },
+            { code: "anklet", categoryCode: "bracelets", name: "Anklet", description: "Decorative anklet for ethnic wear collections." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "footwear",
+        name: "Footwear",
+        description: "Footwear inventory for casual, formal, and sports retail.",
+        categories: [
+            { code: "casual", name: "Casual" },
+            { code: "formal", name: "Formal" },
+            { code: "sports", name: "Sports" },
+            { code: "kids", name: "Kids" },
+        ],
+        items: [
+            { code: "sneakers", categoryCode: "sports", name: "Sneakers", description: "Retail sports sneakers in standard sizes.", hasVariants: true, variantTemplates: sizeVariants() },
+            { code: "formal_shoes", categoryCode: "formal", name: "Formal Shoes", description: "Formal office shoes for menswear stores.", hasVariants: true, variantTemplates: sizeVariants() },
+            { code: "sandals", categoryCode: "casual", name: "Sandals", description: "Everyday sandals for casual use.", hasVariants: true, variantTemplates: sizeVariants() },
+            { code: "flip_flops", categoryCode: "casual", name: "Flip Flops", description: "Lightweight flip flops for home and travel.", hasVariants: true, variantTemplates: sizeVariants() },
+            { code: "kids_shoes", categoryCode: "kids", name: "Kids Shoes", description: "Footwear for kids and schoolwear ranges.", hasVariants: true, variantTemplates: sizeVariants() },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "cleaning",
+        name: "Cleaning",
+        description: "Cleaning inventory for household, laundry, and janitorial supply.",
+        categories: [
+            { code: "household", name: "Household" },
+            { code: "laundry", name: "Laundry" },
+            { code: "kitchen", name: "Kitchen" },
+            { code: "bathroom", name: "Bathroom" },
+        ],
+        items: [
+            { code: "floor_cleaner", categoryCode: "household", name: "Floor Cleaner", description: "Liquid floor cleaner for daily mopping.", unitCode: "l", trackMethod: client_1.TrackMethod.VOLUME },
+            { code: "detergent_powder", categoryCode: "laundry", name: "Detergent Powder", description: "Laundry detergent powder bags.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "dishwash_liquid", categoryCode: "kitchen", name: "Dishwash Liquid", description: "Dishwashing liquid bottles.", unitCode: "l", trackMethod: client_1.TrackMethod.VOLUME },
+            { code: "toilet_cleaner", categoryCode: "bathroom", name: "Toilet Cleaner", description: "Bathroom cleaner for toilet bowls.", unitCode: "l", trackMethod: client_1.TrackMethod.VOLUME },
+            { code: "mop_set", categoryCode: "household", name: "Mop Set", description: "Mop and bucket combo set." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "toys",
+        name: "Toys",
+        description: "Toy inventory for retail shelves, gifting, and early learning sections.",
+        categories: [
+            { code: "learning", name: "Learning" },
+            { code: "indoor", name: "Indoor" },
+            { code: "outdoor", name: "Outdoor" },
+            { code: "infant", name: "Infant" },
+        ],
+        items: [
+            { code: "building_blocks", categoryCode: "learning", name: "Building Blocks", description: "Creative building block set for children.", unitCode: "box" },
+            { code: "toy_car", categoryCode: "indoor", name: "Toy Car", description: "Small toy car for gifting and play." },
+            { code: "soft_toy", categoryCode: "infant", name: "Soft Toy", description: "Soft plush toy for infant and toddler gifting." },
+            { code: "puzzle_cube", categoryCode: "learning", name: "Puzzle Cube", description: "Puzzle cube for learning and focus." },
+            { code: "beach_ball", categoryCode: "outdoor", name: "Beach Ball", description: "Inflatable play ball for outdoor activity." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "office_supplies",
+        name: "Office Supplies",
+        description: "Office supply inventory for workspaces, admin desks, and document handling.",
+        categories: [
+            { code: "paper", name: "Paper" },
+            { code: "writing", name: "Writing" },
+            { code: "filing", name: "Filing" },
+            { code: "desk_tools", name: "Desk Tools" },
+        ],
+        items: [
+            { code: "copier_paper", categoryCode: "paper", name: "Copier Paper", description: "A4 copier paper reams.", unitCode: "pack" },
+            { code: "gel_pen", categoryCode: "writing", name: "Gel Pen", description: "Smooth ink gel pen for office writing." },
+            { code: "file_folder", categoryCode: "filing", name: "File Folder", description: "File folder for document storage." },
+            { code: "calculator", categoryCode: "desk_tools", name: "Calculator", description: "Desktop calculator for office counters." },
+            { code: "sticky_notes", categoryCode: "paper", name: "Sticky Notes", description: "Sticky note pad for quick desk reminders.", unitCode: "pack" },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "construction",
+        name: "Construction",
+        description: "Construction inventory for building materials, paints, and site tools.",
+        categories: [
+            { code: "cementing", name: "Cementing" },
+            { code: "paints", name: "Paints" },
+            { code: "safety", name: "Safety" },
+            { code: "tools", name: "Tools" },
+        ],
+        items: [
+            { code: "cement_bag", categoryCode: "cementing", name: "Cement Bag", description: "Standard cement bag for civil work.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "wall_putty", categoryCode: "cementing", name: "Wall Putty", description: "Wall putty bags for finishing work.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "paint_roller", categoryCode: "paints", name: "Paint Roller", description: "Paint roller tool for wall finishing." },
+            { code: "safety_helmet", categoryCode: "safety", name: "Safety Helmet", description: "Site safety helmet for workers." },
+            { code: "measuring_tape", categoryCode: "tools", name: "Measuring Tape", description: "Tape measure for site and workshop use." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "appliances",
+        name: "Appliances",
+        description: "Appliance inventory for kitchen, cooling, and household electronics.",
+        categories: [
+            { code: "kitchen", name: "Kitchen" },
+            { code: "home_care", name: "Home Care" },
+            { code: "cooling", name: "Cooling" },
+            { code: "personal", name: "Personal" },
+        ],
+        items: [
+            { code: "mixer_grinder", categoryCode: "kitchen", name: "Mixer Grinder", description: "Mixer grinder for kitchen retail sales." },
+            { code: "electric_kettle", categoryCode: "kitchen", name: "Electric Kettle", description: "Electric kettle for quick heating." },
+            { code: "ceiling_fan", categoryCode: "cooling", name: "Ceiling Fan", description: "Ceiling fan for residential installations." },
+            { code: "steam_iron", categoryCode: "personal", name: "Steam Iron", description: "Steam iron for home garment care." },
+            { code: "room_heater", categoryCode: "home_care", name: "Room Heater", description: "Portable room heater for winter use." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "gardening",
+        name: "Gardening",
+        description: "Gardening inventory for planters, soil inputs, and maintenance tools.",
+        categories: [
+            { code: "planters", name: "Planters" },
+            { code: "soil", name: "Soil" },
+            { code: "seeds", name: "Seeds" },
+            { code: "tools", name: "Tools" },
+        ],
+        items: [
+            { code: "planter_pot", categoryCode: "planters", name: "Planter Pot", description: "Decor planter pot for home gardening." },
+            { code: "potting_soil", categoryCode: "soil", name: "Potting Soil", description: "Potting soil mix for container gardening.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "herb_seeds", categoryCode: "seeds", name: "Herb Seeds", description: "Seed packets for herb gardening.", unitCode: "pack" },
+            { code: "pruning_shears", categoryCode: "tools", name: "Pruning Shears", description: "Shears for pruning and plant care." },
+            { code: "watering_can", categoryCode: "tools", name: "Watering Can", description: "Watering can for home and terrace gardens." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "wellness",
+        name: "Wellness",
+        description: "Wellness inventory for fitness recovery, yoga, and supplements.",
+        categories: [
+            { code: "supplements", name: "Supplements" },
+            { code: "yoga", name: "Yoga" },
+            { code: "massage", name: "Massage" },
+            { code: "recovery", name: "Recovery" },
+        ],
+        items: [
+            { code: "protein_powder", categoryCode: "supplements", name: "Protein Powder", description: "Protein powder tubs for nutrition stores.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "yoga_block", categoryCode: "yoga", name: "Yoga Block", description: "Yoga block for balance and stretching." },
+            { code: "massage_oil", categoryCode: "massage", name: "Massage Oil", description: "Massage oil bottle for therapy and wellness.", unitCode: "l", trackMethod: client_1.TrackMethod.VOLUME },
+            { code: "resistance_band", categoryCode: "recovery", name: "Resistance Band", description: "Resistance band for rehab and training." },
+            { code: "foam_roller", categoryCode: "recovery", name: "Foam Roller", description: "Foam roller for mobility and recovery." },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "gifts",
+        name: "Gifts",
+        description: "Gift shop inventory for hampers, decor items, and greeting products.",
+        categories: [
+            { code: "greeting", name: "Greeting" },
+            { code: "decor", name: "Decor" },
+            { code: "hampers", name: "Hampers" },
+            { code: "souvenirs", name: "Souvenirs" },
+        ],
+        items: [
+            { code: "greeting_card", categoryCode: "greeting", name: "Greeting Card", description: "Greeting card for birthdays and celebrations." },
+            { code: "gift_mug", categoryCode: "souvenirs", name: "Gift Mug", description: "Printed gift mug for personal gifting." },
+            { code: "photo_frame_gift", categoryCode: "decor", name: "Gift Photo Frame", description: "Decorative photo frame for gift shops." },
+            { code: "chocolate_hamper", categoryCode: "hampers", name: "Chocolate Hamper", description: "Gift hamper with assorted chocolates.", unitCode: "box" },
+            { code: "gift_wrap_roll", categoryCode: "greeting", name: "Gift Wrap Roll", description: "Gift wrap paper roll for packing.", unitCode: "pack" },
+        ],
+    }),
+    buildGeneratedIndustry({
+        code: "beverage_shop",
+        name: "Beverage Shop",
+        description: "Specialized beverage inventory for juices, coffees, and ready-to-drink counters.",
+        categories: [
+            { code: "coffee", name: "Coffee" },
+            { code: "tea", name: "Tea" },
+            { code: "juices", name: "Juices" },
+            { code: "ready_to_drink", name: "Ready To Drink" },
+        ],
+        items: [
+            { code: "coffee_beans", categoryCode: "coffee", name: "Coffee Beans", description: "Whole coffee beans for cafe retail.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "tea_leaves", categoryCode: "tea", name: "Tea Leaves", description: "Loose tea leaves for tea counters.", unitCode: "kg", trackMethod: client_1.TrackMethod.WEIGHT },
+            { code: "orange_juice", categoryCode: "juices", name: "Orange Juice", description: "Packaged orange juice bottles.", unitCode: "l", trackMethod: client_1.TrackMethod.VOLUME },
+            { code: "cold_coffee", categoryCode: "ready_to_drink", name: "Cold Coffee", description: "Ready-to-drink cold coffee bottles.", unitCode: "l", trackMethod: client_1.TrackMethod.VOLUME },
+            { code: "sparkling_water", categoryCode: "ready_to_drink", name: "Sparkling Water", description: "Sparkling water bottles for beverage stores.", unitCode: "l", trackMethod: client_1.TrackMethod.VOLUME },
+        ],
+    }),
+];
 const industries = [
     {
         code: "grocery",
@@ -766,6 +1209,7 @@ const industries = [
             },
         ],
     },
+    ...generatedIndustries,
 ];
 function translationEntries(translations) {
     return Object.entries(translations).map(([language, value]) => ({

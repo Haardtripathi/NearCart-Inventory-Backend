@@ -236,6 +236,17 @@ async function getCategoryById(organizationId, categoryId, localeContext) {
 }
 async function updateCategory(organizationId, categoryId, actorUserId, input, localeContext) {
     const existing = await getCategoryRecordById(organizationId, categoryId);
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        organizationId,
+        baseName: input.name ?? existing.name,
+        baseDescription: input.description ?? existing.description ?? undefined,
+        existingTranslations: input.translations ??
+            existing.translations.map((translation) => ({
+                language: translation.language,
+                name: translation.name,
+                description: translation.description ?? undefined,
+            })),
+    });
     if (input.parentId !== undefined) {
         if (input.parentId === categoryId) {
             throw ApiError_1.ApiError.badRequest("Category cannot be its own parent");
@@ -263,7 +274,7 @@ async function updateCategory(organizationId, categoryId, actorUserId, input, lo
             },
         });
         await (0, translations_1.upsertTranslations)({
-            entries: input.translations ?? [],
+            entries: translations,
             listExisting: () => tx.categoryTranslation.findMany({
                 where: {
                     categoryId,

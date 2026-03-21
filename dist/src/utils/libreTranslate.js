@@ -1,8 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.translateText = translateText;
+exports.buildTranslations = buildTranslations;
+exports.translateLanguageCodeText = translateLanguageCodeText;
 const crypto_1 = require("crypto");
-const libretranslate_ts_1 = require("libretranslate-ts");
 const env_1 = require("../config/env");
 const redis_1 = require("../config/redis");
 const languageCodeToIso = {
@@ -10,6 +11,8 @@ const languageCodeToIso = {
     HI: "hi",
     GU: "gu",
 };
+const SUPPORTED_LANGUAGES_CACHE_TTL_MS = 5 * 60 * 1000;
+let supportedLanguagesCache = null;
 function toIsoLanguage(languageCode) {
     return languageCodeToIso[languageCode] ?? "en";
 }
@@ -19,14 +22,86 @@ function hashText(value) {
 function buildPhraseCacheKey(source, target, value) {
     return `translation:phrase:${source}:${target}:${hashText(value)}`;
 }
-libretranslate_ts_1.libreTranslate.setApiEndpoint(env_1.env.LIBRETRANSLATE_ENDPOINT);
-libretranslate_ts_1.libreTranslate.setApiKey(env_1.env.LIBRETRANSLATE_API_KEY ?? "");
-async function translateText(value, sourceLanguage, targetLanguage) {
+function buildTranslateUrl() {
+    return `${env_1.env.LIBRETRANSLATE_URL.replace(/\/+$/, "")}/translate`;
+}
+function buildLanguagesUrl() {
+    return `${env_1.env.LIBRETRANSLATE_URL.replace(/\/+$/, "")}/languages`;
+}
+async function getSupportedLanguagesTargets() {
+    if (supportedLanguagesCache && supportedLanguagesCache.expiresAt > Date.now()) {
+        return supportedLanguagesCache.targetsByLanguage;
+    }
+    const response = await fetch(buildLanguagesUrl(), {
+        headers: {
+            Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+        throw new Error(`LibreTranslate languages request failed with status ${response.status}`);
+    }
+    const payload = (await response.json().catch(() => null));
+    if (!Array.isArray(payload)) {
+        throw new Error("LibreTranslate returned an invalid languages response");
+    }
+    const targetsByLanguage = new Map(payload.map((language) => [language.code, new Set(language.targets ?? [])]));
+    supportedLanguagesCache = {
+        expiresAt: Date.now() + SUPPORTED_LANGUAGES_CACHE_TTL_MS,
+        targetsByLanguage,
+    };
+    return targetsByLanguage;
+}
+async function isTranslationAvailable(source, target) {
+    try {
+        const targetsByLanguage = await getSupportedLanguagesTargets();
+        if (!targetsByLanguage.has(target)) {
+            return false;
+        }
+        if (source === "auto") {
+            return true;
+        }
+        return targetsByLanguage.get(source)?.has(target) ?? false;
+    }
+    catch (error) {
+        console.warn("LibreTranslate languages availability check failed", error);
+        return true;
+    }
+}
+async function requestLibreTranslate(value, source, target) {
+    const body = new URLSearchParams({
+        q: value,
+        source,
+        target,
+        format: "text",
+    });
+    const response = await fetch(buildTranslateUrl(), {
+        method: "POST",
+        headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body,
+        signal: AbortSignal.timeout(15_000),
+    });
+    const payload = (await response.json().catch(() => null));
+    if (!response.ok) {
+        throw new Error(payload?.error ?? `LibreTranslate request failed with status ${response.status}`);
+    }
+    if (!payload?.translatedText || typeof payload.translatedText !== "string") {
+        throw new Error("LibreTranslate returned an invalid response");
+    }
+    return payload.translatedText;
+}
+async function translateText(value, targetLanguage, sourceLanguage = "auto") {
     const normalizedValue = value.trim();
     if (!normalizedValue) {
-        return null;
+        return normalizedValue;
     }
-    if (sourceLanguage === targetLanguage) {
+    if (sourceLanguage !== "auto" && sourceLanguage === targetLanguage) {
+        return normalizedValue;
+    }
+    if (!(await isTranslationAvailable(sourceLanguage, targetLanguage))) {
         return normalizedValue;
     }
     const redis = (0, redis_1.getRedisClient)();
@@ -42,18 +117,36 @@ async function translateText(value, sourceLanguage, targetLanguage) {
             console.warn("Redis read failed for translation cache", error);
         }
     }
-    const result = await libretranslate_ts_1.libreTranslate.translate(normalizedValue, toIsoLanguage(sourceLanguage), toIsoLanguage(targetLanguage));
-    if (result.status >= 400 || !result.translatedText) {
-        const message = result.error ?? "Translation failed";
-        throw new Error(message);
-    }
+    const translatedText = await requestLibreTranslate(normalizedValue, sourceLanguage, targetLanguage);
     if (redis) {
         try {
-            await redis.set(cacheKey, result.translatedText, "EX", env_1.env.TRANSLATION_CACHE_TTL_SECONDS);
+            await redis.set(cacheKey, translatedText, "EX", env_1.env.TRANSLATION_CACHE_TTL_SECONDS);
         }
         catch (error) {
             console.warn("Redis write failed for translation cache", error);
         }
     }
-    return result.translatedText;
+    return translatedText;
+}
+async function buildTranslations(value, sourceLanguage = "auto") {
+    const normalizedValue = value.trim();
+    if (!normalizedValue) {
+        throw new Error("Text is required");
+    }
+    const [en, hi, gu] = await Promise.all([
+        translateText(normalizedValue, "en", sourceLanguage),
+        translateText(normalizedValue, "hi", sourceLanguage),
+        translateText(normalizedValue, "gu", sourceLanguage),
+    ]);
+    return { en, hi, gu };
+}
+async function translateLanguageCodeText(value, sourceLanguage, targetLanguage) {
+    const normalizedValue = value.trim();
+    if (!normalizedValue) {
+        return null;
+    }
+    if (sourceLanguage !== "AUTO" && sourceLanguage === targetLanguage) {
+        return normalizedValue;
+    }
+    return translateText(normalizedValue, toIsoLanguage(targetLanguage), sourceLanguage === "AUTO" ? "auto" : toIsoLanguage(sourceLanguage));
 }

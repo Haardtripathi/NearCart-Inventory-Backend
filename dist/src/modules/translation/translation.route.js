@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.translationRouter = void 0;
+const express_1 = require("express");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const translation_controller_1 = require("./translation.controller");
+const translation_validation_1 = require("./translation.validation");
+exports.translationRouter = (0, express_1.Router)();
+exports.translationRouter.post("/", (0, validate_middleware_1.validateRequest)({ body: translation_validation_1.translateItemSchema }), (0, asyncHandler_1.asyncHandler)(translation_controller_1.translateItemController));

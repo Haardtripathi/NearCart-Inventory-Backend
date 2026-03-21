@@ -20,6 +20,7 @@ import { salesOrdersRouter } from "../modules/sales-orders/sales-orders.route";
 import { stockTransfersRouter } from "../modules/stock-transfers/stock-transfers.route";
 import { auditRouter } from "../modules/audit/audit.route";
 import { usersRouter } from "../modules/users/users.route";
+import { translationRouter } from "../modules/translation/translation.route";
 
 export const apiRouter = Router();
 
@@ -49,3 +50,4 @@ apiRouter.use("/sales-orders", salesOrdersRouter);
 apiRouter.use("/stock-transfers", stockTransfersRouter);
 apiRouter.use("/audit-logs", auditRouter);
 apiRouter.use("/users", usersRouter);
+apiRouter.use("/translate-item", translationRouter);

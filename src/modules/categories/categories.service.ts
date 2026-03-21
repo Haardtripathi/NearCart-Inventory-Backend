@@ -310,6 +310,18 @@ export async function updateCategory(
   localeContext: LocaleContext,
 ) {
   const existing = await getCategoryRecordById(organizationId, categoryId);
+  const translations = await enrichWithAutoTranslations<CategoryTranslationInput>({
+    organizationId,
+    baseName: input.name ?? existing.name,
+    baseDescription: input.description ?? existing.description ?? undefined,
+    existingTranslations:
+      input.translations ??
+      existing.translations.map((translation) => ({
+        language: translation.language,
+        name: translation.name,
+        description: translation.description ?? undefined,
+      })),
+  });
 
   if (input.parentId !== undefined) {
     if (input.parentId === categoryId) {
@@ -341,7 +353,7 @@ export async function updateCategory(
     });
 
     await upsertTranslations({
-      entries: input.translations ?? [],
+      entries: translations,
       listExisting: () =>
         tx.categoryTranslation.findMany({
           where: {

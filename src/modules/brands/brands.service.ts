@@ -175,6 +175,16 @@ export async function updateBrand(
   localeContext: LocaleContext,
 ) {
   const existing = await getBrandRecordById(organizationId, brandId);
+  const translations = await enrichWithAutoTranslations<BrandTranslationInput>({
+    organizationId,
+    baseName: input.name ?? existing.name,
+    existingTranslations:
+      input.translations ??
+      existing.translations.map((translation) => ({
+        language: translation.language,
+        name: translation.name,
+      })),
+  });
 
   await prisma.$transaction(async (tx) => {
     await tx.brand.update({
@@ -187,7 +197,7 @@ export async function updateBrand(
     });
 
     await upsertTranslations({
-      entries: input.translations ?? [],
+      entries: translations,
       listExisting: () =>
         tx.brandTranslation.findMany({
           where: {

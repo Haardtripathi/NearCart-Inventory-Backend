@@ -21,6 +21,7 @@ const pagination_1 = require("../../utils/pagination");
 const slug_1 = require("../../utils/slug");
 const translations_1 = require("../../utils/translations");
 const json_1 = require("../../utils/json");
+const autoTranslate_1 = require("../../utils/autoTranslate");
 const audit_service_1 = require("../audit/audit.service");
 const masterCatalogCategoryInclude = {
     translations: {
@@ -391,6 +392,10 @@ async function upsertMasterVariantTemplates(db, masterItemId, templates) {
     const existingByCode = new Map(existingTemplates.map((template) => [template.code, template]));
     const preferredDefaultCode = templates.find((template) => template.isDefault)?.code;
     for (const template of templates) {
+        const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+            baseName: template.name,
+            existingTranslations: template.translations,
+        });
         const existing = existingByCode.get(template.code.trim());
         if (existing) {
             await db.masterCatalogVariantTemplate.update({
@@ -415,7 +420,7 @@ async function upsertMasterVariantTemplates(db, masterItemId, templates) {
                     metadata: (0, json_1.toNullableJsonValue)(template.metadata),
                 },
             });
-            await upsertMasterVariantTranslations(db, existing.id, template.translations ?? []);
+            await upsertMasterVariantTranslations(db, existing.id, translations);
             continue;
         }
         const created = await db.masterCatalogVariantTemplate.create({
@@ -440,7 +445,7 @@ async function upsertMasterVariantTemplates(db, masterItemId, templates) {
                 metadata: (0, json_1.toNullableJsonValue)(template.metadata),
             },
         });
-        await upsertMasterVariantTranslations(db, created.id, template.translations ?? []);
+        await upsertMasterVariantTranslations(db, created.id, translations);
     }
     await normalizeMasterVariantDefaults(db, masterItemId, preferredDefaultCode);
 }
@@ -627,6 +632,11 @@ async function getMasterCatalogItemById(itemId, localeContext, currentOrganizati
     });
 }
 async function createMasterCatalogItem(actorUserId, input, localeContext) {
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        baseName: input.canonicalName,
+        baseDescription: input.canonicalDescription,
+        existingTranslations: input.translations,
+    });
     const item = await prisma_1.prisma.$transaction(async (tx) => {
         const created = await tx.masterCatalogItem.create({
             data: {
@@ -653,7 +663,7 @@ async function createMasterCatalogItem(actorUserId, input, localeContext) {
                 isActive: input.isActive ?? true,
             },
         });
-        await upsertMasterItemTranslations(tx, created.id, input.translations ?? []);
+        await upsertMasterItemTranslations(tx, created.id, translations);
         await replaceMasterItemAliases(tx, created.id, input.aliases ?? []);
         await upsertMasterVariantTemplates(tx, created.id, input.variantTemplates ?? []);
         await rebuildMasterItemSearchText(tx, created.id);
@@ -671,6 +681,17 @@ async function createMasterCatalogItem(actorUserId, input, localeContext) {
 }
 async function updateMasterCatalogItem(itemId, actorUserId, input, localeContext) {
     const existing = await getMasterCatalogItemRecordById(itemId);
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        baseName: input.canonicalName ?? existing.canonicalName,
+        baseDescription: input.canonicalDescription ?? existing.canonicalDescription ?? undefined,
+        existingTranslations: input.translations ??
+            existing.translations.map((translation) => ({
+                language: translation.language,
+                name: translation.name,
+                shortName: translation.shortName ?? undefined,
+                description: translation.description ?? undefined,
+            })),
+    });
     await prisma_1.prisma.$transaction(async (tx) => {
         await tx.masterCatalogItem.update({
             where: {
@@ -703,7 +724,7 @@ async function updateMasterCatalogItem(itemId, actorUserId, input, localeContext
                 ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
             },
         });
-        await upsertMasterItemTranslations(tx, itemId, input.translations ?? []);
+        await upsertMasterItemTranslations(tx, itemId, translations);
         if (input.aliases !== undefined) {
             await replaceMasterItemAliases(tx, itemId, input.aliases);
         }

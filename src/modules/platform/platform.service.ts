@@ -6,6 +6,7 @@ import { serializeLocalizedEntity } from "../../utils/localization";
 import { upsertTranslations } from "../../utils/translations";
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 import { slugify } from "../../utils/slug";
+import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
 
 interface IndustryTranslationInput {
   language: LanguageCode;
@@ -62,6 +63,12 @@ export async function createIndustry(input: {
   customFieldDefinitions?: unknown;
   translations?: IndustryTranslationInput[];
 }, localeContext: LocaleContext) {
+  const translations = await enrichWithAutoTranslations<IndustryTranslationInput>({
+    baseName: input.name,
+    baseDescription: input.description,
+    existingTranslations: input.translations,
+  });
+
   const industry = await prisma.$transaction(async (tx) => {
     const created = await tx.industry.create({
       data: {
@@ -75,9 +82,9 @@ export async function createIndustry(input: {
       },
     });
 
-    if (input.translations?.length) {
+    if (translations.length) {
       await tx.industryTranslation.createMany({
-        data: input.translations.map((translation) => ({
+        data: translations.map((translation) => ({
           industryId: created.id,
           language: translation.language,
           name: translation.name.trim(),
@@ -106,6 +113,19 @@ export async function updateIndustry(
   }>,
   localeContext: LocaleContext,
 ) {
+  const existing = await getIndustryWithTranslations(industryId);
+  const translations = await enrichWithAutoTranslations<IndustryTranslationInput>({
+    baseName: input.name ?? existing.name,
+    baseDescription: input.description ?? existing.description ?? undefined,
+    existingTranslations:
+      input.translations ??
+      existing.translations.map((translation) => ({
+        language: translation.language,
+        name: translation.name,
+        description: translation.description ?? undefined,
+      })),
+  });
+
   await prisma.$transaction(async (tx) => {
     await tx.industry.update({
       where: { id: industryId },
@@ -123,7 +143,7 @@ export async function updateIndustry(
     });
 
     await upsertTranslations({
-      entries: input.translations ?? [],
+      entries: translations,
       listExisting: () =>
         tx.industryTranslation.findMany({
           where: {

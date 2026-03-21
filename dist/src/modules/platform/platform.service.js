@@ -8,6 +8,7 @@ const localization_1 = require("../../utils/localization");
 const translations_1 = require("../../utils/translations");
 const json_1 = require("../../utils/json");
 const slug_1 = require("../../utils/slug");
+const autoTranslate_1 = require("../../utils/autoTranslate");
 function serializeIndustry(industry, localeContext) {
     return (0, localization_1.serializeLocalizedEntity)(industry, localeContext);
 }
@@ -41,6 +42,11 @@ async function listIndustries(localeContext) {
     return industries.map((industry) => serializeIndustry(industry, localeContext));
 }
 async function createIndustry(input, localeContext) {
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        baseName: input.name,
+        baseDescription: input.description,
+        existingTranslations: input.translations,
+    });
     const industry = await prisma_1.prisma.$transaction(async (tx) => {
         const created = await tx.industry.create({
             data: {
@@ -53,9 +59,9 @@ async function createIndustry(input, localeContext) {
                 customFieldDefinitions: (0, json_1.toNullableJsonValue)(input.customFieldDefinitions),
             },
         });
-        if (input.translations?.length) {
+        if (translations.length) {
             await tx.industryTranslation.createMany({
-                data: input.translations.map((translation) => ({
+                data: translations.map((translation) => ({
                     industryId: created.id,
                     language: translation.language,
                     name: translation.name.trim(),
@@ -68,6 +74,17 @@ async function createIndustry(input, localeContext) {
     return serializeIndustry(await getIndustryWithTranslations(industry.id), localeContext);
 }
 async function updateIndustry(industryId, input, localeContext) {
+    const existing = await getIndustryWithTranslations(industryId);
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        baseName: input.name ?? existing.name,
+        baseDescription: input.description ?? existing.description ?? undefined,
+        existingTranslations: input.translations ??
+            existing.translations.map((translation) => ({
+                language: translation.language,
+                name: translation.name,
+                description: translation.description ?? undefined,
+            })),
+    });
     await prisma_1.prisma.$transaction(async (tx) => {
         await tx.industry.update({
             where: { id: industryId },
@@ -84,7 +101,7 @@ async function updateIndustry(industryId, input, localeContext) {
             },
         });
         await (0, translations_1.upsertTranslations)({
-            entries: input.translations ?? [],
+            entries: translations,
             listExisting: () => tx.industryTranslation.findMany({
                 where: {
                     industryId,

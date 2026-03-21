@@ -5,6 +5,7 @@ const client_1 = require("@prisma/client");
 const prisma_1 = require("../config/prisma");
 const env_1 = require("../config/env");
 const libreTranslate_1 = require("./libreTranslate");
+const localization_1 = require("./localization");
 function parseEnabledLanguages(value, defaultLanguage) {
     if (!Array.isArray(value)) {
         return [defaultLanguage, client_1.LanguageCode.EN];
@@ -20,45 +21,53 @@ async function enrichWithAutoTranslations(args) {
     if (!env_1.env.AUTO_TRANSLATE_ON_WRITE) {
         return existingTranslations;
     }
-    const organization = await prisma_1.prisma.organization.findUnique({
-        where: { id: args.organizationId },
-        select: {
-            defaultLanguage: true,
-            enabledLanguages: true,
-        },
-    });
-    if (!organization) {
-        return existingTranslations;
+    const sourceLanguage = args.sourceLanguage ?? "AUTO";
+    let enabledLanguages = [...localization_1.SUPPORTED_LANGUAGE_CODES];
+    if (args.organizationId) {
+        const organization = await prisma_1.prisma.organization.findUnique({
+            where: { id: args.organizationId },
+            select: {
+                defaultLanguage: true,
+                enabledLanguages: true,
+            },
+        });
+        if (!organization) {
+            return existingTranslations;
+        }
+        enabledLanguages = parseEnabledLanguages(organization.enabledLanguages, organization.defaultLanguage);
     }
-    const sourceLanguage = args.sourceLanguage ?? client_1.LanguageCode.EN;
-    const enabledLanguages = parseEnabledLanguages(organization.enabledLanguages, organization.defaultLanguage);
     const existingLanguageSet = new Set(existingTranslations.map((translation) => translation.language));
-    const missingLanguages = enabledLanguages.filter((language) => language !== sourceLanguage && !existingLanguageSet.has(language));
+    const missingLanguages = enabledLanguages.filter((language) => (sourceLanguage === "AUTO" || language !== sourceLanguage) && !existingLanguageSet.has(language));
     if (missingLanguages.length === 0) {
         return existingTranslations;
     }
-    const generated = [];
-    for (const language of missingLanguages) {
+    const generatedResults = await Promise.all(missingLanguages.map(async (language) => {
         try {
-            const translatedName = await (0, libreTranslate_1.translateText)(args.baseName, sourceLanguage, language);
+            const [translatedName, translatedDescription] = await Promise.all([
+                (0, libreTranslate_1.translateLanguageCodeText)(args.baseName, sourceLanguage, language),
+                args.baseDescription ? (0, libreTranslate_1.translateLanguageCodeText)(args.baseDescription, sourceLanguage, language) : null,
+            ]);
             if (!translatedName) {
-                continue;
+                return null;
             }
-            let translatedDescription = undefined;
-            if (args.baseDescription) {
-                translatedDescription = (await (0, libreTranslate_1.translateText)(args.baseDescription, sourceLanguage, language)) ?? undefined;
-            }
-            generated.push({
+            return {
                 language,
                 name: translatedName,
                 ...(translatedDescription ? { description: translatedDescription } : {}),
-            });
+            };
         }
         catch (error) {
             if (!env_1.env.AUTO_TRANSLATE_FAIL_OPEN) {
                 throw error;
             }
             console.warn(`Auto translation failed for ${language}`, error);
+            return null;
+        }
+    }));
+    const generated = [];
+    for (const translation of generatedResults) {
+        if (translation) {
+            generated.push(translation);
         }
     }
     return [...existingTranslations, ...generated];

@@ -17,6 +17,7 @@ import { slugify } from "../../utils/slug";
 import { upsertTranslations } from "../../utils/translations";
 import { toNullableJsonValue } from "../../utils/json";
 import type { DbClient } from "../../types/prisma";
+import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
 import { createAuditLog } from "../audit/audit.service";
 
 interface NameDescriptionTranslationInput {
@@ -546,6 +547,10 @@ async function upsertMasterVariantTemplates(
   const preferredDefaultCode = templates.find((template) => template.isDefault)?.code;
 
   for (const template of templates) {
+    const translations = await enrichWithAutoTranslations<MasterVariantTranslationInput>({
+      baseName: template.name,
+      existingTranslations: template.translations,
+    });
     const existing = existingByCode.get(template.code.trim());
 
     if (existing) {
@@ -577,7 +582,7 @@ async function upsertMasterVariantTemplates(
         },
       });
 
-      await upsertMasterVariantTranslations(db, existing.id, template.translations ?? []);
+      await upsertMasterVariantTranslations(db, existing.id, translations);
       continue;
     }
 
@@ -608,7 +613,7 @@ async function upsertMasterVariantTemplates(
       },
     });
 
-    await upsertMasterVariantTranslations(db, created.id, template.translations ?? []);
+    await upsertMasterVariantTranslations(db, created.id, translations);
   }
 
   await normalizeMasterVariantDefaults(db, masterItemId, preferredDefaultCode);
@@ -921,6 +926,12 @@ export async function createMasterCatalogItem(
   },
   localeContext: LocaleContext,
 ) {
+  const translations = await enrichWithAutoTranslations<MasterItemTranslationInput>({
+    baseName: input.canonicalName,
+    baseDescription: input.canonicalDescription,
+    existingTranslations: input.translations,
+  });
+
   const item = await prisma.$transaction(async (tx) => {
     const created = await tx.masterCatalogItem.create({
       data: {
@@ -948,7 +959,7 @@ export async function createMasterCatalogItem(
       },
     });
 
-    await upsertMasterItemTranslations(tx, created.id, input.translations ?? []);
+    await upsertMasterItemTranslations(tx, created.id, translations);
     await replaceMasterItemAliases(tx, created.id, input.aliases ?? []);
     await upsertMasterVariantTemplates(tx, created.id, input.variantTemplates ?? []);
     await rebuildMasterItemSearchText(tx, created.id);
@@ -1000,6 +1011,18 @@ export async function updateMasterCatalogItem(
   localeContext: LocaleContext,
 ) {
   const existing = await getMasterCatalogItemRecordById(itemId);
+  const translations = await enrichWithAutoTranslations<MasterItemTranslationInput>({
+    baseName: input.canonicalName ?? existing.canonicalName,
+    baseDescription: input.canonicalDescription ?? existing.canonicalDescription ?? undefined,
+    existingTranslations:
+      input.translations ??
+      existing.translations.map((translation) => ({
+        language: translation.language,
+        name: translation.name,
+        shortName: translation.shortName ?? undefined,
+        description: translation.description ?? undefined,
+      })),
+  });
 
   await prisma.$transaction(async (tx) => {
     await tx.masterCatalogItem.update({
@@ -1034,7 +1057,7 @@ export async function updateMasterCatalogItem(
       },
     });
 
-    await upsertMasterItemTranslations(tx, itemId, input.translations ?? []);
+    await upsertMasterItemTranslations(tx, itemId, translations);
 
     if (input.aliases !== undefined) {
       await replaceMasterItemAliases(tx, itemId, input.aliases);

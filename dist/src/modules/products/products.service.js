@@ -245,6 +245,11 @@ async function upsertVariantTranslations(db, variantId, translations) {
     });
 }
 async function createVariantRecord(db, organizationId, productId, input) {
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        organizationId,
+        baseName: input.name,
+        existingTranslations: input.translations,
+    });
     const variant = await db.productVariant.create({
         data: {
             organizationId,
@@ -268,7 +273,7 @@ async function createVariantRecord(db, organizationId, productId, input) {
             metadata: input.metadata,
         },
     });
-    await upsertVariantTranslations(db, variant.id, input.translations);
+    await upsertVariantTranslations(db, variant.id, translations);
     return variant;
 }
 async function listProducts(organizationId, query, localeContext) {
@@ -414,6 +419,17 @@ async function getProductById(organizationId, productId, localeContext) {
 }
 async function updateProduct(organizationId, productId, actorUserId, input, localeContext) {
     const existing = await getProductRecordById(organizationId, productId);
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        organizationId,
+        baseName: input.name ?? existing.name,
+        baseDescription: input.description ?? existing.description ?? undefined,
+        existingTranslations: input.translations ??
+            existing.translations.map((translation) => ({
+                language: translation.language,
+                name: translation.name,
+                description: translation.description ?? undefined,
+            })),
+    });
     await validateProductReferences(organizationId, input);
     const nextHasVariants = input.hasVariants ?? existing.hasVariants;
     const nextProductType = input.productType ?? existing.productType;
@@ -449,7 +465,7 @@ async function updateProduct(organizationId, productId, actorUserId, input, loca
                 updatedById: actorUserId,
             },
         });
-        await upsertProductTranslations(tx, productId, input.translations ?? []);
+        await upsertProductTranslations(tx, productId, translations);
     });
     const updated = await getProductRecordById(organizationId, productId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
@@ -551,8 +567,12 @@ async function createVariant(organizationId, productId, actorUserId, input, loca
 async function updateVariant(organizationId, productId, variantId, actorUserId, input, localeContext) {
     const product = await getProductRecordById(organizationId, productId);
     const existing = await (0, guards_1.assertVariantInOrg)(prisma_1.prisma, organizationId, variantId);
+    const existingVariant = product.variants.find((variant) => variant.id === variantId);
     if (existing.productId !== productId) {
         throw ApiError_1.ApiError.badRequest("Variant does not belong to the selected product");
+    }
+    if (!existingVariant) {
+        throw ApiError_1.ApiError.notFound("Variant not found");
     }
     if (product.status === client_1.ProductStatus.ARCHIVED) {
         throw ApiError_1.ApiError.badRequest("Cannot edit variants for archived product");
@@ -568,6 +588,15 @@ async function updateVariant(organizationId, productId, variantId, actorUserId, 
             sellingPrice: input.sellingPrice ?? existing.sellingPrice,
         },
     ], variantId);
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        organizationId,
+        baseName: input.name ?? existingVariant.name,
+        existingTranslations: input.translations ??
+            existingVariant.translations.map((translation) => ({
+                language: translation.language,
+                name: translation.name,
+            })),
+    });
     const shouldBeDefault = input.isDefault === true;
     const updated = await prisma_1.prisma.$transaction(async (tx) => {
         if (shouldBeDefault) {
@@ -611,7 +640,7 @@ async function updateVariant(organizationId, productId, variantId, actorUserId, 
                 ...(input.metadata !== undefined ? { metadata: (0, json_1.toNullableJsonValue)(input.metadata) } : {}),
             },
         });
-        await upsertVariantTranslations(tx, variantId, input.translations ?? []);
+        await upsertVariantTranslations(tx, variantId, translations);
         return variant;
     });
     const updatedVariant = await prisma_1.prisma.productVariant.findUniqueOrThrow({

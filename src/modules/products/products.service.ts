@@ -378,6 +378,12 @@ async function createVariantRecord(
   productId: string,
   input: NormalizedVariantInput,
 ) {
+  const translations = await enrichWithAutoTranslations<VariantTranslationInput>({
+    organizationId,
+    baseName: input.name,
+    existingTranslations: input.translations,
+  });
+
   const variant = await db.productVariant.create({
     data: {
       organizationId,
@@ -402,7 +408,7 @@ async function createVariantRecord(
     },
   });
 
-  await upsertVariantTranslations(db, variant.id, input.translations);
+  await upsertVariantTranslations(db, variant.id, translations);
 
   return variant;
 }
@@ -643,6 +649,18 @@ export async function updateProduct(
   localeContext: LocaleContext,
 ) {
   const existing = await getProductRecordById(organizationId, productId);
+  const translations = await enrichWithAutoTranslations<ProductTranslationInput>({
+    organizationId,
+    baseName: input.name ?? existing.name,
+    baseDescription: input.description ?? existing.description ?? undefined,
+    existingTranslations:
+      input.translations ??
+      existing.translations.map((translation) => ({
+        language: translation.language,
+        name: translation.name,
+        description: translation.description ?? undefined,
+      })),
+  });
   await validateProductReferences(organizationId, input);
 
   const nextHasVariants = input.hasVariants ?? existing.hasVariants;
@@ -683,7 +701,7 @@ export async function updateProduct(
       },
     });
 
-    await upsertProductTranslations(tx, productId, input.translations ?? []);
+    await upsertProductTranslations(tx, productId, translations);
   });
 
   const updated = await getProductRecordById(organizationId, productId);
@@ -822,9 +840,14 @@ export async function updateVariant(
 ) {
   const product = await getProductRecordById(organizationId, productId);
   const existing = await assertVariantInOrg(prisma, organizationId, variantId);
+  const existingVariant = product.variants.find((variant) => variant.id === variantId);
 
   if (existing.productId !== productId) {
     throw ApiError.badRequest("Variant does not belong to the selected product");
+  }
+
+  if (!existingVariant) {
+    throw ApiError.notFound("Variant not found");
   }
 
   if (product.status === ProductStatus.ARCHIVED) {
@@ -847,6 +870,17 @@ export async function updateVariant(
     ],
     variantId,
   );
+
+  const translations = await enrichWithAutoTranslations<VariantTranslationInput>({
+    organizationId,
+    baseName: input.name ?? existingVariant.name,
+    existingTranslations:
+      input.translations ??
+      existingVariant.translations.map((translation) => ({
+        language: translation.language,
+        name: translation.name,
+      })),
+  });
 
   const shouldBeDefault = input.isDefault === true;
 
@@ -895,7 +929,7 @@ export async function updateVariant(
       },
     });
 
-    await upsertVariantTranslations(tx, variantId, input.translations ?? []);
+    await upsertVariantTranslations(tx, variantId, translations);
 
     return variant;
   });

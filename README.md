@@ -57,6 +57,8 @@ JWT_EXPIRES_IN=7d
 ADMIN_BOOTSTRAP_SECRET=
 CORS_ORIGIN=http://localhost:5173
 REDIS_URL=redis://localhost:6379
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
 REDIS_KEY_PREFIX=nearcart
 LIBRETRANSLATE_ENDPOINT=https://libretranslate.com
 LIBRETRANSLATE_API_KEY=
@@ -69,6 +71,8 @@ Notes:
 
 - `AUTO_TRANSLATE_ON_WRITE=true` will auto-generate missing translations for newly created entities and persist them.
 - Redis is optional but recommended for rate-limit consistency and translation cache.
+- Redis connection priority is `REDIS_URL` first, then Upstash REST (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`).
+- For self-hosted Redis in the future, set `REDIS_URL` and leave Upstash REST values empty.
 
 ## Bootstrap Super Admin
 

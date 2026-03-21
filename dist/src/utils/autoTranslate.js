@@ -18,9 +18,6 @@ function parseEnabledLanguages(value, defaultLanguage) {
 }
 async function enrichWithAutoTranslations(args) {
     const existingTranslations = args.existingTranslations ?? [];
-    if (!env_1.env.AUTO_TRANSLATE_ON_WRITE) {
-        return existingTranslations;
-    }
     const sourceLanguage = args.sourceLanguage ?? "AUTO";
     let enabledLanguages = [...localization_1.SUPPORTED_LANGUAGE_CODES];
     if (args.organizationId) {
@@ -36,10 +33,21 @@ async function enrichWithAutoTranslations(args) {
         }
         enabledLanguages = parseEnabledLanguages(organization.enabledLanguages, organization.defaultLanguage);
     }
-    const existingLanguageSet = new Set(existingTranslations.map((translation) => translation.language));
-    const missingLanguages = enabledLanguages.filter((language) => (sourceLanguage === "AUTO" || language !== sourceLanguage) && !existingLanguageSet.has(language));
+    const translationByLanguage = new Map(existingTranslations.map((translation) => [translation.language, translation]));
+    const missingLanguages = enabledLanguages.filter((language) => (sourceLanguage === "AUTO" || language !== sourceLanguage) && !translationByLanguage.has(language));
     if (missingLanguages.length === 0) {
-        return existingTranslations;
+        return Array.from(translationByLanguage.values());
+    }
+    // Guarantee complete multilingual rows even when machine translation is disabled.
+    if (!env_1.env.AUTO_TRANSLATE_ON_WRITE) {
+        for (const language of missingLanguages) {
+            translationByLanguage.set(language, {
+                language,
+                name: args.baseName,
+                ...(args.baseDescription ? { description: args.baseDescription } : {}),
+            });
+        }
+        return Array.from(translationByLanguage.values());
     }
     const generatedResults = await Promise.all(missingLanguages.map(async (language) => {
         try {
@@ -61,14 +69,27 @@ async function enrichWithAutoTranslations(args) {
                 throw error;
             }
             console.warn(`Auto translation failed for ${language}`, error);
-            return null;
+            // Fail-open fallback keeps data complete for multilingual reads.
+            return {
+                language,
+                name: args.baseName,
+                ...(args.baseDescription ? { description: args.baseDescription } : {}),
+            };
         }
     }));
-    const generated = [];
     for (const translation of generatedResults) {
         if (translation) {
-            generated.push(translation);
+            translationByLanguage.set(translation.language, translation);
         }
     }
-    return [...existingTranslations, ...generated];
+    for (const language of missingLanguages) {
+        if (!translationByLanguage.has(language)) {
+            translationByLanguage.set(language, {
+                language,
+                name: args.baseName,
+                ...(args.baseDescription ? { description: args.baseDescription } : {}),
+            });
+        }
+    }
+    return Array.from(translationByLanguage.values());
 }

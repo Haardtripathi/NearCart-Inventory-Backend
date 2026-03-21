@@ -132,7 +132,8 @@ class IoredisClientAdapter implements AppRedisClient {
   }
 }
 
-let redisClient: AppRedisClient | null = null;
+let configuredRedisClient: AppRedisClient | null = null;
+let readyRedisClient: AppRedisClient | null = null;
 
 if (env.REDIS_URL) {
   const client = new Redis(env.REDIS_URL, {
@@ -145,9 +146,9 @@ if (env.REDIS_URL) {
     console.error("Redis client error", error);
   });
 
-  redisClient = new IoredisClientAdapter(client);
+  configuredRedisClient = new IoredisClientAdapter(client);
 } else if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
-  redisClient = new UpstashRestRedisClient(
+  configuredRedisClient = new UpstashRestRedisClient(
     env.UPSTASH_REDIS_REST_URL,
     env.UPSTASH_REDIS_REST_TOKEN,
     env.REDIS_KEY_PREFIX,
@@ -155,25 +156,40 @@ if (env.REDIS_URL) {
 }
 
 export function getRedisClient() {
-  return redisClient;
+  return readyRedisClient;
 }
 
 export async function connectRedis() {
-  if (!redisClient) {
+  if (!configuredRedisClient) {
     return;
   }
 
-  if (redisClient.status === "ready" || redisClient.status === "connecting") {
+  if (readyRedisClient?.status === "ready") {
     return;
   }
 
-  await redisClient.connect();
+  try {
+    await configuredRedisClient.connect();
+    readyRedisClient = configuredRedisClient;
+  } catch (error) {
+    readyRedisClient = null;
+
+    try {
+      await configuredRedisClient.quit();
+    } catch {
+      // Ignore cleanup failures after an unsuccessful connect attempt.
+    }
+
+    configuredRedisClient = null;
+    throw error;
+  }
 }
 
 export async function disconnectRedis() {
-  if (!redisClient) {
+  if (!configuredRedisClient) {
     return;
   }
 
-  await redisClient.quit();
+  await configuredRedisClient.quit();
+  readyRedisClient = null;
 }

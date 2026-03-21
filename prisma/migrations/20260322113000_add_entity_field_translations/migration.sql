@@ -13,7 +13,7 @@ CREATE TABLE "EntityFieldTranslation" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "EntityFieldTranslation_entityType_entityId_fieldKey_language_key" ON "EntityFieldTranslation"("entityType", "entityId", "fieldKey", "language");
+CREATE UNIQUE INDEX "EntityFieldTranslation_entityType_entityId_fieldKey_languag_key" ON "EntityFieldTranslation"("entityType", "entityId", "fieldKey", "language");
 
 -- CreateIndex
 CREATE INDEX "EntityFieldTranslation_entityType_entityId_idx" ON "EntityFieldTranslation"("entityType", "entityId");

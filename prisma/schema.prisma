@@ -655,7 +655,7 @@ model EntityFieldTranslation {
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
 
-  @@unique([entityType, entityId, fieldKey, language])
+  @@unique([entityType, entityId, fieldKey, language], map: "EntityFieldTranslation_entityType_entityId_fieldKey_languag_key")
   @@index([entityType, entityId])
   @@index([entityType, fieldKey, language])
 }

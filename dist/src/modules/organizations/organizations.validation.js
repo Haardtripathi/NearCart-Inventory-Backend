@@ -5,7 +5,7 @@ const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
 const branchInputSchema = zod_1.z.object({
-    code: validation_1.trimmedString,
+    code: validation_1.optionalTrimmedString,
     name: validation_1.trimmedString,
     type: zod_1.z.nativeEnum(client_1.BranchType),
     phone: validation_1.optionalTrimmedString,

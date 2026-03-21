@@ -10,7 +10,7 @@ import {
 } from "../../utils/validation";
 
 const branchInputSchema = z.object({
-  code: trimmedString,
+  code: optionalTrimmedString,
   name: trimmedString,
   type: z.nativeEnum(BranchType),
   phone: optionalTrimmedString,

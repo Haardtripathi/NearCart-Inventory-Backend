@@ -13,6 +13,7 @@ import { buildUserActionLink, createUserActionToken } from "../../utils/userActi
 import { slugify } from "../../utils/slug";
 import { assertIndustryExists, assertOrganizationExists } from "../../utils/guards";
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
+import { generateUniqueBranchCode } from "../../utils/branchCode";
 
 export interface CreateOrganizationInput {
   name: string;
@@ -36,7 +37,7 @@ export interface CreateOrganizationInput {
   enabledFeatures?: Record<string, unknown>;
   customSettings?: unknown;
   firstBranch: {
-    code: string;
+    code?: string;
     name: string;
     type: "STORE" | "WAREHOUSE" | "DARK_STORE";
     phone?: string;
@@ -301,10 +302,29 @@ export async function createOrganizationWithResolvedOwner(
     },
   });
 
+  let firstBranchCode = input.firstBranch.code?.trim();
+
+  if (!firstBranchCode) {
+    firstBranchCode = await generateUniqueBranchCode(async (candidateCode) => {
+      const existingBranch = await tx.branch.findFirst({
+        where: {
+          organizationId: organization.id,
+          code: candidateCode,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      return Boolean(existingBranch);
+    });
+  }
+
   const firstBranch = await tx.branch.create({
     data: {
       organizationId: organization.id,
-      code: input.firstBranch.code.trim(),
+      code: firstBranchCode,
       name: input.firstBranch.name.trim(),
       type: input.firstBranch.type,
       phone: input.firstBranch.phone ?? null,

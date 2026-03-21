@@ -12,6 +12,7 @@ const userActionTokens_1 = require("../../utils/userActionTokens");
 const slug_1 = require("../../utils/slug");
 const guards_1 = require("../../utils/guards");
 const json_1 = require("../../utils/json");
+const branchCode_1 = require("../../utils/branchCode");
 function normalizeEmail(email) {
     return email.trim().toLowerCase();
 }
@@ -205,10 +206,26 @@ async function createOrganizationWithResolvedOwner(tx, input, options) {
             customSettings: (0, json_1.toNullableJsonValue)(input.customSettings ?? options.primaryIndustry.defaultSettings),
         },
     });
+    let firstBranchCode = input.firstBranch.code?.trim();
+    if (!firstBranchCode) {
+        firstBranchCode = await (0, branchCode_1.generateUniqueBranchCode)(async (candidateCode) => {
+            const existingBranch = await tx.branch.findFirst({
+                where: {
+                    organizationId: organization.id,
+                    code: candidateCode,
+                    deletedAt: null,
+                },
+                select: {
+                    id: true,
+                },
+            });
+            return Boolean(existingBranch);
+        });
+    }
     const firstBranch = await tx.branch.create({
         data: {
             organizationId: organization.id,
-            code: input.firstBranch.code.trim(),
+            code: firstBranchCode,
             name: input.firstBranch.name.trim(),
             type: input.firstBranch.type,
             phone: input.firstBranch.phone ?? null,

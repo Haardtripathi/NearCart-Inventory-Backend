@@ -36,10 +36,6 @@ export async function enrichWithAutoTranslations<T extends TranslationLike>(args
 }): Promise<T[]> {
   const existingTranslations = args.existingTranslations ?? [];
 
-  if (!env.AUTO_TRANSLATE_ON_WRITE) {
-    return existingTranslations;
-  }
-
   const sourceLanguage = args.sourceLanguage ?? "AUTO";
   let enabledLanguages: LanguageCode[] = [...SUPPORTED_LANGUAGE_CODES];
 
@@ -59,14 +55,27 @@ export async function enrichWithAutoTranslations<T extends TranslationLike>(args
     enabledLanguages = parseEnabledLanguages(organization.enabledLanguages, organization.defaultLanguage);
   }
 
-  const existingLanguageSet = new Set(existingTranslations.map((translation) => translation.language));
+  const translationByLanguage = new Map(existingTranslations.map((translation) => [translation.language, translation]));
 
   const missingLanguages = enabledLanguages.filter(
-    (language) => (sourceLanguage === "AUTO" || language !== sourceLanguage) && !existingLanguageSet.has(language),
+    (language) => (sourceLanguage === "AUTO" || language !== sourceLanguage) && !translationByLanguage.has(language),
   );
 
   if (missingLanguages.length === 0) {
-    return existingTranslations;
+    return Array.from(translationByLanguage.values());
+  }
+
+  // Guarantee complete multilingual rows even when machine translation is disabled.
+  if (!env.AUTO_TRANSLATE_ON_WRITE) {
+    for (const language of missingLanguages) {
+      translationByLanguage.set(language, {
+        language,
+        name: args.baseName,
+        ...(args.baseDescription ? { description: args.baseDescription } : {}),
+      } as T);
+    }
+
+    return Array.from(translationByLanguage.values());
   }
 
   const generatedResults = await Promise.all(
@@ -92,18 +101,32 @@ export async function enrichWithAutoTranslations<T extends TranslationLike>(args
         }
 
         console.warn(`Auto translation failed for ${language}`, error);
-        return null;
+
+        // Fail-open fallback keeps data complete for multilingual reads.
+        return {
+          language,
+          name: args.baseName,
+          ...(args.baseDescription ? { description: args.baseDescription } : {}),
+        } as T;
       }
     }),
   );
 
-  const generated: T[] = [];
-
   for (const translation of generatedResults) {
     if (translation) {
-      generated.push(translation);
+      translationByLanguage.set(translation.language, translation);
     }
   }
 
-  return [...existingTranslations, ...generated];
+  for (const language of missingLanguages) {
+    if (!translationByLanguage.has(language)) {
+      translationByLanguage.set(language, {
+        language,
+        name: args.baseName,
+        ...(args.baseDescription ? { description: args.baseDescription } : {}),
+      } as T);
+    }
+  }
+
+  return Array.from(translationByLanguage.values());
 }

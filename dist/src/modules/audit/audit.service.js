@@ -3,10 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createAuditLog = createAuditLog;
 exports.listAuditLogs = listAuditLogs;
 const prisma_1 = require("../../config/prisma");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const pagination_1 = require("../../utils/pagination");
 const json_1 = require("../../utils/json");
 async function createAuditLog(db, input) {
-    return db.auditLog.create({
+    const auditLog = await db.auditLog.create({
         data: {
             organizationId: input.organizationId ?? null,
             actorUserId: input.actorUserId ?? null,
@@ -20,6 +21,13 @@ async function createAuditLog(db, input) {
             userAgent: input.userAgent ?? null,
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(db, {
+        organizationId: input.organizationId ?? undefined,
+        entityType: "AuditLog",
+        entityId: auditLog.id,
+        fields: [{ fieldKey: "entityType", value: input.entityType }],
+    });
+    return auditLog;
 }
 async function listAuditLogs(organizationId, query) {
     const { page, limit, skip } = (0, pagination_1.getPagination)(query.page, query.limit);

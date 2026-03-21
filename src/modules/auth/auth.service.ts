@@ -12,6 +12,7 @@ import { prisma } from "../../config/prisma";
 import type { JwtAuthPayload } from "../../types/auth";
 import { ApiError } from "../../utils/ApiError";
 import { normalizeBranchAccess } from "../../utils/branchAccess";
+import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { signAuthToken } from "../../utils/jwt";
 import {
   getUserActionTokenByRawToken,
@@ -225,6 +226,12 @@ export async function bootstrapSuperAdmin(input: BootstrapSuperAdminInput, meta:
     },
   });
 
+  await syncEntityFieldTranslations(prisma, {
+    entityType: "User",
+    entityId: user.id,
+    fields: [{ fieldKey: "fullName", value: input.fullName }],
+  });
+
   await createAuditLog(prisma, {
     actorUserId: user.id,
     action: AuditAction.CREATE,
@@ -325,6 +332,12 @@ export async function registerOrganizationOwner(input: RegisterOrganizationOwner
         passwordHash: true,
         passwordSetupRequired: true,
       },
+    });
+
+    await syncEntityFieldTranslations(tx, {
+      entityType: "User",
+      entityId: user.id,
+      fields: [{ fieldKey: "fullName", value: input.fullName }],
     });
 
     const organizationInput: CreateOrganizationInput = {

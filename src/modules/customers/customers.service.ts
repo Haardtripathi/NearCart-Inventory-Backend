@@ -2,9 +2,27 @@ import { AuditAction } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
+import {
+  listEntityFieldTranslations,
+  resolveEntityFieldValue,
+  syncEntityFieldTranslations,
+} from "../../utils/entityFieldTranslations";
 import { toNullableJsonValue } from "../../utils/json";
+import type { LocaleContext } from "../../utils/localization";
+import { serializeLocalizedEntity } from "../../utils/localization";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { createAuditLog } from "../audit/audit.service";
+
+function serializeCustomer<TCustomer extends { id: string; name: string }>(
+  customer: TCustomer,
+  localeContext: LocaleContext,
+  translations: Array<{ fieldKey: string; language: import("@prisma/client").LanguageCode; value: string }> = [],
+) {
+  return {
+    ...serializeLocalizedEntity(customer, localeContext),
+    displayName: resolveEntityFieldValue(customer.name, translations, "name", localeContext) ?? customer.name,
+  };
+}
 
 export async function listCustomers(
   organizationId: string,
@@ -14,6 +32,7 @@ export async function listCustomers(
     search?: string;
     isActive?: boolean;
   },
+  localeContext: LocaleContext,
 ) {
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
@@ -41,8 +60,21 @@ export async function listCustomers(
     prisma.customer.count({ where }),
   ]);
 
+  const translations = await listEntityFieldTranslations(
+    "Customer",
+    items.map((customer) => customer.id),
+    ["name"],
+  );
+  const translationsByEntityId = new Map<string, typeof translations>();
+
+  for (const translation of translations) {
+    const bucket = translationsByEntityId.get(translation.entityId) ?? [];
+    bucket.push(translation);
+    translationsByEntityId.set(translation.entityId, bucket);
+  }
+
   return {
-    items,
+    items: items.map((customer) => serializeCustomer(customer, localeContext, translationsByEntityId.get(customer.id) ?? [])),
     pagination: buildPagination(page, limit, totalItems),
   };
 }
@@ -58,6 +90,7 @@ export async function createCustomer(
     notes?: string;
     isActive?: boolean;
   },
+  localeContext: LocaleContext,
 ) {
   const customer = await prisma.customer.create({
     data: {
@@ -71,6 +104,16 @@ export async function createCustomer(
     },
   });
 
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "Customer",
+    entityId: customer.id,
+    fields: [
+      { fieldKey: "name", value: input.name },
+      { fieldKey: "notes", value: input.notes },
+    ],
+  });
+
   await createAuditLog(prisma, {
     organizationId,
     actorUserId,
@@ -80,10 +123,10 @@ export async function createCustomer(
     after: customer,
   });
 
-  return customer;
+  return serializeCustomer(customer, localeContext);
 }
 
-export async function getCustomerById(organizationId: string, customerId: string) {
+async function getCustomerRecordById(organizationId: string, customerId: string) {
   const customer = await prisma.customer.findFirst({
     where: {
       id: customerId,
@@ -99,6 +142,12 @@ export async function getCustomerById(organizationId: string, customerId: string
   return customer;
 }
 
+export async function getCustomerById(organizationId: string, customerId: string, localeContext: LocaleContext) {
+  const customer = await getCustomerRecordById(organizationId, customerId);
+  const translations = await listEntityFieldTranslations("Customer", [customer.id], ["name"]);
+  return serializeCustomer(customer, localeContext, translations);
+}
+
 export async function updateCustomer(
   organizationId: string,
   customerId: string,
@@ -111,8 +160,9 @@ export async function updateCustomer(
     notes: string;
     isActive: boolean;
   }>,
+  localeContext: LocaleContext,
 ) {
-  const existing = await getCustomerById(organizationId, customerId);
+  const existing = await getCustomerRecordById(organizationId, customerId);
 
   const updated = await prisma.customer.update({
     where: { id: customerId },
@@ -126,6 +176,16 @@ export async function updateCustomer(
     },
   });
 
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "Customer",
+    entityId: updated.id,
+    fields: [
+      { fieldKey: "name", value: input.name ?? updated.name },
+      { fieldKey: "notes", value: input.notes ?? updated.notes },
+    ],
+  });
+
   await createAuditLog(prisma, {
     organizationId,
     actorUserId,
@@ -136,11 +196,11 @@ export async function updateCustomer(
     after: updated,
   });
 
-  return updated;
+  return serializeCustomer(updated, localeContext);
 }
 
 export async function deleteCustomer(organizationId: string, customerId: string, actorUserId: string) {
-  const existing = await getCustomerById(organizationId, customerId);
+  const existing = await getCustomerRecordById(organizationId, customerId);
 
   const deleted = await prisma.customer.update({
     where: { id: customerId },

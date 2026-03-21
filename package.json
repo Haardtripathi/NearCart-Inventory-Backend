@@ -11,7 +11,8 @@
     "start": "node dist/src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "prisma db seed",
+    "translations:backfill": "node --import tsx src/scripts/backfill-translations.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

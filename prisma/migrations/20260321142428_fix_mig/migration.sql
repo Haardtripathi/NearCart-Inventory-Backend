@@ -1,0 +1,1 @@
+-- RenameIndex (removed: EntityFieldTranslation table is created in a later migration, no index to rename here)

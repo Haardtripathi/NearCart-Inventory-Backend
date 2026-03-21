@@ -8,10 +8,18 @@ exports.deleteCustomer = deleteCustomer;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const json_1 = require("../../utils/json");
+const localization_1 = require("../../utils/localization");
 const pagination_1 = require("../../utils/pagination");
 const audit_service_1 = require("../audit/audit.service");
-async function listCustomers(organizationId, query) {
+function serializeCustomer(customer, localeContext, translations = []) {
+    return {
+        ...(0, localization_1.serializeLocalizedEntity)(customer, localeContext),
+        displayName: (0, entityFieldTranslations_1.resolveEntityFieldValue)(customer.name, translations, "name", localeContext) ?? customer.name,
+    };
+}
+async function listCustomers(organizationId, query, localeContext) {
     const { page, limit, skip } = (0, pagination_1.getPagination)(query.page, query.limit);
     const where = {
         organizationId,
@@ -36,12 +44,19 @@ async function listCustomers(organizationId, query) {
         }),
         prisma_1.prisma.customer.count({ where }),
     ]);
+    const translations = await (0, entityFieldTranslations_1.listEntityFieldTranslations)("Customer", items.map((customer) => customer.id), ["name"]);
+    const translationsByEntityId = new Map();
+    for (const translation of translations) {
+        const bucket = translationsByEntityId.get(translation.entityId) ?? [];
+        bucket.push(translation);
+        translationsByEntityId.set(translation.entityId, bucket);
+    }
     return {
-        items,
+        items: items.map((customer) => serializeCustomer(customer, localeContext, translationsByEntityId.get(customer.id) ?? [])),
         pagination: (0, pagination_1.buildPagination)(page, limit, totalItems),
     };
 }
-async function createCustomer(organizationId, actorUserId, input) {
+async function createCustomer(organizationId, actorUserId, input, localeContext) {
     const customer = await prisma_1.prisma.customer.create({
         data: {
             organizationId,
@@ -53,6 +68,15 @@ async function createCustomer(organizationId, actorUserId, input) {
             isActive: input.isActive ?? true,
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        organizationId,
+        entityType: "Customer",
+        entityId: customer.id,
+        fields: [
+            { fieldKey: "name", value: input.name },
+            { fieldKey: "notes", value: input.notes },
+        ],
+    });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -61,9 +85,9 @@ async function createCustomer(organizationId, actorUserId, input) {
         entityId: customer.id,
         after: customer,
     });
-    return customer;
+    return serializeCustomer(customer, localeContext);
 }
-async function getCustomerById(organizationId, customerId) {
+async function getCustomerRecordById(organizationId, customerId) {
     const customer = await prisma_1.prisma.customer.findFirst({
         where: {
             id: customerId,
@@ -76,8 +100,13 @@ async function getCustomerById(organizationId, customerId) {
     }
     return customer;
 }
-async function updateCustomer(organizationId, customerId, actorUserId, input) {
-    const existing = await getCustomerById(organizationId, customerId);
+async function getCustomerById(organizationId, customerId, localeContext) {
+    const customer = await getCustomerRecordById(organizationId, customerId);
+    const translations = await (0, entityFieldTranslations_1.listEntityFieldTranslations)("Customer", [customer.id], ["name"]);
+    return serializeCustomer(customer, localeContext, translations);
+}
+async function updateCustomer(organizationId, customerId, actorUserId, input, localeContext) {
+    const existing = await getCustomerRecordById(organizationId, customerId);
     const updated = await prisma_1.prisma.customer.update({
         where: { id: customerId },
         data: {
@@ -89,6 +118,15 @@ async function updateCustomer(organizationId, customerId, actorUserId, input) {
             ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        organizationId,
+        entityType: "Customer",
+        entityId: updated.id,
+        fields: [
+            { fieldKey: "name", value: input.name ?? updated.name },
+            { fieldKey: "notes", value: input.notes ?? updated.notes },
+        ],
+    });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -98,10 +136,10 @@ async function updateCustomer(organizationId, customerId, actorUserId, input) {
         before: existing,
         after: updated,
     });
-    return updated;
+    return serializeCustomer(updated, localeContext);
 }
 async function deleteCustomer(organizationId, customerId, actorUserId) {
-    const existing = await getCustomerById(organizationId, customerId);
+    const existing = await getCustomerRecordById(organizationId, customerId);
     const deleted = await prisma_1.prisma.customer.update({
         where: { id: customerId },
         data: {

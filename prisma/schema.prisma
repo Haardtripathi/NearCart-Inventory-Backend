@@ -396,6 +396,7 @@ model Unit {
   organization   Organization? @relation(fields: [organizationId], references: [id])
   primaryProducts Product[]   @relation("ProductPrimaryUnit")
   variants       ProductVariant[] @relation("VariantUnit")
+  translations   UnitTranslation[]
 
   @@unique([organizationId, code])
   @@index([code])
@@ -433,6 +434,7 @@ model Supplier {
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
   purchaseReceipts PurchaseReceipt[]
+  translations   SupplierTranslation[]
 
   @@index([organizationId, deletedAt])
 }
@@ -590,6 +592,32 @@ model BrandTranslation {
   @@index([language])
 }
 
+model UnitTranslation {
+  id        String       @id @default(cuid())
+  unitId    String
+  language  LanguageCode
+  name      String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  unit      Unit         @relation(fields: [unitId], references: [id])
+
+  @@unique([unitId, language])
+  @@index([language])
+}
+
+model SupplierTranslation {
+  id         String       @id @default(cuid())
+  supplierId String
+  language   LanguageCode
+  name       String
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  supplier   Supplier     @relation(fields: [supplierId], references: [id])
+
+  @@unique([supplierId, language])
+  @@index([language])
+}
+
 model ProductTranslation {
   id          String       @id @default(cuid())
   productId   String
@@ -615,6 +643,21 @@ model ProductVariantTranslation {
 
   @@unique([variantId, language])
   @@index([language])
+}
+
+model EntityFieldTranslation {
+  id         String       @id @default(cuid())
+  entityType String
+  entityId   String
+  fieldKey   String
+  language   LanguageCode
+  value      String
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([entityType, entityId, fieldKey, language])
+  @@index([entityType, entityId])
+  @@index([entityType, fieldKey, language])
 }
 
 model MasterCatalogCategory {

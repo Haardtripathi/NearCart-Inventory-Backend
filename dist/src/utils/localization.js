@@ -8,7 +8,7 @@ exports.resolveLocalizedText = resolveLocalizedText;
 exports.serializeLocalizedEntity = serializeLocalizedEntity;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../config/prisma");
-exports.SUPPORTED_LANGUAGE_CODES = [client_1.LanguageCode.EN, client_1.LanguageCode.HI];
+exports.SUPPORTED_LANGUAGE_CODES = [client_1.LanguageCode.EN, client_1.LanguageCode.HI, client_1.LanguageCode.GU];
 function sanitizeSupportedLanguageCode(value) {
     return value && exports.SUPPORTED_LANGUAGE_CODES.includes(value) ? value : null;
 }
@@ -33,6 +33,8 @@ function normalizeLanguageCode(value) {
             return client_1.LanguageCode.EN;
         case "hi":
             return client_1.LanguageCode.HI;
+        case "gu":
+            return client_1.LanguageCode.GU;
         default:
             return null;
     }

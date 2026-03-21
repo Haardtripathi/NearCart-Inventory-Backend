@@ -3,14 +3,16 @@ import { LanguageCode } from "@prisma/client";
 
 import { env } from "../config/env";
 import { getRedisClient } from "../config/redis";
+import { translateRomanizedInventoryText } from "./transliteration";
 
 const languageCodeToIso: Partial<Record<LanguageCode, TranslationTarget>> = {
   EN: "en",
   HI: "hi",
+  GU: "gu",
 };
 
 type TranslationSource = TranslationTarget | "auto";
-type TranslationTarget = "en" | "hi";
+type TranslationTarget = "en" | "hi" | "gu";
 
 interface LibreTranslateResponse {
   translatedText?: string;
@@ -154,6 +156,9 @@ export async function translateText(
   }
 
   if (!(await isTranslationAvailable(sourceLanguage, targetLanguage))) {
+    if (!env.AUTO_TRANSLATE_FAIL_OPEN) {
+      throw new Error(`Translation from ${sourceLanguage} to ${targetLanguage} is not available`);
+    }
     return normalizedValue;
   }
 
@@ -191,12 +196,13 @@ export async function buildTranslations(value: string, sourceLanguage: Translati
     throw new Error("Text is required");
   }
 
-  const [en, hi] = await Promise.all([
+  const [en, hi, gu] = await Promise.all([
     translateText(normalizedValue, "en", sourceLanguage),
     translateText(normalizedValue, "hi", sourceLanguage),
+    translateText(normalizedValue, "gu", sourceLanguage),
   ]);
 
-  return { en, hi };
+  return { en, hi, gu };
 }
 
 export async function translateLanguageCodeText(
@@ -212,6 +218,11 @@ export async function translateLanguageCodeText(
 
   if (sourceLanguage !== "AUTO" && sourceLanguage === targetLanguage) {
     return normalizedValue;
+  }
+
+  const glossaryTranslation = translateRomanizedInventoryText(normalizedValue, targetLanguage);
+  if (glossaryTranslation) {
+    return glossaryTranslation;
   }
 
   return translateText(

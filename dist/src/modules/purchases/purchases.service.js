@@ -9,6 +9,7 @@ const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const decimal_1 = require("../../utils/decimal");
 const ApiError_1 = require("../../utils/ApiError");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const guards_1 = require("../../utils/guards");
 const json_1 = require("../../utils/json");
 const numbering_1 = require("../../utils/numbering");
@@ -136,6 +137,12 @@ async function createPurchase(organizationId, actorUserId, input) {
             branch: true,
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        organizationId,
+        entityType: "PurchaseReceipt",
+        entityId: purchase.id,
+        fields: [{ fieldKey: "notes", value: input.notes }],
+    });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -213,6 +220,12 @@ async function updatePurchase(organizationId, purchaseId, actorUserId, input) {
                 })),
             });
         }
+        await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(tx, {
+            organizationId,
+            entityType: "PurchaseReceipt",
+            entityId: purchaseId,
+            fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
+        });
     });
     const updated = await getPurchaseById(organizationId, purchaseId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {

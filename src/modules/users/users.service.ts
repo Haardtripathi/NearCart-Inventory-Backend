@@ -13,6 +13,7 @@ import {
   normalizeBranchAccess,
   type BranchAccessState,
 } from "../../utils/branchAccess";
+import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { toNullableJsonValue } from "../../utils/json";
 import { buildUserActionLink, createUserActionToken } from "../../utils/userActionTokens";
 import { createAuditLog } from "../audit/audit.service";
@@ -332,6 +333,14 @@ export async function createOrganizationUser(
         },
       }));
 
+    if (!existingUser) {
+      await syncEntityFieldTranslations(tx, {
+        entityType: "User",
+        entityId: user.id,
+        fields: [{ fieldKey: "fullName", value: input.fullName }],
+      });
+    }
+
     if (existingUser && !existingUser.isActive) {
       await tx.user.update({
         where: {
@@ -353,6 +362,12 @@ export async function createOrganizationUser(
           preferredLanguage: input.preferredLanguage ?? existingUser.preferredLanguage,
           passwordSetupRequired: true,
         },
+      });
+
+      await syncEntityFieldTranslations(tx, {
+        entityType: "User",
+        entityId: existingUser.id,
+        fields: [{ fieldKey: "fullName", value: input.fullName }],
       });
     }
 
@@ -499,6 +514,12 @@ export async function updateOrganizationUser(
           ...(input.fullName ? { fullName: input.fullName.trim() } : {}),
           ...(input.preferredLanguage ? { preferredLanguage: input.preferredLanguage } : {}),
         },
+      });
+
+      await syncEntityFieldTranslations(tx, {
+        entityType: "User",
+        entityId: userId,
+        fields: [{ fieldKey: "fullName", value: input.fullName ?? existing.user.fullName }],
       });
     }
 

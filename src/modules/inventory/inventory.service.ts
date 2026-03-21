@@ -10,6 +10,7 @@ import { prisma } from "../../config/prisma";
 import type { DbClient } from "../../types/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { toDecimal } from "../../utils/decimal";
+import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { assertBranchInOrg, assertVariantInOrg } from "../../utils/guards";
 import { generateDocumentNumber } from "../../utils/numbering";
 import { buildPagination, getPagination } from "../../utils/pagination";
@@ -191,6 +192,13 @@ export async function applyStockMovement(db: DbClient, input: ApplyStockMovement
       batchId: batch?.id ?? null,
       createdById: input.createdById ?? null,
     },
+  });
+
+  await syncEntityFieldTranslations(db, {
+    organizationId: input.organizationId,
+    entityType: "InventoryLedger",
+    entityId: ledger.id,
+    fields: [{ fieldKey: "note", value: input.note }],
   });
 
   return {

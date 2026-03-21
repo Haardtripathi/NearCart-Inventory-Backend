@@ -9,6 +9,7 @@ const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
 const branchAccess_1 = require("../../utils/branchAccess");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const json_1 = require("../../utils/json");
 const userActionTokens_1 = require("../../utils/userActionTokens");
 const audit_service_1 = require("../audit/audit.service");
@@ -260,6 +261,13 @@ async function createOrganizationUser(actorUserId, actorRole, organizationId, in
                     lastLoginAt: true,
                 },
             }));
+        if (!existingUser) {
+            await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(tx, {
+                entityType: "User",
+                entityId: user.id,
+                fields: [{ fieldKey: "fullName", value: input.fullName }],
+            });
+        }
         if (existingUser && !existingUser.isActive) {
             await tx.user.update({
                 where: {
@@ -280,6 +288,11 @@ async function createOrganizationUser(actorUserId, actorRole, organizationId, in
                     preferredLanguage: input.preferredLanguage ?? existingUser.preferredLanguage,
                     passwordSetupRequired: true,
                 },
+            });
+            await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(tx, {
+                entityType: "User",
+                entityId: existingUser.id,
+                fields: [{ fieldKey: "fullName", value: input.fullName }],
             });
         }
         const membershipCount = await tx.organizationMembership.count({
@@ -384,6 +397,11 @@ async function updateOrganizationUser(actorUserId, actorRole, organizationId, us
                     ...(input.fullName ? { fullName: input.fullName.trim() } : {}),
                     ...(input.preferredLanguage ? { preferredLanguage: input.preferredLanguage } : {}),
                 },
+            });
+            await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(tx, {
+                entityType: "User",
+                entityId: userId,
+                fields: [{ fieldKey: "fullName", value: input.fullName ?? existing.user.fullName }],
             });
         }
         const membership = await tx.organizationMembership.update({

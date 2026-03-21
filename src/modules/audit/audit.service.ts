@@ -2,6 +2,7 @@ import { AuditAction } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
 import type { DbClient } from "../../types/prisma";
+import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { toNullableJsonValue } from "../../utils/json";
 
@@ -19,7 +20,7 @@ interface AuditLogInput {
 }
 
 export async function createAuditLog(db: DbClient, input: AuditLogInput) {
-  return db.auditLog.create({
+  const auditLog = await db.auditLog.create({
     data: {
       organizationId: input.organizationId ?? null,
       actorUserId: input.actorUserId ?? null,
@@ -33,6 +34,15 @@ export async function createAuditLog(db: DbClient, input: AuditLogInput) {
       userAgent: input.userAgent ?? null,
     },
   });
+
+  await syncEntityFieldTranslations(db, {
+    organizationId: input.organizationId ?? undefined,
+    entityType: "AuditLog",
+    entityId: auditLog.id,
+    fields: [{ fieldKey: "entityType", value: input.entityType }],
+  });
+
+  return auditLog;
 }
 
 export async function listAuditLogs(organizationId: string, query: {

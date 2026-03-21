@@ -3,8 +3,26 @@ import { AuditAction } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { toDecimal } from "../../utils/decimal";
 import { ApiError } from "../../utils/ApiError";
+import {
+  listEntityFieldTranslations,
+  resolveEntityFieldValue,
+  syncEntityFieldTranslations,
+} from "../../utils/entityFieldTranslations";
+import type { LocaleContext } from "../../utils/localization";
+import { serializeLocalizedEntity } from "../../utils/localization";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { createAuditLog } from "../audit/audit.service";
+
+function serializeTaxRate<TTaxRate extends { id: string; name: string }>(
+  taxRate: TTaxRate,
+  localeContext: LocaleContext,
+  translations: Array<{ fieldKey: string; language: import("@prisma/client").LanguageCode; value: string }> = [],
+) {
+  return {
+    ...serializeLocalizedEntity(taxRate, localeContext),
+    displayName: resolveEntityFieldValue(taxRate.name, translations, "name", localeContext) ?? taxRate.name,
+  };
+}
 
 export async function listTaxRates(
   organizationId: string,
@@ -14,6 +32,7 @@ export async function listTaxRates(
     search?: string;
     isActive?: boolean;
   },
+  localeContext: LocaleContext,
 ) {
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
@@ -39,8 +58,21 @@ export async function listTaxRates(
     prisma.taxRate.count({ where }),
   ]);
 
+  const translations = await listEntityFieldTranslations(
+    "TaxRate",
+    items.map((taxRate) => taxRate.id),
+    ["name"],
+  );
+  const translationsByEntityId = new Map<string, typeof translations>();
+
+  for (const translation of translations) {
+    const bucket = translationsByEntityId.get(translation.entityId) ?? [];
+    bucket.push(translation);
+    translationsByEntityId.set(translation.entityId, bucket);
+  }
+
   return {
-    items,
+    items: items.map((taxRate) => serializeTaxRate(taxRate, localeContext, translationsByEntityId.get(taxRate.id) ?? [])),
     pagination: buildPagination(page, limit, totalItems),
   };
 }
@@ -55,6 +87,7 @@ export async function createTaxRate(
     isInclusive?: boolean;
     isActive?: boolean;
   },
+  localeContext: LocaleContext,
 ) {
   const taxRate = await prisma.taxRate.create({
     data: {
@@ -67,6 +100,13 @@ export async function createTaxRate(
     },
   });
 
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "TaxRate",
+    entityId: taxRate.id,
+    fields: [{ fieldKey: "name", value: input.name }],
+  });
+
   await createAuditLog(prisma, {
     organizationId,
     actorUserId,
@@ -76,7 +116,7 @@ export async function createTaxRate(
     after: taxRate,
   });
 
-  return taxRate;
+  return serializeTaxRate(taxRate, localeContext);
 }
 
 export async function updateTaxRate(
@@ -90,6 +130,7 @@ export async function updateTaxRate(
     isInclusive: boolean;
     isActive: boolean;
   }>,
+  localeContext: LocaleContext,
 ) {
   const existing = await prisma.taxRate.findFirst({
     where: {
@@ -113,6 +154,13 @@ export async function updateTaxRate(
     },
   });
 
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "TaxRate",
+    entityId: updated.id,
+    fields: [{ fieldKey: "name", value: input.name ?? updated.name }],
+  });
+
   await createAuditLog(prisma, {
     organizationId,
     actorUserId,
@@ -123,5 +171,5 @@ export async function updateTaxRate(
     after: updated,
   });
 
-  return updated;
+  return serializeTaxRate(updated, localeContext);
 }

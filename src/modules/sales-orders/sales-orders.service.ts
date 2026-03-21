@@ -10,6 +10,7 @@ import {
 import { prisma } from "../../config/prisma";
 import { toDecimal } from "../../utils/decimal";
 import { ApiError } from "../../utils/ApiError";
+import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { assertBranchInOrg, assertCustomerInOrg, assertVariantInOrg } from "../../utils/guards";
 import { toNullableJsonValue } from "../../utils/json";
 import { generateDocumentNumber } from "../../utils/numbering";
@@ -217,6 +218,25 @@ export async function createSalesOrder(
     },
   });
 
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "SalesOrder",
+    entityId: order.id,
+    fields: [{ fieldKey: "notes", value: input.notes }],
+  });
+
+  for (const item of order.items) {
+    await syncEntityFieldTranslations(prisma, {
+      organizationId,
+      entityType: "SalesOrderItem",
+      entityId: item.id,
+      fields: [
+        { fieldKey: "productNameSnapshot", value: item.productNameSnapshot },
+        { fieldKey: "variantNameSnapshot", value: item.variantNameSnapshot },
+      ],
+    });
+  }
+
   await createAuditLog(prisma, {
     organizationId,
     actorUserId,
@@ -320,9 +340,28 @@ export async function updateSalesOrder(
         })),
       });
     }
+
+    await syncEntityFieldTranslations(tx, {
+      organizationId,
+      entityType: "SalesOrder",
+      entityId: orderId,
+      fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
+    });
   });
 
   const updated = await getSalesOrderById(organizationId, orderId);
+
+  for (const item of updated.items) {
+    await syncEntityFieldTranslations(prisma, {
+      organizationId,
+      entityType: "SalesOrderItem",
+      entityId: item.id,
+      fields: [
+        { fieldKey: "productNameSnapshot", value: item.productNameSnapshot },
+        { fieldKey: "variantNameSnapshot", value: item.variantNameSnapshot },
+      ],
+    });
+  }
 
   await createAuditLog(prisma, {
     organizationId,
@@ -416,6 +455,13 @@ export async function rejectSalesOrder(
       status: SalesOrderStatus.REJECTED,
       rejectionReason,
     },
+  });
+
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "SalesOrder",
+    entityId: updated.id,
+    fields: [{ fieldKey: "rejectionReason", value: rejectionReason }],
   });
 
   await createAuditLog(prisma, {

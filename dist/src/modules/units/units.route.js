@@ -13,3 +13,5 @@ exports.unitsRouter = (0, express_1.Router)();
 exports.unitsRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
 exports.unitsRouter.get("/", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: units_validation_1.unitQuerySchema }), (0, asyncHandler_1.asyncHandler)(units_controller_1.listUnitsController));
 exports.unitsRouter.post("/", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: units_validation_1.createUnitSchema }), (0, asyncHandler_1.asyncHandler)(units_controller_1.createUnitController));
+exports.unitsRouter.get("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, asyncHandler_1.asyncHandler)(units_controller_1.getUnitController));
+exports.unitsRouter.patch("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: units_validation_1.updateUnitSchema }), (0, asyncHandler_1.asyncHandler)(units_controller_1.updateUnitController));

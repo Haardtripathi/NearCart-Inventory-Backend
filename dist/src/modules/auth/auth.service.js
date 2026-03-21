@@ -17,6 +17,7 @@ const env_1 = require("../../config/env");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
 const branchAccess_1 = require("../../utils/branchAccess");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const jwt_1 = require("../../utils/jwt");
 const userActionTokens_1 = require("../../utils/userActionTokens");
 const guards_1 = require("../../utils/guards");
@@ -138,6 +139,11 @@ async function bootstrapSuperAdmin(input, meta) {
             createdAt: true,
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        entityType: "User",
+        entityId: user.id,
+        fields: [{ fieldKey: "fullName", value: input.fullName }],
+    });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         actorUserId: user.id,
         action: client_1.AuditAction.CREATE,
@@ -222,6 +228,11 @@ async function registerOrganizationOwner(input, meta) {
                 passwordHash: true,
                 passwordSetupRequired: true,
             },
+        });
+        await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(tx, {
+            entityType: "User",
+            entityId: user.id,
+            fields: [{ fieldKey: "fullName", value: input.fullName }],
         });
         const organizationInput = {
             name: input.name,

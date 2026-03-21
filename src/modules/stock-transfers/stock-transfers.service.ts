@@ -8,6 +8,7 @@ import {
 import { prisma } from "../../config/prisma";
 import { toDecimal } from "../../utils/decimal";
 import { ApiError } from "../../utils/ApiError";
+import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { assertBranchInOrg, assertVariantInOrg } from "../../utils/guards";
 import { generateDocumentNumber } from "../../utils/numbering";
 import { buildPagination, getPagination } from "../../utils/pagination";
@@ -133,6 +134,13 @@ export async function createStockTransfer(
     },
   });
 
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "StockTransfer",
+    entityId: transfer.id,
+    fields: [{ fieldKey: "notes", value: input.notes }],
+  });
+
   await createAuditLog(prisma, {
     organizationId,
     actorUserId,
@@ -230,6 +238,13 @@ export async function updateStockTransfer(
         })),
       });
     }
+
+    await syncEntityFieldTranslations(tx, {
+      organizationId,
+      entityType: "StockTransfer",
+      entityId: transferId,
+      fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
+    });
   });
 
   const updated = await getStockTransferById(organizationId, transferId);

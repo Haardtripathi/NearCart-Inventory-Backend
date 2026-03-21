@@ -7,9 +7,17 @@ const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const decimal_1 = require("../../utils/decimal");
 const ApiError_1 = require("../../utils/ApiError");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
+const localization_1 = require("../../utils/localization");
 const pagination_1 = require("../../utils/pagination");
 const audit_service_1 = require("../audit/audit.service");
-async function listTaxRates(organizationId, query) {
+function serializeTaxRate(taxRate, localeContext, translations = []) {
+    return {
+        ...(0, localization_1.serializeLocalizedEntity)(taxRate, localeContext),
+        displayName: (0, entityFieldTranslations_1.resolveEntityFieldValue)(taxRate.name, translations, "name", localeContext) ?? taxRate.name,
+    };
+}
+async function listTaxRates(organizationId, query, localeContext) {
     const { page, limit, skip } = (0, pagination_1.getPagination)(query.page, query.limit);
     const where = {
         organizationId,
@@ -32,12 +40,19 @@ async function listTaxRates(organizationId, query) {
         }),
         prisma_1.prisma.taxRate.count({ where }),
     ]);
+    const translations = await (0, entityFieldTranslations_1.listEntityFieldTranslations)("TaxRate", items.map((taxRate) => taxRate.id), ["name"]);
+    const translationsByEntityId = new Map();
+    for (const translation of translations) {
+        const bucket = translationsByEntityId.get(translation.entityId) ?? [];
+        bucket.push(translation);
+        translationsByEntityId.set(translation.entityId, bucket);
+    }
     return {
-        items,
+        items: items.map((taxRate) => serializeTaxRate(taxRate, localeContext, translationsByEntityId.get(taxRate.id) ?? [])),
         pagination: (0, pagination_1.buildPagination)(page, limit, totalItems),
     };
 }
-async function createTaxRate(organizationId, actorUserId, input) {
+async function createTaxRate(organizationId, actorUserId, input, localeContext) {
     const taxRate = await prisma_1.prisma.taxRate.create({
         data: {
             organizationId,
@@ -48,6 +63,12 @@ async function createTaxRate(organizationId, actorUserId, input) {
             isActive: input.isActive ?? true,
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        organizationId,
+        entityType: "TaxRate",
+        entityId: taxRate.id,
+        fields: [{ fieldKey: "name", value: input.name }],
+    });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -56,9 +77,9 @@ async function createTaxRate(organizationId, actorUserId, input) {
         entityId: taxRate.id,
         after: taxRate,
     });
-    return taxRate;
+    return serializeTaxRate(taxRate, localeContext);
 }
-async function updateTaxRate(organizationId, taxRateId, actorUserId, input) {
+async function updateTaxRate(organizationId, taxRateId, actorUserId, input, localeContext) {
     const existing = await prisma_1.prisma.taxRate.findFirst({
         where: {
             id: taxRateId,
@@ -78,6 +99,12 @@ async function updateTaxRate(organizationId, taxRateId, actorUserId, input) {
             ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        organizationId,
+        entityType: "TaxRate",
+        entityId: updated.id,
+        fields: [{ fieldKey: "name", value: input.name ?? updated.name }],
+    });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -87,5 +114,5 @@ async function updateTaxRate(organizationId, taxRateId, actorUserId, input) {
         before: existing,
         after: updated,
     });
-    return updated;
+    return serializeTaxRate(updated, localeContext);
 }

@@ -12,6 +12,7 @@ const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const decimal_1 = require("../../utils/decimal");
 const ApiError_1 = require("../../utils/ApiError");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const guards_1 = require("../../utils/guards");
 const json_1 = require("../../utils/json");
 const numbering_1 = require("../../utils/numbering");
@@ -163,6 +164,23 @@ async function createSalesOrder(organizationId, actorUserId, input) {
             customer: true,
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        organizationId,
+        entityType: "SalesOrder",
+        entityId: order.id,
+        fields: [{ fieldKey: "notes", value: input.notes }],
+    });
+    for (const item of order.items) {
+        await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+            organizationId,
+            entityType: "SalesOrderItem",
+            entityId: item.id,
+            fields: [
+                { fieldKey: "productNameSnapshot", value: item.productNameSnapshot },
+                { fieldKey: "variantNameSnapshot", value: item.variantNameSnapshot },
+            ],
+        });
+    }
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -241,8 +259,25 @@ async function updateSalesOrder(organizationId, orderId, actorUserId, input) {
                 })),
             });
         }
+        await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(tx, {
+            organizationId,
+            entityType: "SalesOrder",
+            entityId: orderId,
+            fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
+        });
     });
     const updated = await getSalesOrderById(organizationId, orderId);
+    for (const item of updated.items) {
+        await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+            organizationId,
+            entityType: "SalesOrderItem",
+            entityId: item.id,
+            fields: [
+                { fieldKey: "productNameSnapshot", value: item.productNameSnapshot },
+                { fieldKey: "variantNameSnapshot", value: item.variantNameSnapshot },
+            ],
+        });
+    }
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -317,6 +352,12 @@ async function rejectSalesOrder(organizationId, orderId, actorUserId, rejectionR
             status: client_1.SalesOrderStatus.REJECTED,
             rejectionReason,
         },
+    });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        organizationId,
+        entityType: "SalesOrder",
+        entityId: updated.id,
+        fields: [{ fieldKey: "rejectionReason", value: rejectionReason }],
     });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,

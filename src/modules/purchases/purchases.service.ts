@@ -3,6 +3,7 @@ import { AuditAction, PurchaseReceiptStatus, ReferenceType, StockMovementType } 
 import { prisma } from "../../config/prisma";
 import { toDecimal } from "../../utils/decimal";
 import { ApiError } from "../../utils/ApiError";
+import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { assertBranchInOrg, assertSupplierInOrg, assertVariantInOrg } from "../../utils/guards";
 import { toNullableJsonValue } from "../../utils/json";
 import { generateDocumentNumber } from "../../utils/numbering";
@@ -183,6 +184,13 @@ export async function createPurchase(
     },
   });
 
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "PurchaseReceipt",
+    entityId: purchase.id,
+    fields: [{ fieldKey: "notes", value: input.notes }],
+  });
+
   await createAuditLog(prisma, {
     organizationId,
     actorUserId,
@@ -285,6 +293,13 @@ export async function updatePurchase(
         })),
       });
     }
+
+    await syncEntityFieldTranslations(tx, {
+      organizationId,
+      entityType: "PurchaseReceipt",
+      entityId: purchaseId,
+      fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
+    });
   });
 
   const updated = await getPurchaseById(organizationId, purchaseId);

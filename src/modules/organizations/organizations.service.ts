@@ -12,6 +12,7 @@ import { ApiError } from "../../utils/ApiError";
 import { buildUserActionLink, createUserActionToken } from "../../utils/userActionTokens";
 import { slugify } from "../../utils/slug";
 import { assertIndustryExists, assertOrganizationExists } from "../../utils/guards";
+import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 import { generateUniqueBranchCode } from "../../utils/branchCode";
 
@@ -200,6 +201,12 @@ async function resolveOrganizationOwner(
           },
         });
 
+        await syncEntityFieldTranslations(tx, {
+          entityType: "User",
+          entityId: updatedOwner.id,
+          fields: [{ fieldKey: "fullName", value: input.owner.fullName }],
+        });
+
         return {
           owner: updatedOwner,
           requiresAccountSetup: true,
@@ -229,6 +236,12 @@ async function resolveOrganizationOwner(
         passwordHash: true,
         passwordSetupRequired: true,
       },
+    });
+
+    await syncEntityFieldTranslations(tx, {
+      entityType: "User",
+      entityId: createdOwner.id,
+      fields: [{ fieldKey: "fullName", value: input.owner.fullName }],
     });
 
     return {
@@ -287,9 +300,18 @@ export async function createOrganizationWithResolvedOwner(
       currencyCode: input.currencyCode ?? "INR",
       timezone: input.timezone ?? "Asia/Kolkata",
       defaultLanguage: input.defaultLanguage ?? LanguageCode.EN,
-      enabledLanguages: input.enabledLanguages ?? [LanguageCode.EN, LanguageCode.HI],
+      enabledLanguages: input.enabledLanguages ?? [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU],
       settings: toNullableJsonValue(input.settings),
     },
+  });
+
+  await syncEntityFieldTranslations(tx, {
+    entityType: "Organization",
+    entityId: organization.id,
+    fields: [
+      { fieldKey: "name", value: input.name },
+      { fieldKey: "legalName", value: input.legalName },
+    ],
   });
 
   await tx.organizationIndustryConfig.create({
@@ -336,6 +358,20 @@ export async function createOrganizationWithResolvedOwner(
       country: input.firstBranch.country ?? null,
       postalCode: input.firstBranch.postalCode ?? null,
     },
+  });
+
+  await syncEntityFieldTranslations(tx, {
+    organizationId: organization.id,
+    entityType: "Branch",
+    entityId: firstBranch.id,
+    fields: [
+      { fieldKey: "name", value: input.firstBranch.name },
+      { fieldKey: "addressLine1", value: input.firstBranch.addressLine1 },
+      { fieldKey: "addressLine2", value: input.firstBranch.addressLine2 },
+      { fieldKey: "city", value: input.firstBranch.city },
+      { fieldKey: "state", value: input.firstBranch.state },
+      { fieldKey: "country", value: input.firstBranch.country },
+    ],
   });
 
   await tx.organizationMembership.create({

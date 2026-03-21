@@ -32,8 +32,8 @@ const envSchema = zod_1.z
     UPSTASH_REDIS_REST_TOKEN: zod_1.z.string().trim().min(1).optional(),
     REDIS_KEY_PREFIX: zod_1.z.string().trim().min(1).default("nearcart"),
     LIBRETRANSLATE_URL: zod_1.z.string().trim().url().default("http://127.0.0.1:5000"),
-    AUTO_TRANSLATE_ON_WRITE: booleanFromEnv.default(false),
-    AUTO_TRANSLATE_FAIL_OPEN: booleanFromEnv.default(true),
+    AUTO_TRANSLATE_ON_WRITE: booleanFromEnv.default(true),
+    AUTO_TRANSLATE_FAIL_OPEN: booleanFromEnv.default(false),
     TRANSLATION_CACHE_TTL_SECONDS: zod_1.z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
 })
     .refine((values) => (!!values.UPSTASH_REDIS_REST_URL && !!values.UPSTASH_REDIS_REST_TOKEN) ||

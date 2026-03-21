@@ -6,9 +6,11 @@ exports.translateLanguageCodeText = translateLanguageCodeText;
 const crypto_1 = require("crypto");
 const env_1 = require("../config/env");
 const redis_1 = require("../config/redis");
+const transliteration_1 = require("./transliteration");
 const languageCodeToIso = {
     EN: "en",
     HI: "hi",
+    GU: "gu",
 };
 const SUPPORTED_LANGUAGES_CACHE_TTL_MS = 5 * 60 * 1000;
 let supportedLanguagesCache = null;
@@ -101,6 +103,9 @@ async function translateText(value, targetLanguage, sourceLanguage = "auto") {
         return normalizedValue;
     }
     if (!(await isTranslationAvailable(sourceLanguage, targetLanguage))) {
+        if (!env_1.env.AUTO_TRANSLATE_FAIL_OPEN) {
+            throw new Error(`Translation from ${sourceLanguage} to ${targetLanguage} is not available`);
+        }
         return normalizedValue;
     }
     const redis = (0, redis_1.getRedisClient)();
@@ -132,11 +137,12 @@ async function buildTranslations(value, sourceLanguage = "auto") {
     if (!normalizedValue) {
         throw new Error("Text is required");
     }
-    const [en, hi] = await Promise.all([
+    const [en, hi, gu] = await Promise.all([
         translateText(normalizedValue, "en", sourceLanguage),
         translateText(normalizedValue, "hi", sourceLanguage),
+        translateText(normalizedValue, "gu", sourceLanguage),
     ]);
-    return { en, hi };
+    return { en, hi, gu };
 }
 async function translateLanguageCodeText(value, sourceLanguage, targetLanguage) {
     const normalizedValue = value.trim();
@@ -145,6 +151,10 @@ async function translateLanguageCodeText(value, sourceLanguage, targetLanguage) 
     }
     if (sourceLanguage !== "AUTO" && sourceLanguage === targetLanguage) {
         return normalizedValue;
+    }
+    const glossaryTranslation = (0, transliteration_1.translateRomanizedInventoryText)(normalizedValue, targetLanguage);
+    if (glossaryTranslation) {
+        return glossaryTranslation;
     }
     return translateText(normalizedValue, toIsoLanguage(targetLanguage), sourceLanguage === "AUTO" ? "auto" : toIsoLanguage(sourceLanguage));
 }

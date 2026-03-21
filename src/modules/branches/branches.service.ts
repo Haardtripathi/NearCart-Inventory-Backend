@@ -1,7 +1,25 @@
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { generateUniqueBranchCode } from "../../utils/branchCode";
+import {
+  listEntityFieldTranslations,
+  resolveEntityFieldValue,
+  syncEntityFieldTranslations,
+} from "../../utils/entityFieldTranslations";
+import type { LocaleContext } from "../../utils/localization";
+import { serializeLocalizedEntity } from "../../utils/localization";
 import { buildPagination, getPagination } from "../../utils/pagination";
+
+function serializeBranch<TBranch extends { id: string; name: string }>(
+  branch: TBranch,
+  localeContext: LocaleContext,
+  translations: Array<{ fieldKey: string; language: import("@prisma/client").LanguageCode; value: string }> = [],
+) {
+  return {
+    ...serializeLocalizedEntity(branch, localeContext),
+    displayName: resolveEntityFieldValue(branch.name, translations, "name", localeContext) ?? branch.name,
+  };
+}
 
 export async function listBranches(
   organizationId: string,
@@ -11,6 +29,7 @@ export async function listBranches(
     search?: string;
     isActive?: boolean;
   },
+  localeContext: LocaleContext,
 ) {
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
@@ -39,8 +58,21 @@ export async function listBranches(
     prisma.branch.count({ where }),
   ]);
 
+  const translations = await listEntityFieldTranslations(
+    "Branch",
+    items.map((branch) => branch.id),
+    ["name"],
+  );
+  const translationsByEntityId = new Map<string, typeof translations>();
+
+  for (const translation of translations) {
+    const bucket = translationsByEntityId.get(translation.entityId) ?? [];
+    bucket.push(translation);
+    translationsByEntityId.set(translation.entityId, bucket);
+  }
+
   return {
-    items,
+    items: items.map((branch) => serializeBranch(branch, localeContext, translationsByEntityId.get(branch.id) ?? [])),
     pagination: buildPagination(page, limit, totalItems),
   };
 }
@@ -58,7 +90,7 @@ export async function createBranch(organizationId: string, input: {
   country?: string;
   postalCode?: string;
   isActive?: boolean;
-}) {
+}, localeContext: LocaleContext) {
   // Generate code if not provided
   let code = input.code?.trim();
   
@@ -75,7 +107,7 @@ export async function createBranch(organizationId: string, input: {
     });
   }
 
-  return prisma.branch.create({
+  const branch = await prisma.branch.create({
     data: {
       organizationId,
       code,
@@ -92,9 +124,25 @@ export async function createBranch(organizationId: string, input: {
       isActive: input.isActive ?? true,
     },
   });
+
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "Branch",
+    entityId: branch.id,
+    fields: [
+      { fieldKey: "name", value: input.name },
+      { fieldKey: "addressLine1", value: input.addressLine1 },
+      { fieldKey: "addressLine2", value: input.addressLine2 },
+      { fieldKey: "city", value: input.city },
+      { fieldKey: "state", value: input.state },
+      { fieldKey: "country", value: input.country },
+    ],
+  });
+
+  return serializeBranch(branch, localeContext);
 }
 
-export async function getBranchById(organizationId: string, branchId: string) {
+async function getBranchRecordById(organizationId: string, branchId: string) {
   const branch = await prisma.branch.findFirst({
     where: {
       id: branchId,
@@ -108,6 +156,12 @@ export async function getBranchById(organizationId: string, branchId: string) {
   }
 
   return branch;
+}
+
+export async function getBranchById(organizationId: string, branchId: string, localeContext: LocaleContext) {
+  const branch = await getBranchRecordById(organizationId, branchId);
+  const translations = await listEntityFieldTranslations("Branch", [branch.id], ["name"]);
+  return serializeBranch(branch, localeContext, translations);
 }
 
 export async function updateBranch(
@@ -127,10 +181,11 @@ export async function updateBranch(
     postalCode: string;
     isActive: boolean;
   }>,
+  localeContext: LocaleContext,
 ) {
-  await getBranchById(organizationId, branchId);
+  await getBranchRecordById(organizationId, branchId);
 
-  return prisma.branch.update({
+  const branch = await prisma.branch.update({
     where: { id: branchId },
     data: {
       ...(input.code ? { code: input.code.trim() } : {}),
@@ -147,10 +202,26 @@ export async function updateBranch(
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
     },
   });
+
+  await syncEntityFieldTranslations(prisma, {
+    organizationId,
+    entityType: "Branch",
+    entityId: branch.id,
+    fields: [
+      { fieldKey: "name", value: input.name ?? branch.name },
+      { fieldKey: "addressLine1", value: input.addressLine1 ?? branch.addressLine1 },
+      { fieldKey: "addressLine2", value: input.addressLine2 ?? branch.addressLine2 },
+      { fieldKey: "city", value: input.city ?? branch.city },
+      { fieldKey: "state", value: input.state ?? branch.state },
+      { fieldKey: "country", value: input.country ?? branch.country },
+    ],
+  });
+
+  return serializeBranch(branch, localeContext);
 }
 
 export async function deleteBranch(organizationId: string, branchId: string) {
-  await getBranchById(organizationId, branchId);
+  await getBranchRecordById(organizationId, branchId);
 
   return prisma.branch.update({
     where: { id: branchId },

@@ -8,6 +8,7 @@ const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
 const decimal_1 = require("../../utils/decimal");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const guards_1 = require("../../utils/guards");
 const numbering_1 = require("../../utils/numbering");
 const pagination_1 = require("../../utils/pagination");
@@ -142,6 +143,12 @@ async function applyStockMovement(db, input) {
             batchId: batch?.id ?? null,
             createdById: input.createdById ?? null,
         },
+    });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(db, {
+        organizationId: input.organizationId,
+        entityType: "InventoryLedger",
+        entityId: ledger.id,
+        fields: [{ fieldKey: "note", value: input.note }],
     });
     return {
         balance: updatedBalance,

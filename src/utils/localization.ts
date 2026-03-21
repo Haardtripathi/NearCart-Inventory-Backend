@@ -3,7 +3,7 @@ import { LanguageCode } from "@prisma/client";
 
 import { prisma } from "../config/prisma";
 
-export const SUPPORTED_LANGUAGE_CODES = [LanguageCode.EN, LanguageCode.HI] as const;
+export const SUPPORTED_LANGUAGE_CODES = [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU] as const;
 
 function sanitizeSupportedLanguageCode(value: LanguageCode | null | undefined): LanguageCode | null {
   return value && SUPPORTED_LANGUAGE_CODES.includes(value as (typeof SUPPORTED_LANGUAGE_CODES)[number]) ? value : null;
@@ -63,6 +63,8 @@ export function normalizeLanguageCode(value: string | null | undefined): Languag
       return LanguageCode.EN;
     case "hi":
       return LanguageCode.HI;
+    case "gu":
+      return LanguageCode.GU;
     default:
       return null;
   }

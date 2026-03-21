@@ -10,6 +10,7 @@ const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const decimal_1 = require("../../utils/decimal");
 const ApiError_1 = require("../../utils/ApiError");
+const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const guards_1 = require("../../utils/guards");
 const numbering_1 = require("../../utils/numbering");
 const pagination_1 = require("../../utils/pagination");
@@ -94,6 +95,12 @@ async function createStockTransfer(organizationId, actorUserId, input) {
             toBranch: true,
         },
     });
+    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
+        organizationId,
+        entityType: "StockTransfer",
+        entityId: transfer.id,
+        fields: [{ fieldKey: "notes", value: input.notes }],
+    });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -166,6 +173,12 @@ async function updateStockTransfer(organizationId, transferId, actorUserId, inpu
                 })),
             });
         }
+        await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(tx, {
+            organizationId,
+            entityType: "StockTransfer",
+            entityId: transferId,
+            fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
+        });
     });
     const updated = await getStockTransferById(organizationId, transferId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {

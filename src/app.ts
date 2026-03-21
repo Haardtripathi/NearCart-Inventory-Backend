@@ -11,10 +11,17 @@ import { apiRouter } from "./routes";
 
 export const app = express();
 
+const corsOrigins = env.CORS_ORIGIN.split(",")
+  .map((value) => value.trim())
+  .filter(Boolean)
+  .map((origin) =>
+    /^https?:\/\//i.test(origin) ? origin : `http://${origin}`,
+  );
+
 app.use(helmet());
 app.use(
   cors({
-    origin: env.CORS_ORIGIN.split(",").map((value) => value.trim()),
+    origin: corsOrigins,
     credentials: true,
   }),
 );

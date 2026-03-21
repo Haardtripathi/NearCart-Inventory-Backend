@@ -15,4 +15,10 @@ authRouter.post(
 );
 
 authRouter.post("/login", validateRequest({ body: loginSchema }), asyncHandler(loginController));
+authRouter.post("/logout", authenticate, asyncHandler(async (req, res) => {
+  // For JWT-based auth, logout can be handled on the client side by deleting the token.
+  // Optionally, you can implement token blacklisting here if needed.
+  res.status(204).send();
+}));
+
 authRouter.get("/me", authenticate, asyncHandler(meController));

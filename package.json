@@ -6,7 +6,7 @@
   "main": "dist/src/server.js",
   "type": "commonjs",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "nodemon --signal SIGTERM --watch src --ext ts --exec \"node --import tsx src/server.ts\"",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
     "prisma:generate": "prisma generate",
@@ -32,6 +32,7 @@
     "@types/jsonwebtoken": "^9.0.8",
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.13.10",
+    "nodemon": "^3.1.14",
     "prisma": "^6.5.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"

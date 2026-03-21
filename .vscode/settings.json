@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^fuser -n tcp 5000$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

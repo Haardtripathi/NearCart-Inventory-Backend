@@ -21,6 +21,7 @@ const purchases_route_1 = require("../modules/purchases/purchases.route");
 const sales_orders_route_1 = require("../modules/sales-orders/sales-orders.route");
 const stock_transfers_route_1 = require("../modules/stock-transfers/stock-transfers.route");
 const audit_route_1 = require("../modules/audit/audit.route");
+const users_route_1 = require("../modules/users/users.route");
 exports.apiRouter = (0, express_1.Router)();
 exports.apiRouter.get("/health", (_req, res) => {
     return (0, ApiResponse_1.sendSuccess)(res, 200, "NearCart Inventory backend is healthy", {
@@ -46,3 +47,4 @@ exports.apiRouter.use("/purchases", purchases_route_1.purchasesRouter);
 exports.apiRouter.use("/sales-orders", sales_orders_route_1.salesOrdersRouter);
 exports.apiRouter.use("/stock-transfers", stock_transfers_route_1.stockTransfersRouter);
 exports.apiRouter.use("/audit-logs", audit_route_1.auditRouter);
+exports.apiRouter.use("/users", users_route_1.usersRouter);

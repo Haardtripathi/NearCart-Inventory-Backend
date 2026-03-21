@@ -14,6 +14,12 @@ enum UserRole {
   STAFF
 }
 
+enum MembershipStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
 enum OrganizationStatus {
   ACTIVE
   INACTIVE
@@ -144,6 +150,11 @@ enum AuditAction {
   TRANSFER_APPROVE
 }
 
+enum UserActionTokenPurpose {
+  ACCOUNT_SETUP
+  PASSWORD_RESET
+}
+
 enum StockTransferStatus {
   DRAFT
   APPROVED
@@ -154,14 +165,19 @@ model User {
   id                      String                    @id @default(cuid())
   fullName                String
   email                   String                    @unique
-  passwordHash            String
+  passwordHash            String?
   platformRole            UserRole?
   preferredLanguage       LanguageCode              @default(EN)
   isActive                Boolean                   @default(true)
+  passwordSetupRequired   Boolean                   @default(false)
+  passwordChangedAt       DateTime?
   lastLoginAt             DateTime?
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
   memberships             OrganizationMembership[]
+  invitedMemberships      OrganizationMembership[]  @relation("MembershipInvitedBy")
+  actionTokens            UserActionToken[]         @relation("UserActionTokenUser")
+  createdActionTokens     UserActionToken[]         @relation("UserActionTokenCreatedBy")
   createdProducts         Product[]                 @relation("ProductCreatedBy")
   updatedProducts         Product[]                 @relation("ProductUpdatedBy")
   inventoryLedgers        InventoryLedger[]         @relation("InventoryLedgerCreatedBy")
@@ -211,6 +227,7 @@ model Organization {
   salesOrders      SalesOrder[]
   stockTransfers   StockTransfer[]
   auditLogs        AuditLog[]
+  userActionTokens UserActionToken[]
 
   @@index([deletedAt])
 }
@@ -220,16 +237,42 @@ model OrganizationMembership {
   userId         String
   organizationId String
   role           UserRole
+  status         MembershipStatus @default(ACTIVE)
   isDefault      Boolean      @default(false)
   branchAccess   Json?
+  invitedByUserId String?
+  invitedAt      DateTime?
+  acceptedAt     DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   user           User         @relation(fields: [userId], references: [id])
   organization   Organization @relation(fields: [organizationId], references: [id])
+  invitedBy      User?        @relation("MembershipInvitedBy", fields: [invitedByUserId], references: [id])
 
   @@unique([userId, organizationId])
   @@index([organizationId])
   @@index([userId])
+  @@index([status])
+}
+
+model UserActionToken {
+  id              String                 @id @default(cuid())
+  userId          String
+  createdByUserId String?
+  organizationId  String?
+  purpose         UserActionTokenPurpose
+  tokenHash       String                 @unique
+  expiresAt       DateTime
+  usedAt          DateTime?
+  metadata        Json?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  user            User                   @relation("UserActionTokenUser", fields: [userId], references: [id])
+  createdBy       User?                  @relation("UserActionTokenCreatedBy", fields: [createdByUserId], references: [id])
+  organization    Organization?          @relation(fields: [organizationId], references: [id])
+
+  @@index([userId, purpose, usedAt, expiresAt])
+  @@index([organizationId])
 }
 
 model Industry {
@@ -270,7 +313,7 @@ model OrganizationIndustryConfig {
 model Branch {
   id               String             @id @default(cuid())
   organizationId   String
-  code             String
+  code             String?            // Optional - auto-generated if not provided
   name             String
   type             BranchType
   phone            String?
@@ -334,6 +377,7 @@ model Brand {
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
   products       Product[]
+  translations   BrandTranslation[]
 
   @@unique([organizationId, slug])
   @@index([organizationId, deletedAt])
@@ -530,6 +574,19 @@ model CategoryTranslation {
   category    Category     @relation(fields: [categoryId], references: [id])
 
   @@unique([categoryId, language])
+  @@index([language])
+}
+
+model BrandTranslation {
+  id          String       @id @default(cuid())
+  brandId     String
+  language    LanguageCode
+  name        String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  brand       Brand        @relation(fields: [brandId], references: [id])
+
+  @@unique([brandId, language])
   @@index([language])
 }
 

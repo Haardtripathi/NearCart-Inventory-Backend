@@ -10,4 +10,12 @@ const auth_validation_1 = require("./auth.validation");
 exports.authRouter = (0, express_1.Router)();
 exports.authRouter.post("/bootstrap-super-admin", (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.bootstrapSuperAdminSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.bootstrapSuperAdminController));
 exports.authRouter.post("/login", (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.loginSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.loginController));
+exports.authRouter.post("/register-organization-owner", (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.registerOrganizationOwnerSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.registerOrganizationOwnerController));
+exports.authRouter.post("/complete-account-setup", (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.completeAccountSetupSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.completeAccountSetupController));
+exports.authRouter.post("/reset-password", (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.resetPasswordSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.resetPasswordController));
+exports.authRouter.post("/logout", auth_middleware_1.authenticate, (0, asyncHandler_1.asyncHandler)(async (_req, res) => {
+    res.status(204).send();
+}));
 exports.authRouter.get("/me", auth_middleware_1.authenticate, (0, asyncHandler_1.asyncHandler)(auth_controller_1.meController));
+exports.authRouter.patch("/me/preferences", auth_middleware_1.authenticate, (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.updateMyPreferencesSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.updateMyPreferencesController));
+exports.authRouter.post("/change-password", auth_middleware_1.authenticate, (0, validate_middleware_1.validateRequest)({ body: auth_validation_1.changePasswordSchema }), (0, asyncHandler_1.asyncHandler)(auth_controller_1.changePasswordController));

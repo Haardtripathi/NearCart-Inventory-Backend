@@ -13,5 +13,6 @@ exports.brandsRouter = (0, express_1.Router)();
 exports.brandsRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
 exports.brandsRouter.get("/", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: brands_validation_1.brandQuerySchema }), (0, asyncHandler_1.asyncHandler)(brands_controller_1.listBrandsController));
 exports.brandsRouter.post("/", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: brands_validation_1.createBrandSchema }), (0, asyncHandler_1.asyncHandler)(brands_controller_1.createBrandController));
+exports.brandsRouter.get("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, asyncHandler_1.asyncHandler)(brands_controller_1.getBrandController));
 exports.brandsRouter.patch("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: brands_validation_1.updateBrandSchema }), (0, asyncHandler_1.asyncHandler)(brands_controller_1.updateBrandController));
 exports.brandsRouter.delete("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, asyncHandler_1.asyncHandler)(brands_controller_1.deleteBrandController));

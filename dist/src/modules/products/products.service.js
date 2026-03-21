@@ -19,6 +19,7 @@ const pagination_1 = require("../../utils/pagination");
 const slug_1 = require("../../utils/slug");
 const translations_1 = require("../../utils/translations");
 const json_1 = require("../../utils/json");
+const autoTranslate_1 = require("../../utils/autoTranslate");
 const audit_service_1 = require("../audit/audit.service");
 const productInclude = {
     translations: {
@@ -355,6 +356,12 @@ async function createProduct(organizationId, actorUserId, input, localeContext) 
     await validateVariantReferenceUnits(organizationId, rawVariants);
     ensureRequestVariantUniqueness(rawVariants);
     await ensureVariantUniquenessInDb(organizationId, rawVariants);
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        organizationId,
+        baseName: input.name,
+        baseDescription: input.description,
+        existingTranslations: input.translations,
+    });
     const normalizedVariants = normalizeVariantPayload(input.name, computedHasVariants, rawVariants);
     const slug = (0, slug_1.slugify)(input.slug ?? input.name);
     const productId = await prisma_1.prisma.$transaction(async (tx) => {
@@ -385,7 +392,7 @@ async function createProduct(organizationId, actorUserId, input, localeContext) 
                 updatedById: actorUserId,
             },
         });
-        await upsertProductTranslations(tx, product.id, input.translations ?? []);
+        await upsertProductTranslations(tx, product.id, translations);
         for (const variant of normalizedVariants) {
             await createVariantRecord(tx, organizationId, product.id, variant);
         }

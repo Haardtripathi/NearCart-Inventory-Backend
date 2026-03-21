@@ -13,7 +13,7 @@ export const branchQuerySchema = paginationQuerySchema.extend({
 });
 
 export const createBranchSchema = z.object({
-  code: trimmedString,
+  code: optionalTrimmedString, // Auto-generated if not provided
   name: trimmedString,
   type: z.nativeEnum(BranchType),
   phone: optionalTrimmedString,

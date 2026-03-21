@@ -8,7 +8,7 @@ exports.branchQuerySchema = validation_1.paginationQuerySchema.extend({
     isActive: zod_1.z.coerce.boolean().optional(),
 });
 exports.createBranchSchema = zod_1.z.object({
-    code: validation_1.trimmedString,
+    code: validation_1.optionalTrimmedString, // Auto-generated if not provided
     name: validation_1.trimmedString,
     type: zod_1.z.nativeEnum(client_1.BranchType),
     phone: validation_1.optionalTrimmedString,

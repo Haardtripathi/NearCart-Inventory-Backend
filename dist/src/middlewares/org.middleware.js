@@ -40,6 +40,7 @@ async function requireOrganizationContext(req, _res, next) {
         where: {
             userId: req.auth.userId,
             organizationId,
+            status: client_1.MembershipStatus.ACTIVE,
             organization: {
                 deletedAt: null,
             },

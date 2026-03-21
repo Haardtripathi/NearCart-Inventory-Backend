@@ -7,6 +7,7 @@ exports.updateBranch = updateBranch;
 exports.deleteBranch = deleteBranch;
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
+const branchCode_1 = require("../../utils/branchCode");
 const pagination_1 = require("../../utils/pagination");
 async function listBranches(organizationId, query) {
     const { page, limit, skip } = (0, pagination_1.getPagination)(query.page, query.limit);
@@ -40,10 +41,24 @@ async function listBranches(organizationId, query) {
     };
 }
 async function createBranch(organizationId, input) {
+    // Generate code if not provided
+    let code = input.code?.trim();
+    if (!code) {
+        code = await (0, branchCode_1.generateUniqueBranchCode)(async (candidateCode) => {
+            const existing = await prisma_1.prisma.branch.findFirst({
+                where: {
+                    organizationId,
+                    code: candidateCode,
+                    deletedAt: null,
+                },
+            });
+            return !!existing;
+        });
+    }
     return prisma_1.prisma.branch.create({
         data: {
             organizationId,
-            code: input.code.trim(),
+            code,
             name: input.name.trim(),
             type: input.type,
             phone: input.phone ?? null,

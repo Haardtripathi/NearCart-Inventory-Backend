@@ -1,6 +1,11 @@
 import { app } from "./app";
 import { env } from "./config/env";
 import { prisma } from "./config/prisma";
+import { connectRedis, disconnectRedis } from "./config/redis";
+
+void connectRedis().catch((error) => {
+  console.error("Redis connection failed, running without Redis", error);
+});
 
 const server = app.listen(env.PORT, () => {
   console.log(`NearCart Inventory backend running on port ${env.PORT}`);
@@ -27,6 +32,7 @@ async function shutdown(signal: string, onClosed?: () => void) {
   console.log(`${signal} received, shutting down gracefully`);
   server.close(async () => {
     await prisma.$disconnect();
+    await disconnectRedis();
     if (onClosed) {
       onClosed();
       return;

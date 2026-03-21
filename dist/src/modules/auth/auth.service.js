@@ -5,16 +5,106 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.bootstrapSuperAdmin = bootstrapSuperAdmin;
 exports.login = login;
+exports.registerOrganizationOwner = registerOrganizationOwner;
+exports.completeAccountSetup = completeAccountSetup;
+exports.resetPasswordWithToken = resetPasswordWithToken;
+exports.changePassword = changePassword;
+exports.updateMyPreferences = updateMyPreferences;
 exports.getMe = getMe;
 const client_1 = require("@prisma/client");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const env_1 = require("../../config/env");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
+const branchAccess_1 = require("../../utils/branchAccess");
 const jwt_1 = require("../../utils/jwt");
+const userActionTokens_1 = require("../../utils/userActionTokens");
+const guards_1 = require("../../utils/guards");
+const organizations_service_1 = require("../organizations/organizations.service");
 const audit_service_1 = require("../audit/audit.service");
+function normalizeEmail(email) {
+    return email.trim().toLowerCase();
+}
 function buildTokenPayload(input) {
     return (0, jwt_1.signAuthToken)(input);
+}
+function serializeMemberships(memberships) {
+    return memberships.map((membership) => ({
+        id: membership.id,
+        organizationId: membership.organizationId,
+        role: membership.role,
+        isDefault: membership.isDefault,
+        branchAccess: (0, branchAccess_1.normalizeBranchAccess)(membership.branchAccess),
+        organization: membership.organization,
+    }));
+}
+async function buildAuthenticatedSession(userId, requestedOrganizationId) {
+    const user = await prisma_1.prisma.user.findUnique({
+        where: {
+            id: userId,
+        },
+        include: {
+            memberships: {
+                where: {
+                    status: client_1.MembershipStatus.ACTIVE,
+                    organization: {
+                        deletedAt: null,
+                    },
+                },
+                include: {
+                    organization: {
+                        select: {
+                            id: true,
+                            name: true,
+                            slug: true,
+                            status: true,
+                        },
+                    },
+                },
+                orderBy: {
+                    createdAt: "asc",
+                },
+            },
+        },
+    });
+    if (!user || !user.isActive) {
+        throw ApiError_1.ApiError.unauthorized("User is inactive or does not exist");
+    }
+    let activeOrganizationId = null;
+    let role = user.platformRole === client_1.UserRole.SUPER_ADMIN ? client_1.UserRole.SUPER_ADMIN : null;
+    if (user.platformRole !== client_1.UserRole.SUPER_ADMIN) {
+        const membership = (requestedOrganizationId
+            ? user.memberships.find((item) => item.organizationId === requestedOrganizationId)
+            : user.memberships.find((item) => item.isDefault) ?? user.memberships[0]) ?? null;
+        if (!membership) {
+            throw ApiError_1.ApiError.forbidden("No active organization membership found for this user");
+        }
+        activeOrganizationId = membership.organizationId;
+        role = membership.role;
+    }
+    if (!role) {
+        throw ApiError_1.ApiError.forbidden("Unable to determine role for this user");
+    }
+    const token = buildTokenPayload({
+        userId: user.id,
+        activeOrganizationId,
+        role,
+    });
+    return {
+        token,
+        user: {
+            id: user.id,
+            fullName: user.fullName,
+            email: user.email,
+            platformRole: user.platformRole,
+            preferredLanguage: user.preferredLanguage,
+            isActive: user.isActive,
+            lastLoginAt: user.lastLoginAt,
+        },
+        activeOrganizationId,
+        role,
+        memberships: serializeMemberships(user.memberships),
+    };
 }
 async function bootstrapSuperAdmin(input, meta) {
     if (input.secret !== env_1.env.ADMIN_BOOTSTRAP_SECRET) {
@@ -33,9 +123,11 @@ async function bootstrapSuperAdmin(input, meta) {
     const user = await prisma_1.prisma.user.create({
         data: {
             fullName: input.fullName.trim(),
-            email: input.email.trim().toLowerCase(),
+            email: normalizeEmail(input.email),
             passwordHash,
             platformRole: client_1.UserRole.SUPER_ADMIN,
+            passwordSetupRequired: false,
+            passwordChangedAt: new Date(),
         },
         select: {
             id: true,
@@ -60,98 +152,259 @@ async function bootstrapSuperAdmin(input, meta) {
 async function login(input, meta) {
     const user = await prisma_1.prisma.user.findUnique({
         where: {
-            email: input.email.trim().toLowerCase(),
+            email: normalizeEmail(input.email),
         },
-        include: {
-            memberships: {
-                include: {
-                    organization: {
-                        select: {
-                            id: true,
-                            name: true,
-                            slug: true,
-                            status: true,
-                            deletedAt: true,
-                        },
-                    },
-                },
-                orderBy: {
-                    createdAt: "asc",
-                },
-            },
+        select: {
+            id: true,
+            isActive: true,
+            passwordHash: true,
+            passwordSetupRequired: true,
         },
     });
-    if (!user || !user.isActive) {
-        throw ApiError_1.ApiError.unauthorized("Invalid email or password");
+    if (!user || !user.isActive || !user.passwordHash) {
+        throw ApiError_1.ApiError.unauthorized(user?.passwordSetupRequired ? "Account setup is required before login" : "Invalid email or password");
     }
     const passwordMatches = await bcrypt_1.default.compare(input.password, user.passwordHash);
     if (!passwordMatches) {
         throw ApiError_1.ApiError.unauthorized("Invalid email or password");
     }
-    const activeMemberships = user.memberships.filter((membership) => membership.organization.deletedAt === null);
-    let activeOrganizationId = null;
-    let role = user.platformRole === client_1.UserRole.SUPER_ADMIN ? client_1.UserRole.SUPER_ADMIN : null;
-    if (user.platformRole !== client_1.UserRole.SUPER_ADMIN) {
-        const membership = (input.organizationId
-            ? activeMemberships.find((item) => item.organizationId === input.organizationId)
-            : activeMemberships.find((item) => item.isDefault) ?? activeMemberships[0]) ?? null;
-        if (!membership) {
-            throw ApiError_1.ApiError.forbidden("No organization membership found for this user");
-        }
-        activeOrganizationId = membership.organizationId;
-        role = membership.role;
-    }
-    if (role === null) {
-        throw ApiError_1.ApiError.forbidden("Unable to determine role for this user");
-    }
     await prisma_1.prisma.user.update({
         where: { id: user.id },
         data: { lastLoginAt: new Date() },
     });
-    const token = buildTokenPayload({
-        userId: user.id,
-        activeOrganizationId,
-        role,
-    });
+    const session = await buildAuthenticatedSession(user.id, input.organizationId ?? null);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
-        organizationId: activeOrganizationId,
+        organizationId: session.activeOrganizationId,
         actorUserId: user.id,
         action: client_1.AuditAction.LOGIN,
         entityType: "User",
         entityId: user.id,
         meta: {
-            activeOrganizationId,
-            role,
+            activeOrganizationId: session.activeOrganizationId,
+            role: session.role,
         },
         ipAddress: meta.ipAddress,
         userAgent: meta.userAgent,
     });
-    return {
-        token,
-        user: {
-            id: user.id,
-            fullName: user.fullName,
-            email: user.email,
-            platformRole: user.platformRole,
-            preferredLanguage: user.preferredLanguage,
-            lastLoginAt: user.lastLoginAt,
+    return session;
+}
+async function registerOrganizationOwner(input, meta) {
+    const email = normalizeEmail(input.email);
+    const existingUser = await prisma_1.prisma.user.findUnique({
+        where: {
+            email,
         },
-        activeOrganizationId,
-        role,
-        memberships: activeMemberships.map((membership) => ({
-            id: membership.id,
-            organizationId: membership.organizationId,
-            role: membership.role,
-            isDefault: membership.isDefault,
-            organization: membership.organization,
-        })),
+        select: {
+            id: true,
+        },
+    });
+    if (existingUser) {
+        throw ApiError_1.ApiError.conflict("An account with this email already exists");
+    }
+    const industry = await (0, guards_1.assertIndustryExists)(prisma_1.prisma, input.primaryIndustryId);
+    const passwordHash = await bcrypt_1.default.hash(input.password, 12);
+    const created = await prisma_1.prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+            data: {
+                fullName: input.fullName.trim(),
+                email,
+                passwordHash,
+                preferredLanguage: input.preferredLanguage ?? input.defaultLanguage ?? client_1.LanguageCode.EN,
+                isActive: true,
+                passwordSetupRequired: false,
+                passwordChangedAt: new Date(),
+            },
+            select: {
+                id: true,
+                fullName: true,
+                email: true,
+                preferredLanguage: true,
+                passwordHash: true,
+                passwordSetupRequired: true,
+            },
+        });
+        const organizationInput = {
+            name: input.name,
+            slug: input.slug,
+            legalName: input.legalName,
+            phone: input.phone,
+            email: input.organizationEmail,
+            currencyCode: input.currencyCode,
+            timezone: input.timezone,
+            defaultLanguage: input.defaultLanguage,
+            enabledLanguages: input.enabledLanguages,
+            settings: input.settings,
+            primaryIndustryId: input.primaryIndustryId,
+            enabledFeatures: input.enabledFeatures,
+            customSettings: input.customSettings,
+            firstBranch: input.firstBranch,
+        };
+        const organization = await (0, organizations_service_1.createOrganizationWithResolvedOwner)(tx, organizationInput, {
+            actorUserId: user.id,
+            primaryIndustry: industry,
+            owner: user,
+            ownerRequiresAccountSetup: false,
+        });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            actorUserId: user.id,
+            organizationId: organization.organization.id,
+            action: client_1.AuditAction.CREATE,
+            entityType: "User",
+            entityId: user.id,
+            after: {
+                id: user.id,
+                email: user.email,
+            },
+            ipAddress: meta.ipAddress,
+            userAgent: meta.userAgent,
+        });
+        return {
+            userId: user.id,
+            organizationId: organization.organization.id,
+        };
+    });
+    await prisma_1.prisma.user.update({
+        where: {
+            id: created.userId,
+        },
+        data: {
+            lastLoginAt: new Date(),
+        },
+    });
+    const session = await buildAuthenticatedSession(created.userId, created.organizationId);
+    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+        organizationId: created.organizationId,
+        actorUserId: created.userId,
+        action: client_1.AuditAction.LOGIN,
+        entityType: "User",
+        entityId: created.userId,
+        meta: {
+            activeOrganizationId: created.organizationId,
+            role: session.role,
+            source: "registration",
+        },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+    });
+    return session;
+}
+async function completeCredentialFlow(token, purpose, password, meta) {
+    const tokenRecord = await (0, userActionTokens_1.getUserActionTokenByRawToken)(prisma_1.prisma, token, purpose);
+    if (!tokenRecord || !tokenRecord.user.isActive) {
+        throw ApiError_1.ApiError.unauthorized("This link is invalid or has expired");
+    }
+    const passwordHash = await bcrypt_1.default.hash(password, 12);
+    const now = new Date();
+    await prisma_1.prisma.$transaction(async (tx) => {
+        await tx.user.update({
+            where: {
+                id: tokenRecord.userId,
+            },
+            data: {
+                passwordHash,
+                passwordSetupRequired: false,
+                passwordChangedAt: now,
+                lastLoginAt: now,
+            },
+        });
+        if (purpose === client_1.UserActionTokenPurpose.ACCOUNT_SETUP) {
+            await tx.organizationMembership.updateMany({
+                where: {
+                    userId: tokenRecord.userId,
+                    status: client_1.MembershipStatus.INVITED,
+                },
+                data: {
+                    status: client_1.MembershipStatus.ACTIVE,
+                    acceptedAt: now,
+                },
+            });
+        }
+        await (0, userActionTokens_1.markUserActionTokenUsed)(tx, tokenRecord.id);
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId: tokenRecord.organizationId,
+            actorUserId: tokenRecord.userId,
+            action: client_1.AuditAction.UPDATE,
+            entityType: "User",
+            entityId: tokenRecord.userId,
+            after: {
+                purpose,
+                completedAt: now,
+            },
+            ipAddress: meta.ipAddress,
+            userAgent: meta.userAgent,
+        });
+    });
+    return buildAuthenticatedSession(tokenRecord.userId, tokenRecord.organizationId ?? null);
+}
+async function completeAccountSetup(input, meta) {
+    return completeCredentialFlow(input.token, client_1.UserActionTokenPurpose.ACCOUNT_SETUP, input.password, meta);
+}
+async function resetPasswordWithToken(input, meta) {
+    return completeCredentialFlow(input.token, client_1.UserActionTokenPurpose.PASSWORD_RESET, input.password, meta);
+}
+async function changePassword(userId, input) {
+    const user = await prisma_1.prisma.user.findUnique({
+        where: {
+            id: userId,
+        },
+        select: {
+            id: true,
+            passwordHash: true,
+        },
+    });
+    if (!user?.passwordHash) {
+        throw ApiError_1.ApiError.badRequest("Password is not available for this account");
+    }
+    const passwordMatches = await bcrypt_1.default.compare(input.currentPassword, user.passwordHash);
+    if (!passwordMatches) {
+        throw ApiError_1.ApiError.unauthorized("Current password is incorrect");
+    }
+    const passwordHash = await bcrypt_1.default.hash(input.newPassword, 12);
+    await prisma_1.prisma.user.update({
+        where: {
+            id: userId,
+        },
+        data: {
+            passwordHash,
+            passwordSetupRequired: false,
+            passwordChangedAt: new Date(),
+        },
+    });
+    return {
+        success: true,
     };
+}
+async function updateMyPreferences(userId, input) {
+    const user = await prisma_1.prisma.user.update({
+        where: {
+            id: userId,
+        },
+        data: {
+            preferredLanguage: input.preferredLanguage,
+        },
+        select: {
+            id: true,
+            fullName: true,
+            email: true,
+            isActive: true,
+            platformRole: true,
+            preferredLanguage: true,
+            lastLoginAt: true,
+        },
+    });
+    return user;
 }
 async function getMe(userId, activeOrganizationId, role) {
     const user = await prisma_1.prisma.user.findUnique({
         where: { id: userId },
         include: {
             memberships: {
+                where: {
+                    status: client_1.MembershipStatus.ACTIVE,
+                    organization: {
+                        deletedAt: null,
+                    },
+                },
                 include: {
                     organization: {
                         select: {
@@ -180,13 +433,7 @@ async function getMe(userId, activeOrganizationId, role) {
         preferredLanguage: user.preferredLanguage,
         activeOrganizationId,
         role,
-        memberships: user.memberships.map((membership) => ({
-            id: membership.id,
-            organizationId: membership.organizationId,
-            role: membership.role,
-            isDefault: membership.isDefault,
-            branchAccess: membership.branchAccess,
-            organization: membership.organization,
-        })),
+        memberships: serializeMemberships(user.memberships),
+        lastLoginAt: user.lastLoginAt,
     };
 }

@@ -19,6 +19,7 @@ import { purchasesRouter } from "../modules/purchases/purchases.route";
 import { salesOrdersRouter } from "../modules/sales-orders/sales-orders.route";
 import { stockTransfersRouter } from "../modules/stock-transfers/stock-transfers.route";
 import { auditRouter } from "../modules/audit/audit.route";
+import { usersRouter } from "../modules/users/users.route";
 
 export const apiRouter = Router();
 
@@ -47,3 +48,4 @@ apiRouter.use("/purchases", purchasesRouter);
 apiRouter.use("/sales-orders", salesOrdersRouter);
 apiRouter.use("/stock-transfers", stockTransfersRouter);
 apiRouter.use("/audit-logs", auditRouter);
+apiRouter.use("/users", usersRouter);

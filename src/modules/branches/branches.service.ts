@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
+import { generateUniqueBranchCode } from "../../utils/branchCode";
 import { buildPagination, getPagination } from "../../utils/pagination";
 
 export async function listBranches(
@@ -45,7 +46,7 @@ export async function listBranches(
 }
 
 export async function createBranch(organizationId: string, input: {
-  code: string;
+  code?: string; // Optional - auto-generated if not provided
   name: string;
   type: "STORE" | "WAREHOUSE" | "DARK_STORE";
   phone?: string;
@@ -58,10 +59,26 @@ export async function createBranch(organizationId: string, input: {
   postalCode?: string;
   isActive?: boolean;
 }) {
+  // Generate code if not provided
+  let code = input.code?.trim();
+  
+  if (!code) {
+    code = await generateUniqueBranchCode(async (candidateCode) => {
+      const existing = await prisma.branch.findFirst({
+        where: {
+          organizationId,
+          code: candidateCode,
+          deletedAt: null,
+        },
+      });
+      return !!existing;
+    });
+  }
+
   return prisma.branch.create({
     data: {
       organizationId,
-      code: input.code.trim(),
+      code,
       name: input.name.trim(),
       type: input.type,
       phone: input.phone ?? null,

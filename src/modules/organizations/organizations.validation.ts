@@ -23,6 +23,12 @@ const branchInputSchema = z.object({
   postalCode: optionalTrimmedString,
 });
 
+const ownerInputSchema = z.object({
+  fullName: trimmedString,
+  email: z.string().trim().email(),
+  preferredLanguage: z.nativeEnum(LanguageCode).optional(),
+});
+
 export const createOrganizationSchema = z.object({
   name: trimmedString,
   slug: optionalTrimmedString,
@@ -36,10 +42,19 @@ export const createOrganizationSchema = z.object({
   enabledLanguages: uniqueLanguageArraySchema(languageCodeSchema).optional(),
   settings: z.unknown().optional(),
   ownerUserId: optionalTrimmedString,
+  owner: ownerInputSchema.optional(),
   primaryIndustryId: trimmedString,
   enabledFeatures: z.record(z.any()).optional(),
   customSettings: z.unknown().optional(),
   firstBranch: branchInputSchema,
+}).superRefine((value, ctx) => {
+  if (value.ownerUserId && value.owner) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide either ownerUserId or owner details, not both",
+      path: ["owner"],
+    });
+  }
 });
 
 export const addOrganizationIndustrySchema = z.object({

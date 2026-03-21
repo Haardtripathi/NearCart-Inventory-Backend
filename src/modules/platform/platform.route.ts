@@ -9,17 +9,17 @@ import { createIndustrySchema, industriesQuerySchema, updateIndustrySchema } fro
 
 export const platformRouter = Router();
 
-platformRouter.use(authenticate);
-
 platformRouter.get("/industries", validateRequest({ query: industriesQuerySchema }), asyncHandler(getIndustriesController));
 platformRouter.post(
   "/industries",
+  authenticate,
   requireRoles(UserRole.SUPER_ADMIN),
   validateRequest({ body: createIndustrySchema }),
   asyncHandler(createIndustryController),
 );
 platformRouter.patch(
   "/industries/:id",
+  authenticate,
   requireRoles(UserRole.SUPER_ADMIN),
   validateRequest({ body: updateIndustrySchema }),
   asyncHandler(updateIndustryController),

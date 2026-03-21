@@ -9,6 +9,7 @@ import { slugify } from "../../utils/slug";
 import { assertCategoryInOrg } from "../../utils/guards";
 import { toNullableJsonValue } from "../../utils/json";
 import { upsertTranslations } from "../../utils/translations";
+import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
 import { createAuditLog } from "../audit/audit.service";
 
 interface CategoryTranslationInput {
@@ -237,6 +238,13 @@ export async function createCategory(
     await assertCategoryInOrg(prisma, organizationId, input.parentId);
   }
 
+  const translations = await enrichWithAutoTranslations<CategoryTranslationInput>({
+    organizationId,
+    baseName: input.name,
+    baseDescription: input.description,
+    existingTranslations: input.translations,
+  });
+
   const category = await prisma.$transaction(async (tx) => {
     const created = await tx.category.create({
       data: {
@@ -251,9 +259,9 @@ export async function createCategory(
       },
     });
 
-    if (input.translations?.length) {
+    if (translations.length) {
       await tx.categoryTranslation.createMany({
-        data: input.translations.map((translation) => ({
+        data: translations.map((translation) => ({
           categoryId: created.id,
           language: translation.language,
           name: translation.name.trim(),

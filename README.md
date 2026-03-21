@@ -56,7 +56,19 @@ JWT_SECRET=
 JWT_EXPIRES_IN=7d
 ADMIN_BOOTSTRAP_SECRET=
 CORS_ORIGIN=http://localhost:5173
+REDIS_URL=redis://localhost:6379
+REDIS_KEY_PREFIX=nearcart
+LIBRETRANSLATE_ENDPOINT=https://libretranslate.com
+LIBRETRANSLATE_API_KEY=
+AUTO_TRANSLATE_ON_WRITE=false
+AUTO_TRANSLATE_FAIL_OPEN=true
+TRANSLATION_CACHE_TTL_SECONDS=2592000
 ```
+
+Notes:
+
+- `AUTO_TRANSLATE_ON_WRITE=true` will auto-generate missing translations for newly created entities and persist them.
+- Redis is optional but recommended for rate-limit consistency and translation cache.
 
 ## Bootstrap Super Admin
 

@@ -1,12 +1,20 @@
-import { LanguageCode, OrganizationStatus, UserRole } from "@prisma/client";
+import {
+  LanguageCode,
+  MembershipStatus,
+  OrganizationStatus,
+  UserActionTokenPurpose,
+  UserRole,
+} from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
+import type { DbClient } from "../../types/prisma";
 import { ApiError } from "../../utils/ApiError";
+import { buildUserActionLink, createUserActionToken } from "../../utils/userActionTokens";
 import { slugify } from "../../utils/slug";
 import { assertIndustryExists, assertOrganizationExists } from "../../utils/guards";
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 
-interface CreateOrganizationInput {
+export interface CreateOrganizationInput {
   name: string;
   slug?: string;
   legalName?: string;
@@ -19,6 +27,11 @@ interface CreateOrganizationInput {
   enabledLanguages?: LanguageCode[];
   settings?: unknown;
   ownerUserId?: string;
+  owner?: {
+    fullName: string;
+    email: string;
+    preferredLanguage?: LanguageCode;
+  };
   primaryIndustryId: string;
   enabledFeatures?: Record<string, unknown>;
   customSettings?: unknown;
@@ -44,6 +57,19 @@ interface AddOrganizationIndustryInput {
   customSettings?: unknown;
 }
 
+interface ResolvedOrganizationOwner {
+  id: string;
+  fullName: string;
+  email: string;
+  preferredLanguage: LanguageCode;
+  passwordHash: string | null;
+  passwordSetupRequired: boolean;
+}
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
 async function assertOrganizationManageAccess(
   requesterUserId: string,
   requesterRole: UserRole,
@@ -57,6 +83,10 @@ async function assertOrganizationManageAccess(
     where: {
       userId: requesterUserId,
       organizationId,
+      status: MembershipStatus.ACTIVE,
+      user: {
+        isActive: true,
+      },
     },
     select: {
       role: true,
@@ -68,89 +98,296 @@ async function assertOrganizationManageAccess(
   }
 }
 
+async function resolveOrganizationOwner(
+  tx: DbClient,
+  currentUserId: string,
+  currentRole: UserRole,
+  input: CreateOrganizationInput,
+) {
+  if (currentRole !== UserRole.SUPER_ADMIN) {
+    const currentUser = await tx.user.findUnique({
+      where: { id: currentUserId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        preferredLanguage: true,
+        isActive: true,
+        passwordHash: true,
+        passwordSetupRequired: true,
+      },
+    });
+
+    if (!currentUser) {
+      throw ApiError.notFound("Owner user not found");
+    }
+
+    return {
+      owner: currentUser,
+      requiresAccountSetup: false,
+    };
+  }
+
+  if (input.ownerUserId) {
+    const owner = await tx.user.findUnique({
+      where: { id: input.ownerUserId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        preferredLanguage: true,
+        isActive: true,
+        passwordHash: true,
+        passwordSetupRequired: true,
+      },
+    });
+
+    if (!owner) {
+      throw ApiError.notFound("Owner user not found");
+    }
+
+    if (!owner.isActive) {
+      throw ApiError.conflict("Selected owner account is inactive");
+    }
+
+    return {
+      owner,
+      requiresAccountSetup: !owner.passwordHash,
+    };
+  }
+
+  if (input.owner) {
+    const email = normalizeEmail(input.owner.email);
+    const existingOwner = await tx.user.findUnique({
+      where: {
+        email,
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        preferredLanguage: true,
+        isActive: true,
+        passwordHash: true,
+        passwordSetupRequired: true,
+      },
+    });
+
+    if (existingOwner) {
+      if (!existingOwner.isActive) {
+        throw ApiError.conflict("Selected owner account is inactive");
+      }
+
+      if (!existingOwner.passwordHash) {
+        const updatedOwner = await tx.user.update({
+          where: {
+            id: existingOwner.id,
+          },
+          data: {
+            fullName: input.owner.fullName.trim(),
+            preferredLanguage: input.owner.preferredLanguage ?? existingOwner.preferredLanguage,
+            passwordSetupRequired: true,
+          },
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            preferredLanguage: true,
+            isActive: true,
+            passwordHash: true,
+            passwordSetupRequired: true,
+          },
+        });
+
+        return {
+          owner: updatedOwner,
+          requiresAccountSetup: true,
+        };
+      }
+
+      return {
+        owner: existingOwner,
+        requiresAccountSetup: false,
+      };
+    }
+
+    const createdOwner = await tx.user.create({
+      data: {
+        fullName: input.owner.fullName.trim(),
+        email,
+        preferredLanguage: input.owner.preferredLanguage ?? LanguageCode.EN,
+        isActive: true,
+        passwordSetupRequired: true,
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        preferredLanguage: true,
+        isActive: true,
+        passwordHash: true,
+        passwordSetupRequired: true,
+      },
+    });
+
+    return {
+      owner: createdOwner,
+      requiresAccountSetup: true,
+    };
+  }
+
+  const currentUser = await tx.user.findUnique({
+    where: { id: currentUserId },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      preferredLanguage: true,
+      isActive: true,
+      passwordHash: true,
+      passwordSetupRequired: true,
+    },
+  });
+
+  if (!currentUser) {
+    throw ApiError.notFound("Owner user not found");
+  }
+
+  return {
+    owner: currentUser,
+    requiresAccountSetup: false,
+  };
+}
+
+export async function createOrganizationWithResolvedOwner(
+  tx: DbClient,
+  input: CreateOrganizationInput,
+  options: {
+    actorUserId: string;
+    primaryIndustry: Awaited<ReturnType<typeof assertIndustryExists>>;
+    owner: ResolvedOrganizationOwner;
+    ownerRequiresAccountSetup: boolean;
+  },
+) {
+  const ownerMembershipCount = await tx.organizationMembership.count({
+    where: {
+      userId: options.owner.id,
+    },
+  });
+
+  const organization = await tx.organization.create({
+    data: {
+      name: input.name.trim(),
+      slug: slugify(input.slug ?? input.name),
+      legalName: input.legalName ?? null,
+      phone: input.phone ?? null,
+      email: input.email ?? null,
+      status: input.status ?? OrganizationStatus.ACTIVE,
+      currencyCode: input.currencyCode ?? "INR",
+      timezone: input.timezone ?? "Asia/Kolkata",
+      defaultLanguage: input.defaultLanguage ?? LanguageCode.EN,
+      enabledLanguages: input.enabledLanguages ?? [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU],
+      settings: toNullableJsonValue(input.settings),
+    },
+  });
+
+  await tx.organizationIndustryConfig.create({
+    data: {
+      organizationId: organization.id,
+      industryId: options.primaryIndustry.id,
+      isPrimary: true,
+      enabledFeatures: toJsonValue(input.enabledFeatures ?? options.primaryIndustry.defaultFeatures)!,
+      customSettings: toNullableJsonValue(input.customSettings ?? options.primaryIndustry.defaultSettings),
+    },
+  });
+
+  const firstBranch = await tx.branch.create({
+    data: {
+      organizationId: organization.id,
+      code: input.firstBranch.code.trim(),
+      name: input.firstBranch.name.trim(),
+      type: input.firstBranch.type,
+      phone: input.firstBranch.phone ?? null,
+      email: input.firstBranch.email ?? null,
+      addressLine1: input.firstBranch.addressLine1 ?? null,
+      addressLine2: input.firstBranch.addressLine2 ?? null,
+      city: input.firstBranch.city ?? null,
+      state: input.firstBranch.state ?? null,
+      country: input.firstBranch.country ?? null,
+      postalCode: input.firstBranch.postalCode ?? null,
+    },
+  });
+
+  await tx.organizationMembership.create({
+    data: {
+      userId: options.owner.id,
+      organizationId: organization.id,
+      role: UserRole.ORG_ADMIN,
+      status: options.ownerRequiresAccountSetup ? MembershipStatus.INVITED : MembershipStatus.ACTIVE,
+      isDefault: ownerMembershipCount === 0,
+      invitedByUserId: options.ownerRequiresAccountSetup ? options.actorUserId : null,
+      invitedAt: options.ownerRequiresAccountSetup ? new Date() : null,
+      acceptedAt: options.ownerRequiresAccountSetup ? null : new Date(),
+    },
+  });
+
+  const ownerAccessLink = options.ownerRequiresAccountSetup
+    ? await createUserActionToken(tx, {
+        userId: options.owner.id,
+        createdByUserId: options.actorUserId,
+        organizationId: organization.id,
+        purpose: UserActionTokenPurpose.ACCOUNT_SETUP,
+        expiresInHours: 24 * 7,
+        metadata: {
+          organizationId: organization.id,
+        },
+      })
+    : null;
+
+  return {
+    organization,
+    firstBranch,
+    primaryIndustry: options.primaryIndustry,
+    ownerUser: {
+      id: options.owner.id,
+      fullName: options.owner.fullName,
+      email: options.owner.email,
+      preferredLanguage: options.owner.preferredLanguage,
+      requiresAccountSetup: options.ownerRequiresAccountSetup,
+    },
+    ownerAccessLink: ownerAccessLink
+      ? {
+          purpose: UserActionTokenPurpose.ACCOUNT_SETUP,
+          token: ownerAccessLink.rawToken,
+          url: buildUserActionLink("/account-setup", ownerAccessLink.rawToken),
+          expiresAt: ownerAccessLink.record.expiresAt,
+        }
+      : null,
+  };
+}
+
 export async function createOrganization(
   currentUserId: string,
   currentRole: UserRole,
   input: CreateOrganizationInput,
 ) {
   const industry = await assertIndustryExists(prisma, input.primaryIndustryId);
-  const ownerUserId =
-    currentRole === UserRole.SUPER_ADMIN && input.ownerUserId ? input.ownerUserId : currentUserId;
-
-  const owner = await prisma.user.findUnique({
-    where: { id: ownerUserId },
-    select: { id: true },
-  });
-
-  if (!owner) {
-    throw ApiError.notFound("Owner user not found");
-  }
-
-  const ownerMembershipCount = await prisma.organizationMembership.count({
-    where: {
-      userId: ownerUserId,
-    },
-  });
-
-  const slug = slugify(input.slug ?? input.name);
 
   return prisma.$transaction(async (tx) => {
-    const organization = await tx.organization.create({
-      data: {
-        name: input.name.trim(),
-        slug,
-        legalName: input.legalName ?? null,
-        phone: input.phone ?? null,
-        email: input.email ?? null,
-        status: input.status ?? OrganizationStatus.ACTIVE,
-        currencyCode: input.currencyCode ?? "INR",
-        timezone: input.timezone ?? "Asia/Kolkata",
-        defaultLanguage: input.defaultLanguage ?? LanguageCode.EN,
-        enabledLanguages: input.enabledLanguages ?? [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU],
-        settings: toNullableJsonValue(input.settings),
-      },
-    });
-
-    await tx.organizationIndustryConfig.create({
-      data: {
-        organizationId: organization.id,
-        industryId: industry.id,
-        isPrimary: true,
-        enabledFeatures: toJsonValue(input.enabledFeatures ?? industry.defaultFeatures)!,
-        customSettings: toNullableJsonValue(input.customSettings ?? industry.defaultSettings),
-      },
-    });
-
-    const firstBranch = await tx.branch.create({
-      data: {
-        organizationId: organization.id,
-        code: input.firstBranch.code.trim(),
-        name: input.firstBranch.name.trim(),
-        type: input.firstBranch.type,
-        phone: input.firstBranch.phone ?? null,
-        email: input.firstBranch.email ?? null,
-        addressLine1: input.firstBranch.addressLine1 ?? null,
-        addressLine2: input.firstBranch.addressLine2 ?? null,
-        city: input.firstBranch.city ?? null,
-        state: input.firstBranch.state ?? null,
-        country: input.firstBranch.country ?? null,
-        postalCode: input.firstBranch.postalCode ?? null,
-      },
-    });
-
-    await tx.organizationMembership.create({
-      data: {
-        userId: ownerUserId,
-        organizationId: organization.id,
-        role: UserRole.ORG_ADMIN,
-        isDefault: ownerMembershipCount === 0,
-      },
+    const ownerResolution = await resolveOrganizationOwner(tx, currentUserId, currentRole, input);
+    const created = await createOrganizationWithResolvedOwner(tx, input, {
+      actorUserId: currentUserId,
+      primaryIndustry: industry,
+      owner: ownerResolution.owner,
+      ownerRequiresAccountSetup: ownerResolution.requiresAccountSetup,
     });
 
     return {
-      ...organization,
-      firstBranch,
-      primaryIndustry: industry,
+      ...created.organization,
+      firstBranch: created.firstBranch,
+      primaryIndustry: created.primaryIndustry,
+      ownerUser: created.ownerUser,
+      ownerAccessLink: created.ownerAccessLink,
     };
   });
 }
@@ -159,6 +396,10 @@ export async function getMyOrganizations(userId: string) {
   const memberships = await prisma.organizationMembership.findMany({
     where: {
       userId,
+      status: MembershipStatus.ACTIVE,
+      user: {
+        isActive: true,
+      },
       organization: {
         deletedAt: null,
       },
@@ -196,6 +437,10 @@ export async function getOrganizationById(requesterUserId: string, requesterRole
       where: {
         userId: requesterUserId,
         organizationId,
+        status: MembershipStatus.ACTIVE,
+        user: {
+          isActive: true,
+        },
       },
       select: { id: true },
     });

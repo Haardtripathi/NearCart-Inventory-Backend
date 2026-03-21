@@ -8,6 +8,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import {
   createBrandController,
   deleteBrandController,
+  getBrandController,
   listBrandsController,
   updateBrandController,
 } from "./brands.controller";
@@ -19,5 +20,6 @@ brandsRouter.use(authenticate, requireOrganizationContext);
 
 brandsRouter.get("/", requireRoles(...READ_WRITE_STAFF_ROLES), validateRequest({ query: brandQuerySchema }), asyncHandler(listBrandsController));
 brandsRouter.post("/", requireRoles(...MANAGER_ROLES), validateRequest({ body: createBrandSchema }), asyncHandler(createBrandController));
+brandsRouter.get("/:id", requireRoles(...READ_WRITE_STAFF_ROLES), asyncHandler(getBrandController));
 brandsRouter.patch("/:id", requireRoles(...MANAGER_ROLES), validateRequest({ body: updateBrandSchema }), asyncHandler(updateBrandController));
 brandsRouter.delete("/:id", requireRoles(...MANAGER_ROLES), asyncHandler(deleteBrandController));

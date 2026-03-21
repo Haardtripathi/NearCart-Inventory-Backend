@@ -27,6 +27,7 @@ import { slugify } from "../../utils/slug";
 import { upsertTranslations } from "../../utils/translations";
 import { toNullableJsonValue } from "../../utils/json";
 import type { DbClient } from "../../types/prisma";
+import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
 import { createAuditLog } from "../audit/audit.service";
 
 interface ProductTranslationInput {
@@ -543,6 +544,13 @@ export async function createProduct(
   ensureRequestVariantUniqueness(rawVariants);
   await ensureVariantUniquenessInDb(organizationId, rawVariants);
 
+  const translations = await enrichWithAutoTranslations<ProductTranslationInput>({
+    organizationId,
+    baseName: input.name,
+    baseDescription: input.description,
+    existingTranslations: input.translations,
+  });
+
   const normalizedVariants = normalizeVariantPayload(input.name, computedHasVariants, rawVariants);
   const slug = slugify(input.slug ?? input.name);
 
@@ -575,7 +583,7 @@ export async function createProduct(
       },
     });
 
-    await upsertProductTranslations(tx, product.id, input.translations ?? []);
+    await upsertProductTranslations(tx, product.id, translations);
 
     for (const variant of normalizedVariants) {
       await createVariantRecord(tx, organizationId, product.id, variant);

@@ -15,6 +15,7 @@ const slug_1 = require("../../utils/slug");
 const guards_1 = require("../../utils/guards");
 const json_1 = require("../../utils/json");
 const translations_1 = require("../../utils/translations");
+const autoTranslate_1 = require("../../utils/autoTranslate");
 const audit_service_1 = require("../audit/audit.service");
 function serializeCategory(category, localeContext) {
     const localizedCategory = (0, localization_1.serializeLocalizedEntity)(category, localeContext);
@@ -189,6 +190,12 @@ async function createCategory(organizationId, actorUserId, input, localeContext)
     if (input.parentId) {
         await (0, guards_1.assertCategoryInOrg)(prisma_1.prisma, organizationId, input.parentId);
     }
+    const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
+        organizationId,
+        baseName: input.name,
+        baseDescription: input.description,
+        existingTranslations: input.translations,
+    });
     const category = await prisma_1.prisma.$transaction(async (tx) => {
         const created = await tx.category.create({
             data: {
@@ -202,9 +209,9 @@ async function createCategory(organizationId, actorUserId, input, localeContext)
                 customFields: (0, json_1.toNullableJsonValue)(input.customFields),
             },
         });
-        if (input.translations?.length) {
+        if (translations.length) {
             await tx.categoryTranslation.createMany({
-                data: input.translations.map((translation) => ({
+                data: translations.map((translation) => ({
                     categoryId: created.id,
                     language: translation.language,
                     name: translation.name.trim(),

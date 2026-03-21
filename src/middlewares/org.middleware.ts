@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { UserRole } from "@prisma/client";
+import { MembershipStatus, UserRole } from "@prisma/client";
 
 import { prisma } from "../config/prisma";
 import { ApiError } from "../utils/ApiError";
@@ -48,6 +48,7 @@ export async function requireOrganizationContext(req: Request, _res: Response, n
     where: {
       userId: req.auth.userId,
       organizationId,
+      status: MembershipStatus.ACTIVE,
       organization: {
         deletedAt: null,
       },

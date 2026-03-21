@@ -12,19 +12,23 @@ interface TranslationLike {
 }
 
 function parseEnabledLanguages(value: unknown, defaultLanguage: LanguageCode): LanguageCode[] {
+  const normalizedDefaultLanguage = SUPPORTED_LANGUAGE_CODES.includes(defaultLanguage as (typeof SUPPORTED_LANGUAGE_CODES)[number])
+    ? defaultLanguage
+    : LanguageCode.EN;
+
   if (!Array.isArray(value)) {
-    return [defaultLanguage, LanguageCode.EN];
+    return [normalizedDefaultLanguage, LanguageCode.EN];
   }
 
   const candidates = value.filter((entry): entry is LanguageCode =>
-    Object.values(LanguageCode).includes(entry as LanguageCode),
+    SUPPORTED_LANGUAGE_CODES.includes(entry as (typeof SUPPORTED_LANGUAGE_CODES)[number]),
   );
 
   if (candidates.length === 0) {
-    return [defaultLanguage, LanguageCode.EN];
+    return [normalizedDefaultLanguage, LanguageCode.EN];
   }
 
-  return Array.from(new Set([...candidates, defaultLanguage, LanguageCode.EN]));
+  return Array.from(new Set([...candidates, normalizedDefaultLanguage, LanguageCode.EN]));
 }
 
 export async function enrichWithAutoTranslations<T extends TranslationLike>(args: {

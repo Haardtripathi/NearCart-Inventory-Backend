@@ -286,7 +286,7 @@ export async function createOrganizationWithResolvedOwner(
       currencyCode: input.currencyCode ?? "INR",
       timezone: input.timezone ?? "Asia/Kolkata",
       defaultLanguage: input.defaultLanguage ?? LanguageCode.EN,
-      enabledLanguages: input.enabledLanguages ?? [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU],
+      enabledLanguages: input.enabledLanguages ?? [LanguageCode.EN, LanguageCode.HI],
       settings: toNullableJsonValue(input.settings),
     },
   });

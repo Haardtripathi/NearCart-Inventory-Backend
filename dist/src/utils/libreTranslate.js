@@ -9,7 +9,6 @@ const redis_1 = require("../config/redis");
 const languageCodeToIso = {
     EN: "en",
     HI: "hi",
-    GU: "gu",
 };
 const SUPPORTED_LANGUAGES_CACHE_TTL_MS = 5 * 60 * 1000;
 let supportedLanguagesCache = null;
@@ -133,12 +132,11 @@ async function buildTranslations(value, sourceLanguage = "auto") {
     if (!normalizedValue) {
         throw new Error("Text is required");
     }
-    const [en, hi, gu] = await Promise.all([
+    const [en, hi] = await Promise.all([
         translateText(normalizedValue, "en", sourceLanguage),
         translateText(normalizedValue, "hi", sourceLanguage),
-        translateText(normalizedValue, "gu", sourceLanguage),
     ]);
-    return { en, hi, gu };
+    return { en, hi };
 }
 async function translateLanguageCodeText(value, sourceLanguage, targetLanguage) {
     const normalizedValue = value.trim();

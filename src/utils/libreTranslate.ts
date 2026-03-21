@@ -4,14 +4,13 @@ import { LanguageCode } from "@prisma/client";
 import { env } from "../config/env";
 import { getRedisClient } from "../config/redis";
 
-const languageCodeToIso: Record<LanguageCode, TranslationTarget> = {
+const languageCodeToIso: Partial<Record<LanguageCode, TranslationTarget>> = {
   EN: "en",
   HI: "hi",
-  GU: "gu",
 };
 
 type TranslationSource = TranslationTarget | "auto";
-type TranslationTarget = "en" | "hi" | "gu";
+type TranslationTarget = "en" | "hi";
 
 interface LibreTranslateResponse {
   translatedText?: string;
@@ -192,13 +191,12 @@ export async function buildTranslations(value: string, sourceLanguage: Translati
     throw new Error("Text is required");
   }
 
-  const [en, hi, gu] = await Promise.all([
+  const [en, hi] = await Promise.all([
     translateText(normalizedValue, "en", sourceLanguage),
     translateText(normalizedValue, "hi", sourceLanguage),
-    translateText(normalizedValue, "gu", sourceLanguage),
   ]);
 
-  return { en, hi, gu };
+  return { en, hi };
 }
 
 export async function translateLanguageCodeText(

@@ -97,10 +97,10 @@ Recommended first API call order:
 2. `POST /api/auth/login`
 3. `GET /api/auth/me`
 4. `GET /api/meta/languages`
-5. `GET /api/platform/industries?lang=gu`
+5. `GET /api/platform/industries?lang=hi`
 6. `GET /api/master-catalog/items?industryId=<industryId>&lang=hi&q=milk`
 7. `POST /api/master-catalog/items/:id/import`
-8. `GET /api/products?lang=gu`
+8. `GET /api/products?lang=hi`
 9. `GET /api/platform/industries`
 10. `POST /api/organizations`
 11. Login again with the new organization selected if needed, or send `x-organization-id`
@@ -115,12 +115,11 @@ Supported languages:
 
 - `EN`
 - `HI`
-- `GU`
 
 Localized endpoints accept either:
 
-- `?lang=en|hi|gu`
-- `Accept-Language: en|hi|gu`
+- `?lang=en|hi`
+- `Accept-Language: en|hi`
 
 Language resolution order:
 

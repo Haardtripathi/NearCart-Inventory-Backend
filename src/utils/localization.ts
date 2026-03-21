@@ -3,7 +3,11 @@ import { LanguageCode } from "@prisma/client";
 
 import { prisma } from "../config/prisma";
 
-export const SUPPORTED_LANGUAGE_CODES = [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU] as const;
+export const SUPPORTED_LANGUAGE_CODES = [LanguageCode.EN, LanguageCode.HI] as const;
+
+function sanitizeSupportedLanguageCode(value: LanguageCode | null | undefined): LanguageCode | null {
+  return value && SUPPORTED_LANGUAGE_CODES.includes(value as (typeof SUPPORTED_LANGUAGE_CODES)[number]) ? value : null;
+}
 
 export interface LocaleContext {
   requestedLanguage: LanguageCode | null;
@@ -59,8 +63,6 @@ export function normalizeLanguageCode(value: string | null | undefined): Languag
       return LanguageCode.EN;
     case "hi":
       return LanguageCode.HI;
-    case "gu":
-      return LanguageCode.GU;
     default:
       return null;
   }
@@ -109,13 +111,14 @@ export async function resolveLocaleContext(
     typeof req.headers["accept-language"] === "string" ? req.headers["accept-language"] : null,
   );
   const requestedLanguage = queryLanguage ?? headerLanguage;
-  const userPreferredLanguage = req.auth?.userPreferredLanguage ?? null;
+  const userPreferredLanguage = sanitizeSupportedLanguageCode(req.auth?.userPreferredLanguage ?? null);
 
-  let orgDefaultLanguage =
+  let orgDefaultLanguage = sanitizeSupportedLanguageCode(
     options?.organizationDefaultLanguage ??
-    req.activeOrganization?.defaultLanguage ??
-    req.auth?.activeOrganizationDefaultLanguage ??
-    null;
+      req.activeOrganization?.defaultLanguage ??
+      req.auth?.activeOrganizationDefaultLanguage ??
+      null,
+  );
 
   const organizationId = options?.organizationId ?? req.activeOrganization?.id ?? req.auth?.activeOrganizationId ?? null;
 
@@ -130,7 +133,7 @@ export async function resolveLocaleContext(
       },
     });
 
-    orgDefaultLanguage = organization?.defaultLanguage ?? null;
+    orgDefaultLanguage = sanitizeSupportedLanguageCode(organization?.defaultLanguage ?? null);
   }
 
   const resolvedLanguage = requestedLanguage ?? userPreferredLanguage ?? orgDefaultLanguage ?? LanguageCode.EN;

@@ -8,7 +8,10 @@ exports.resolveLocalizedText = resolveLocalizedText;
 exports.serializeLocalizedEntity = serializeLocalizedEntity;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../config/prisma");
-exports.SUPPORTED_LANGUAGE_CODES = [client_1.LanguageCode.EN, client_1.LanguageCode.HI, client_1.LanguageCode.GU];
+exports.SUPPORTED_LANGUAGE_CODES = [client_1.LanguageCode.EN, client_1.LanguageCode.HI];
+function sanitizeSupportedLanguageCode(value) {
+    return value && exports.SUPPORTED_LANGUAGE_CODES.includes(value) ? value : null;
+}
 function normalizeText(value) {
     if (typeof value !== "string") {
         return null;
@@ -30,8 +33,6 @@ function normalizeLanguageCode(value) {
             return client_1.LanguageCode.EN;
         case "hi":
             return client_1.LanguageCode.HI;
-        case "gu":
-            return client_1.LanguageCode.GU;
         default:
             return null;
     }
@@ -65,11 +66,11 @@ async function resolveLocaleContext(req, options) {
     const queryLanguage = typeof req.query.lang === "string" ? normalizeLanguageCode(req.query.lang) : null;
     const headerLanguage = parseAcceptLanguageHeader(typeof req.headers["accept-language"] === "string" ? req.headers["accept-language"] : null);
     const requestedLanguage = queryLanguage ?? headerLanguage;
-    const userPreferredLanguage = req.auth?.userPreferredLanguage ?? null;
-    let orgDefaultLanguage = options?.organizationDefaultLanguage ??
+    const userPreferredLanguage = sanitizeSupportedLanguageCode(req.auth?.userPreferredLanguage ?? null);
+    let orgDefaultLanguage = sanitizeSupportedLanguageCode(options?.organizationDefaultLanguage ??
         req.activeOrganization?.defaultLanguage ??
         req.auth?.activeOrganizationDefaultLanguage ??
-        null;
+        null);
     const organizationId = options?.organizationId ?? req.activeOrganization?.id ?? req.auth?.activeOrganizationId ?? null;
     if (!orgDefaultLanguage && organizationId) {
         const organization = await prisma_1.prisma.organization.findFirst({
@@ -81,7 +82,7 @@ async function resolveLocaleContext(req, options) {
                 defaultLanguage: true,
             },
         });
-        orgDefaultLanguage = organization?.defaultLanguage ?? null;
+        orgDefaultLanguage = sanitizeSupportedLanguageCode(organization?.defaultLanguage ?? null);
     }
     const resolvedLanguage = requestedLanguage ?? userPreferredLanguage ?? orgDefaultLanguage ?? client_1.LanguageCode.EN;
     const fallbackLanguages = Array.from(new Set([resolvedLanguage, orgDefaultLanguage ?? null, client_1.LanguageCode.EN].filter(Boolean)));

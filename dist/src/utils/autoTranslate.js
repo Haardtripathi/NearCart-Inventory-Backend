@@ -7,14 +7,17 @@ const env_1 = require("../config/env");
 const libreTranslate_1 = require("./libreTranslate");
 const localization_1 = require("./localization");
 function parseEnabledLanguages(value, defaultLanguage) {
+    const normalizedDefaultLanguage = localization_1.SUPPORTED_LANGUAGE_CODES.includes(defaultLanguage)
+        ? defaultLanguage
+        : client_1.LanguageCode.EN;
     if (!Array.isArray(value)) {
-        return [defaultLanguage, client_1.LanguageCode.EN];
+        return [normalizedDefaultLanguage, client_1.LanguageCode.EN];
     }
-    const candidates = value.filter((entry) => Object.values(client_1.LanguageCode).includes(entry));
+    const candidates = value.filter((entry) => localization_1.SUPPORTED_LANGUAGE_CODES.includes(entry));
     if (candidates.length === 0) {
-        return [defaultLanguage, client_1.LanguageCode.EN];
+        return [normalizedDefaultLanguage, client_1.LanguageCode.EN];
     }
-    return Array.from(new Set([...candidates, defaultLanguage, client_1.LanguageCode.EN]));
+    return Array.from(new Set([...candidates, normalizedDefaultLanguage, client_1.LanguageCode.EN]));
 }
 async function enrichWithAutoTranslations(args) {
     const existingTranslations = args.existingTranslations ?? [];

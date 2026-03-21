@@ -11,6 +11,11 @@ import { apiRouter } from "./routes";
 
 export const app = express();
 
+if (env.NODE_ENV === "production") {
+  // Render and similar platforms terminate TLS at a proxy and set X-Forwarded-For.
+  app.set("trust proxy", 1);
+}
+
 const corsOrigins = env.CORS_ORIGIN.split(",")
   .map((value) => value.trim())
   .filter(Boolean)

@@ -79,14 +79,7 @@ Notes:
 Create the first `SUPER_ADMIN` user once after migrations and seed:
 
 ```bash
-curl -X POST http://localhost:5000/api/auth/bootstrap-super-admin \
-  -H "Content-Type: application/json" \
-  -d '{
-    "secret": "your-admin-bootstrap-secret",
-    "fullName": "Platform Admin",
-    "email": "admin@example.com",
-    "password": "StrongPassword123"
-  }'
+curl -sS -X POST 'http://localhost:5001/api/auth/bootstrap-super-admin' -H 'Content-Type: application/json' -d '{"secret":"your-admin-bootstrap-secret","fullName":"Platform Admin","email":"admin@example.com","password":"StrongPassword123"}'
 ```
 
 ## Local Test Order

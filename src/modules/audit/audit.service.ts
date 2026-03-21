@@ -35,12 +35,21 @@ export async function createAuditLog(db: DbClient, input: AuditLogInput) {
     },
   });
 
-  await syncEntityFieldTranslations(db, {
-    organizationId: input.organizationId ?? undefined,
-    entityType: "AuditLog",
-    entityId: auditLog.id,
-    fields: [{ fieldKey: "entityType", value: input.entityType }],
-  });
+  try {
+    await syncEntityFieldTranslations(db, {
+      organizationId: input.organizationId ?? undefined,
+      entityType: "AuditLog",
+      entityId: auditLog.id,
+      fields: [{ fieldKey: "entityType", value: input.entityType }],
+    });
+  } catch (error) {
+    // Audit-log creation is primary; translation sync must never block auth or writes.
+    console.warn("Audit translation sync failed", {
+      auditLogId: auditLog.id,
+      entityType: input.entityType,
+      error,
+    });
+  }
 
   return auditLog;
 }

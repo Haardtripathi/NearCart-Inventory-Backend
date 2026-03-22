@@ -68,6 +68,8 @@ interface ResolvedOrganizationOwner {
   passwordSetupRequired: boolean;
 }
 
+const defaultBrandTranslationLanguages: LanguageCode[] = [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU];
+
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
@@ -123,6 +125,200 @@ async function generateUniqueOrganizationSlug(
   }
 
   throw ApiError.conflict("Unable to generate a unique organization slug");
+}
+
+function getMasterCategoryCanonicalFields(category: {
+  code: string;
+  translations: Array<{
+    language: LanguageCode;
+    name: string;
+    description: string | null;
+  }>;
+}) {
+  const englishTranslation = category.translations.find((translation) => translation.language === LanguageCode.EN);
+  const fallbackTranslation = englishTranslation ?? category.translations[0];
+
+  return {
+    name: fallbackTranslation?.name ?? category.code,
+    description: fallbackTranslation?.description ?? null,
+  };
+}
+
+async function seedOrganizationCatalogDefaultsForIndustry(
+  tx: DbClient,
+  organizationId: string,
+  industryId: string,
+) {
+  const masterCategories = await tx.masterCatalogCategory.findMany({
+    where: {
+      industryId,
+      isActive: true,
+    },
+    include: {
+      translations: {
+        orderBy: {
+          language: "asc",
+        },
+      },
+    },
+    orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
+  });
+
+  const masterCategoryById = new Map(masterCategories.map((category) => [category.id, category]));
+  const organizationCategoryIdByMasterId = new Map<string, string>();
+
+  const ensureCategory = async (masterCategoryId: string): Promise<string> => {
+    const cachedCategoryId = organizationCategoryIdByMasterId.get(masterCategoryId);
+
+    if (cachedCategoryId) {
+      return cachedCategoryId;
+    }
+
+    const masterCategory = masterCategoryById.get(masterCategoryId);
+
+    if (!masterCategory) {
+      throw ApiError.notFound("Master catalog category not found for industry bootstrap");
+    }
+
+    const parentId = masterCategory.parentId ? await ensureCategory(masterCategory.parentId) : null;
+    const canonicalFields = getMasterCategoryCanonicalFields(masterCategory);
+    const existingCategory = await tx.category.findFirst({
+      where: {
+        organizationId,
+        slug: masterCategory.slug,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const category = existingCategory
+      ? await tx.category.update({
+          where: {
+            id: existingCategory.id,
+          },
+          data: {
+            parentId,
+            name: canonicalFields.name,
+            description: canonicalFields.description,
+            sortOrder: masterCategory.sortOrder,
+            isActive: true,
+            deletedAt: null,
+            customFields: toNullableJsonValue({
+              masterCatalogCategoryId: masterCategory.id,
+              importedFromMasterCatalog: true,
+              importedFromIndustryDefaults: true,
+            }),
+          },
+        })
+      : await tx.category.create({
+          data: {
+            organizationId,
+            parentId,
+            name: canonicalFields.name,
+            slug: masterCategory.slug,
+            description: canonicalFields.description,
+            isActive: true,
+            sortOrder: masterCategory.sortOrder,
+            customFields: toNullableJsonValue({
+              masterCatalogCategoryId: masterCategory.id,
+              importedFromMasterCatalog: true,
+              importedFromIndustryDefaults: true,
+            }),
+          },
+        });
+
+    await tx.categoryTranslation.deleteMany({
+      where: {
+        categoryId: category.id,
+      },
+    });
+
+    if (masterCategory.translations.length > 0) {
+      await tx.categoryTranslation.createMany({
+        data: masterCategory.translations.map((translation) => ({
+          categoryId: category.id,
+          language: translation.language,
+          name: translation.name,
+          description: translation.description,
+        })),
+      });
+    }
+
+    organizationCategoryIdByMasterId.set(masterCategoryId, category.id);
+    return category.id;
+  };
+
+  for (const masterCategory of masterCategories) {
+    await ensureCategory(masterCategory.id);
+  }
+
+  const distinctBrandNames = Array.from(
+    new Set(
+      (
+        await tx.masterCatalogItem.findMany({
+          where: {
+            industryId,
+            isActive: true,
+            NOT: {
+              defaultBrandName: null,
+            },
+          },
+          select: {
+            defaultBrandName: true,
+          },
+        })
+      )
+        .map((item) => item.defaultBrandName?.trim())
+        .filter((brandName): brandName is string => Boolean(brandName)),
+    ),
+  );
+
+  for (const brandName of distinctBrandNames) {
+    const existingBrand = await tx.brand.findFirst({
+      where: {
+        organizationId,
+        slug: slugify(brandName),
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const brand = existingBrand
+      ? await tx.brand.update({
+          where: {
+            id: existingBrand.id,
+          },
+          data: {
+            name: brandName,
+            isActive: true,
+            deletedAt: null,
+          },
+        })
+      : await tx.brand.create({
+          data: {
+            organizationId,
+            name: brandName,
+            slug: slugify(brandName),
+            isActive: true,
+          },
+        });
+
+    await tx.brandTranslation.deleteMany({
+      where: {
+        brandId: brand.id,
+      },
+    });
+
+    await tx.brandTranslation.createMany({
+      data: defaultBrandTranslationLanguages.map((language) => ({
+        brandId: brand.id,
+        language,
+        name: brandName,
+      })),
+    });
+  }
 }
 
 async function assertOrganizationManageAccess(
@@ -378,6 +574,8 @@ export async function createOrganizationWithResolvedOwner(
     },
   });
 
+  await seedOrganizationCatalogDefaultsForIndustry(tx, organization.id, options.primaryIndustry.id);
+
   let firstBranchCode = input.firstBranch.code?.trim();
 
   if (!firstBranchCode) {
@@ -499,6 +697,9 @@ export async function createOrganization(
       ownerUser: created.ownerUser,
       ownerAccessLink: created.ownerAccessLink,
     };
+  }, {
+    maxWait: 10_000,
+    timeout: 30_000,
   });
 }
 
@@ -687,6 +888,34 @@ export async function addIndustryToOrganization(
       },
     });
 
+    await seedOrganizationCatalogDefaultsForIndustry(tx, organizationId, industry.id);
+
     return config;
+  }, {
+    maxWait: 10_000,
+    timeout: 30_000,
   });
+}
+
+export async function backfillOrganizationIndustryCatalogDefaults() {
+  const configs = await prisma.organizationIndustryConfig.findMany({
+    select: {
+      organizationId: true,
+      industryId: true,
+    },
+    orderBy: [{ organizationId: "asc" }, { industryId: "asc" }],
+  });
+
+  for (const config of configs) {
+    await prisma.$transaction(async (tx) => {
+      await seedOrganizationCatalogDefaultsForIndustry(tx, config.organizationId, config.industryId);
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
+    });
+  }
+
+  return {
+    processed: configs.length,
+  };
 }

@@ -274,6 +274,9 @@ async function registerOrganizationOwner(input, meta) {
             userId: user.id,
             organizationId: organization.organization.id,
         };
+    }, {
+        maxWait: 10_000,
+        timeout: 30_000,
     });
     await prisma_1.prisma.user.update({
         where: {

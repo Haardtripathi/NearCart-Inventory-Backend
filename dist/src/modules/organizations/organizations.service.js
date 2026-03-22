@@ -5,6 +5,7 @@ exports.createOrganization = createOrganization;
 exports.getMyOrganizations = getMyOrganizations;
 exports.getOrganizationById = getOrganizationById;
 exports.addIndustryToOrganization = addIndustryToOrganization;
+exports.backfillOrganizationIndustryCatalogDefaults = backfillOrganizationIndustryCatalogDefaults;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
@@ -14,6 +15,7 @@ const guards_1 = require("../../utils/guards");
 const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const json_1 = require("../../utils/json");
 const branchCode_1 = require("../../utils/branchCode");
+const defaultBrandTranslationLanguages = [client_1.LanguageCode.EN, client_1.LanguageCode.HI, client_1.LanguageCode.GU];
 function normalizeEmail(email) {
     return email.trim().toLowerCase();
 }
@@ -57,6 +59,164 @@ async function generateUniqueOrganizationSlug(tx, input) {
         }
     }
     throw ApiError_1.ApiError.conflict("Unable to generate a unique organization slug");
+}
+function getMasterCategoryCanonicalFields(category) {
+    const englishTranslation = category.translations.find((translation) => translation.language === client_1.LanguageCode.EN);
+    const fallbackTranslation = englishTranslation ?? category.translations[0];
+    return {
+        name: fallbackTranslation?.name ?? category.code,
+        description: fallbackTranslation?.description ?? null,
+    };
+}
+async function seedOrganizationCatalogDefaultsForIndustry(tx, organizationId, industryId) {
+    const masterCategories = await tx.masterCatalogCategory.findMany({
+        where: {
+            industryId,
+            isActive: true,
+        },
+        include: {
+            translations: {
+                orderBy: {
+                    language: "asc",
+                },
+            },
+        },
+        orderBy: [{ sortOrder: "asc" }, { code: "asc" }],
+    });
+    const masterCategoryById = new Map(masterCategories.map((category) => [category.id, category]));
+    const organizationCategoryIdByMasterId = new Map();
+    const ensureCategory = async (masterCategoryId) => {
+        const cachedCategoryId = organizationCategoryIdByMasterId.get(masterCategoryId);
+        if (cachedCategoryId) {
+            return cachedCategoryId;
+        }
+        const masterCategory = masterCategoryById.get(masterCategoryId);
+        if (!masterCategory) {
+            throw ApiError_1.ApiError.notFound("Master catalog category not found for industry bootstrap");
+        }
+        const parentId = masterCategory.parentId ? await ensureCategory(masterCategory.parentId) : null;
+        const canonicalFields = getMasterCategoryCanonicalFields(masterCategory);
+        const existingCategory = await tx.category.findFirst({
+            where: {
+                organizationId,
+                slug: masterCategory.slug,
+            },
+            select: {
+                id: true,
+            },
+        });
+        const category = existingCategory
+            ? await tx.category.update({
+                where: {
+                    id: existingCategory.id,
+                },
+                data: {
+                    parentId,
+                    name: canonicalFields.name,
+                    description: canonicalFields.description,
+                    sortOrder: masterCategory.sortOrder,
+                    isActive: true,
+                    deletedAt: null,
+                    customFields: (0, json_1.toNullableJsonValue)({
+                        masterCatalogCategoryId: masterCategory.id,
+                        importedFromMasterCatalog: true,
+                        importedFromIndustryDefaults: true,
+                    }),
+                },
+            })
+            : await tx.category.create({
+                data: {
+                    organizationId,
+                    parentId,
+                    name: canonicalFields.name,
+                    slug: masterCategory.slug,
+                    description: canonicalFields.description,
+                    isActive: true,
+                    sortOrder: masterCategory.sortOrder,
+                    customFields: (0, json_1.toNullableJsonValue)({
+                        masterCatalogCategoryId: masterCategory.id,
+                        importedFromMasterCatalog: true,
+                        importedFromIndustryDefaults: true,
+                    }),
+                },
+            });
+        await tx.categoryTranslation.deleteMany({
+            where: {
+                categoryId: category.id,
+            },
+        });
+        if (masterCategory.translations.length > 0) {
+            await tx.categoryTranslation.createMany({
+                data: masterCategory.translations.map((translation) => ({
+                    categoryId: category.id,
+                    language: translation.language,
+                    name: translation.name,
+                    description: translation.description,
+                })),
+            });
+        }
+        organizationCategoryIdByMasterId.set(masterCategoryId, category.id);
+        return category.id;
+    };
+    for (const masterCategory of masterCategories) {
+        await ensureCategory(masterCategory.id);
+    }
+    const distinctBrandNames = Array.from(new Set((await tx.masterCatalogItem.findMany({
+        where: {
+            industryId,
+            isActive: true,
+            NOT: {
+                defaultBrandName: null,
+            },
+        },
+        select: {
+            defaultBrandName: true,
+        },
+    }))
+        .map((item) => item.defaultBrandName?.trim())
+        .filter((brandName) => Boolean(brandName))));
+    for (const brandName of distinctBrandNames) {
+        const existingBrand = await tx.brand.findFirst({
+            where: {
+                organizationId,
+                slug: (0, slug_1.slugify)(brandName),
+            },
+            select: {
+                id: true,
+            },
+        });
+        const brand = existingBrand
+            ? await tx.brand.update({
+                where: {
+                    id: existingBrand.id,
+                },
+                data: {
+                    name: brandName,
+                    isActive: true,
+                    deletedAt: null,
+                },
+            })
+            : await tx.brand.create({
+                data: {
+                    organizationId,
+                    name: brandName,
+                    slug: (0, slug_1.slugify)(brandName),
+                    isActive: true,
+                },
+            });
+        await tx.brandTranslation.deleteMany({
+            where: {
+                brandId: brand.id,
+            },
+        });
+        await tx.brandTranslation.createMany({
+            data: defaultBrandTranslationLanguages.map((language) => ({
+                brandId: brand.id,
+                language,
+                name: brandName,
+            })),
+        });
+    }
 }
 async function assertOrganizationManageAccess(requesterUserId, requesterRole, organizationId) {
     if (requesterRole === client_1.UserRole.SUPER_ADMIN) {
@@ -267,6 +427,7 @@ async function createOrganizationWithResolvedOwner(tx, input, options) {
             customSettings: (0, json_1.toNullableJsonValue)(input.customSettings ?? options.primaryIndustry.defaultSettings),
         },
     });
+    await seedOrganizationCatalogDefaultsForIndustry(tx, organization.id, options.primaryIndustry.id);
     let firstBranchCode = input.firstBranch.code?.trim();
     if (!firstBranchCode) {
         firstBranchCode = await (0, branchCode_1.generateUniqueBranchCode)(async (candidateCode) => {
@@ -374,6 +535,9 @@ async function createOrganization(currentUserId, currentRole, input) {
             ownerUser: created.ownerUser,
             ownerAccessLink: created.ownerAccessLink,
         };
+    }, {
+        maxWait: 10_000,
+        timeout: 30_000,
     });
 }
 async function getMyOrganizations(userId, requesterRole) {
@@ -542,6 +706,30 @@ async function addIndustryToOrganization(requesterUserId, requesterRole, organiz
                 industry: true,
             },
         });
+        await seedOrganizationCatalogDefaultsForIndustry(tx, organizationId, industry.id);
         return config;
+    }, {
+        maxWait: 10_000,
+        timeout: 30_000,
     });
+}
+async function backfillOrganizationIndustryCatalogDefaults() {
+    const configs = await prisma_1.prisma.organizationIndustryConfig.findMany({
+        select: {
+            organizationId: true,
+            industryId: true,
+        },
+        orderBy: [{ organizationId: "asc" }, { industryId: "asc" }],
+    });
+    for (const config of configs) {
+        await prisma_1.prisma.$transaction(async (tx) => {
+            await seedOrganizationCatalogDefaultsForIndustry(tx, config.organizationId, config.industryId);
+        }, {
+            maxWait: 10_000,
+            timeout: 30_000,
+        });
+    }
+    return {
+        processed: configs.length,
+    };
 }

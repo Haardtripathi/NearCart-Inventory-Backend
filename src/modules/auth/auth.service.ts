@@ -384,6 +384,9 @@ export async function registerOrganizationOwner(input: RegisterOrganizationOwner
       userId: user.id,
       organizationId: organization.organization.id,
     };
+  }, {
+    maxWait: 10_000,
+    timeout: 30_000,
   });
 
   await prisma.user.update({

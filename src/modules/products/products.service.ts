@@ -98,9 +98,25 @@ const productInclude = {
       },
     },
   },
-  brand: true,
+  brand: {
+    include: {
+      translations: {
+        orderBy: {
+          language: "asc",
+        },
+      },
+    },
+  },
   taxRate: true,
-  primaryUnit: true,
+  primaryUnit: {
+    include: {
+      translations: {
+        orderBy: {
+          language: "asc",
+        },
+      },
+    },
+  },
   masterCatalogItem: {
     select: {
       id: true,
@@ -119,6 +135,15 @@ const productInclude = {
           language: "asc",
         },
       },
+      unit: {
+        include: {
+          translations: {
+            orderBy: {
+              language: "asc",
+            },
+          },
+        },
+      },
     },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
   },
@@ -131,7 +156,10 @@ type ProductRecord = Prisma.ProductGetPayload<{
 type ProductVariantRecord = ProductRecord["variants"][number];
 
 function serializeVariant(variant: ProductVariantRecord, localeContext: LocaleContext) {
-  return serializeLocalizedEntity(variant, localeContext);
+  return {
+    ...serializeLocalizedEntity(variant, localeContext),
+    unit: variant.unit ? serializeLocalizedEntity(variant.unit, localeContext) : null,
+  };
 }
 
 function serializeProduct(product: ProductRecord, localeContext: LocaleContext) {
@@ -140,6 +168,8 @@ function serializeProduct(product: ProductRecord, localeContext: LocaleContext) 
   return {
     ...localizedProduct,
     category: product.category ? serializeLocalizedEntity(product.category, localeContext) : null,
+    brand: product.brand ? serializeLocalizedEntity(product.brand, localeContext) : null,
+    primaryUnit: product.primaryUnit ? serializeLocalizedEntity(product.primaryUnit, localeContext) : null,
     variants: product.variants.map((variant) => serializeVariant(variant, localeContext)),
   };
 }

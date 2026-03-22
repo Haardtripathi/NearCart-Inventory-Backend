@@ -37,7 +37,7 @@ async function getSupportedLanguagesTargets() {
         headers: {
             Accept: "application/json",
         },
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(60_000),
     });
     if (!response.ok) {
         throw new Error(`LibreTranslate languages request failed with status ${response.status}`);
@@ -83,7 +83,7 @@ async function requestLibreTranslate(value, source, target) {
             "Content-Type": "application/x-www-form-urlencoded",
         },
         body,
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(60_000),
     });
     const payload = (await response.json().catch(() => null));
     if (!response.ok) {
@@ -121,7 +121,21 @@ async function translateText(value, targetLanguage, sourceLanguage = "auto") {
             console.warn("Redis read failed for translation cache", error);
         }
     }
-    const translatedText = await requestLibreTranslate(normalizedValue, sourceLanguage, targetLanguage);
+    let translatedText;
+    try {
+        translatedText = await requestLibreTranslate(normalizedValue, sourceLanguage, targetLanguage);
+    }
+    catch (error) {
+        if (!env_1.env.AUTO_TRANSLATE_FAIL_OPEN) {
+            throw error;
+        }
+        console.warn("LibreTranslate request failed; returning source text due to fail-open mode", {
+            sourceLanguage,
+            targetLanguage,
+            error,
+        });
+        return normalizedValue;
+    }
     if (redis) {
         try {
             await redis.set(cacheKey, translatedText, "EX", env_1.env.TRANSLATION_CACHE_TTL_SECONDS);

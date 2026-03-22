@@ -14,6 +14,10 @@ const notFound_middleware_1 = require("./middlewares/notFound.middleware");
 const rateLimit_middleware_1 = require("./middlewares/rateLimit.middleware");
 const routes_1 = require("./routes");
 exports.app = (0, express_1.default)();
+if (env_1.env.NODE_ENV === "production") {
+    // Render and similar platforms terminate TLS at a proxy and set X-Forwarded-For.
+    exports.app.set("trust proxy", 1);
+}
 const corsOrigins = env_1.env.CORS_ORIGIN.split(",")
     .map((value) => value.trim())
     .filter(Boolean)

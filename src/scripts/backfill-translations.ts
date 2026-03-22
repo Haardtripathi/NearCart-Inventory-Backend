@@ -4,6 +4,7 @@ import { translateLanguageCodeText } from "../utils/libreTranslate";
 import { SUPPORTED_LANGUAGE_CODES } from "../utils/localization";
 
 const prisma = new PrismaClient();
+const NON_ENGLISH_LANGUAGES = SUPPORTED_LANGUAGE_CODES.filter((item) => item !== LanguageCode.EN);
 
 async function translateName(name: string, language: LanguageCode) {
   return translateLanguageCodeText(name, "AUTO", language);
@@ -25,7 +26,7 @@ async function backfillIndustries() {
   });
 
   for (const industry of industries) {
-    for (const language of SUPPORTED_LANGUAGE_CODES.filter((item) => item !== LanguageCode.EN)) {
+    for (const language of NON_ENGLISH_LANGUAGES) {
       const translatedName = await translateName(industry.name, language);
       const translatedDescription = await translateDescription(language, industry.description);
 
@@ -62,7 +63,7 @@ async function backfillCategories() {
   });
 
   for (const category of categories) {
-    for (const language of SUPPORTED_LANGUAGE_CODES.filter((item) => item !== LanguageCode.EN)) {
+    for (const language of NON_ENGLISH_LANGUAGES) {
       const translatedName = await translateName(category.name, language);
       const translatedDescription = await translateDescription(language, category.description);
 
@@ -99,7 +100,7 @@ async function backfillBrands() {
   });
 
   for (const brand of brands) {
-    for (const language of SUPPORTED_LANGUAGE_CODES.filter((item) => item !== LanguageCode.EN)) {
+    for (const language of NON_ENGLISH_LANGUAGES) {
       const translatedName = await translateName(brand.name, language);
 
       await prisma.brandTranslation.upsert({
@@ -130,7 +131,7 @@ async function backfillUnits() {
   });
 
   for (const unit of units) {
-    for (const language of SUPPORTED_LANGUAGE_CODES.filter((item) => item !== LanguageCode.EN)) {
+    for (const language of NON_ENGLISH_LANGUAGES) {
       const translatedName = await translateName(unit.name, language);
 
       await prisma.unitTranslation.upsert({
@@ -164,7 +165,7 @@ async function backfillSuppliers() {
   });
 
   for (const supplier of suppliers) {
-    for (const language of SUPPORTED_LANGUAGE_CODES.filter((item) => item !== LanguageCode.EN)) {
+    for (const language of NON_ENGLISH_LANGUAGES) {
       const translatedName = await translateName(supplier.name, language);
 
       await prisma.supplierTranslation.upsert({
@@ -187,12 +188,144 @@ async function backfillSuppliers() {
   }
 }
 
+async function backfillProducts() {
+  const products = await prisma.product.findMany({
+    where: {
+      deletedAt: null,
+    },
+    include: {
+      translations: true,
+      variants: {
+        where: {
+          deletedAt: null,
+        },
+        include: {
+          translations: true,
+        },
+      },
+    },
+  });
+
+  for (const product of products) {
+    for (const language of NON_ENGLISH_LANGUAGES) {
+      const translatedName = await translateName(product.name, language);
+      const translatedDescription = await translateDescription(language, product.description);
+
+      await prisma.productTranslation.upsert({
+        where: {
+          productId_language: {
+            productId: product.id,
+            language,
+          },
+        },
+        create: {
+          productId: product.id,
+          language,
+          name: translatedName ?? product.name,
+          description: translatedDescription ?? product.description ?? null,
+        },
+        update: {
+          name: translatedName ?? product.name,
+          description: translatedDescription ?? product.description ?? null,
+        },
+      });
+    }
+
+    for (const variant of product.variants) {
+      for (const language of NON_ENGLISH_LANGUAGES) {
+        const translatedName = await translateName(variant.name, language);
+
+        await prisma.productVariantTranslation.upsert({
+          where: {
+            variantId_language: {
+              variantId: variant.id,
+              language,
+            },
+          },
+          create: {
+            variantId: variant.id,
+            language,
+            name: translatedName ?? variant.name,
+          },
+          update: {
+            name: translatedName ?? variant.name,
+          },
+        });
+      }
+    }
+  }
+}
+
+async function backfillMasterCatalogItems() {
+  const items = await prisma.masterCatalogItem.findMany({
+    include: {
+      translations: true,
+      variantTemplates: {
+        include: {
+          translations: true,
+        },
+      },
+    },
+  });
+
+  for (const item of items) {
+    for (const language of NON_ENGLISH_LANGUAGES) {
+      const translatedName = await translateName(item.canonicalName, language);
+      const translatedDescription = await translateDescription(language, item.canonicalDescription);
+
+      await prisma.masterCatalogItemTranslation.upsert({
+        where: {
+          masterItemId_language: {
+            masterItemId: item.id,
+            language,
+          },
+        },
+        create: {
+          masterItemId: item.id,
+          language,
+          name: translatedName ?? item.canonicalName,
+          description: translatedDescription ?? item.canonicalDescription ?? null,
+        },
+        update: {
+          name: translatedName ?? item.canonicalName,
+          description: translatedDescription ?? item.canonicalDescription ?? null,
+        },
+      });
+    }
+
+    for (const template of item.variantTemplates) {
+      for (const language of NON_ENGLISH_LANGUAGES) {
+        const translatedName = await translateName(template.name, language);
+
+        await prisma.masterCatalogVariantTranslation.upsert({
+          where: {
+            masterVariantTemplateId_language: {
+              masterVariantTemplateId: template.id,
+              language,
+            },
+          },
+          create: {
+            masterVariantTemplateId: template.id,
+            language,
+            name: translatedName ?? template.name,
+          },
+          update: {
+            name: translatedName ?? template.name,
+          },
+        });
+      }
+    }
+  }
+}
+
 async function main() {
   await backfillIndustries();
   await backfillCategories();
   await backfillBrands();
   await backfillUnits();
   await backfillSuppliers();
+  await backfillProducts();
+  await backfillMasterCatalogItems();
   console.log("Localized translations backfilled successfully.");
 }
 

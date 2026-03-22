@@ -36,9 +36,25 @@ const productInclude = {
             },
         },
     },
-    brand: true,
+    brand: {
+        include: {
+            translations: {
+                orderBy: {
+                    language: "asc",
+                },
+            },
+        },
+    },
     taxRate: true,
-    primaryUnit: true,
+    primaryUnit: {
+        include: {
+            translations: {
+                orderBy: {
+                    language: "asc",
+                },
+            },
+        },
+    },
     masterCatalogItem: {
         select: {
             id: true,
@@ -57,18 +73,32 @@ const productInclude = {
                     language: "asc",
                 },
             },
+            unit: {
+                include: {
+                    translations: {
+                        orderBy: {
+                            language: "asc",
+                        },
+                    },
+                },
+            },
         },
         orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     },
 };
 function serializeVariant(variant, localeContext) {
-    return (0, localization_1.serializeLocalizedEntity)(variant, localeContext);
+    return {
+        ...(0, localization_1.serializeLocalizedEntity)(variant, localeContext),
+        unit: variant.unit ? (0, localization_1.serializeLocalizedEntity)(variant.unit, localeContext) : null,
+    };
 }
 function serializeProduct(product, localeContext) {
     const localizedProduct = (0, localization_1.serializeLocalizedEntity)(product, localeContext);
     return {
         ...localizedProduct,
         category: product.category ? (0, localization_1.serializeLocalizedEntity)(product.category, localeContext) : null,
+        brand: product.brand ? (0, localization_1.serializeLocalizedEntity)(product.brand, localeContext) : null,
+        primaryUnit: product.primaryUnit ? (0, localization_1.serializeLocalizedEntity)(product.primaryUnit, localeContext) : null,
         variants: product.variants.map((variant) => serializeVariant(variant, localeContext)),
     };
 }

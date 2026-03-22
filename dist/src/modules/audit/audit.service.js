@@ -21,12 +21,22 @@ async function createAuditLog(db, input) {
             userAgent: input.userAgent ?? null,
         },
     });
-    await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(db, {
-        organizationId: input.organizationId ?? undefined,
-        entityType: "AuditLog",
-        entityId: auditLog.id,
-        fields: [{ fieldKey: "entityType", value: input.entityType }],
-    });
+    try {
+        await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(db, {
+            organizationId: input.organizationId ?? undefined,
+            entityType: "AuditLog",
+            entityId: auditLog.id,
+            fields: [{ fieldKey: "entityType", value: input.entityType }],
+        });
+    }
+    catch (error) {
+        // Audit-log creation is primary; translation sync must never block auth or writes.
+        console.warn("Audit translation sync failed", {
+            auditLogId: auditLog.id,
+            entityType: input.entityType,
+            error,
+        });
+    }
     return auditLog;
 }
 async function listAuditLogs(organizationId, query) {

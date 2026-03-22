@@ -660,7 +660,10 @@ async function getOrganizationById(requesterUserId, requesterRole, organizationI
     if (!organization) {
         throw ApiError_1.ApiError.notFound("Organization not found");
     }
-    return organization;
+    return {
+        ...organization,
+        industries: organization.industryConfigs,
+    };
 }
 async function addIndustryToOrganization(requesterUserId, requesterRole, organizationId, input) {
     await assertOrganizationManageAccess(requesterUserId, requesterRole, organizationId);

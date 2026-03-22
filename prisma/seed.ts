@@ -4,6 +4,12 @@ import { AuditAction, BatchStatus, BranchType, LanguageCode, MembershipStatus, O
 
 import { buildMasterItemSearchText, normalizeMasterCatalogAliasValues } from "../src/utils/masterCatalog";
 import { slugify } from "../src/utils/slug";
+import {
+  groceryFmcgBrandPatch,
+  groceryFmcgCategoryPatch,
+  groceryFmcgProductPatch,
+  suggestedMasterCatalogRenames,
+} from "./nearcart_grocery_fmcg_seed_patch";
 
 const prisma = new PrismaClient();
 
@@ -151,6 +157,20 @@ function mirroredTranslations(name: string, description?: string): TranslationWi
         }
       : undefined,
   );
+}
+
+function mergeSeedByKey<T>(base: T[], patch: T[], getKey: (item: T) => string): T[] {
+  const merged = new Map(base.map((item) => [getKey(item), item]));
+
+  for (const item of patch) {
+    merged.set(getKey(item), item);
+  }
+
+  return Array.from(merged.values());
+}
+
+function getSuggestedMasterCatalogName(code: string, fallback: string) {
+  return suggestedMasterCatalogRenames.find((entry) => entry.code === code)?.suggestedName ?? fallback;
 }
 
 interface GeneratedCategorySpec {
@@ -684,41 +704,40 @@ const industries: IndustrySeed[] = [
       },
     ],
     items: [
+      // Grocery master items stay generic and reusable.
+      // Shelf brand belongs on Product; pack/SKU details belong on ProductVariant.
       {
         code: "grocery_milk",
         categoryCode: "dairy",
         canonicalName: "Milk",
-        canonicalDescription: "Fresh pouch milk for daily retail sales.",
+        canonicalDescription: "Packaged milk pouches and cartons sold as counted retail packs.",
         translations: withDescriptions(names("Milk", "दूध", "દૂધ")),
         aliases: [
           { language: LanguageCode.EN, value: "full cream milk" },
           { language: LanguageCode.HI, value: "दूध पैकेट" },
           { language: LanguageCode.GU, value: "દૂધ પેકેટ" },
         ],
-        defaultTrackMethod: TrackMethod.VOLUME,
-        defaultUnitCode: "l",
-        defaultBrandName: "Amul",
+        defaultTrackMethod: TrackMethod.PIECE,
+        defaultUnitCode: "pack",
         tags: ["dairy", "daily"],
       },
       {
         code: "grocery_curd",
         categoryCode: "dairy",
         canonicalName: "Curd",
-        canonicalDescription: "Fresh curd tubs and pouches.",
+        canonicalDescription: "Packaged curd tubs and pouches sold as counted retail packs.",
         translations: withDescriptions(names("Curd", "दही", "દહીં")),
-        defaultTrackMethod: TrackMethod.WEIGHT,
-        defaultUnitCode: "kg",
-        defaultBrandName: "Mother Dairy",
+        defaultTrackMethod: TrackMethod.PIECE,
+        defaultUnitCode: "pack",
       },
       {
         code: "grocery_paneer",
         categoryCode: "dairy",
         canonicalName: "Paneer",
-        canonicalDescription: "Fresh cottage cheese blocks.",
+        canonicalDescription: "Packaged paneer blocks sold as counted retail packs.",
         translations: withDescriptions(names("Paneer", "पनीर", "પનીર")),
-        defaultTrackMethod: TrackMethod.WEIGHT,
-        defaultUnitCode: "kg",
-        defaultBrandName: "Amul",
+        defaultTrackMethod: TrackMethod.PIECE,
+        defaultUnitCode: "pack",
       },
       {
         code: "grocery_potato_chips",
@@ -728,70 +747,27 @@ const industries: IndustrySeed[] = [
         translations: withDescriptions(names("Potato Chips", "आलू चिप्स", "બટાકા ચીપ્સ")),
         aliases: [{ language: LanguageCode.EN, value: "chips" }],
         defaultUnitCode: "pack",
-        defaultBrandName: "Haldiram",
       },
       {
         code: "grocery_biscuits",
         categoryCode: "biscuits",
-        canonicalName: "Parle-G Gluco Biscuits",
-        canonicalDescription: "Classic glucose biscuits for tea-time and everyday snacking.",
+        canonicalName: getSuggestedMasterCatalogName("grocery_biscuits", "Glucose Biscuits"),
+        canonicalDescription: "Packaged glucose biscuits that can be reused across multiple shelf brands.",
         translations: withDescriptions(
-          names("Parle-G Gluco Biscuits", "पारले-जी ग्लूको बिस्किट", "પાર્લે-જી ગ્લુકો બિસ્કિટ"),
+          names("Glucose Biscuits", "ग्लूकोज़ बिस्किट", "ગ્લુકોઝ બિસ્કિટ"),
           {
-            EN: "Classic glucose biscuits for tea-time and everyday snacking.",
-            HI: "चाय-समय और रोज़मर्रा के स्नैक के लिए क्लासिक ग्लूकोज़ बिस्किट।",
-            GU: "ચા સમય અને રોજિંદા નાસ્તા માટેના ક્લાસિક ગ્લુકોઝ બિસ્કિટ.",
+            EN: "Packaged glucose biscuits that can be reused across multiple shelf brands.",
+            HI: "पैक्ड ग्लूकोज़ बिस्किट जिन्हें कई शेल्फ ब्रांड्स के लिए इस्तेमाल किया जा सकता है।",
+            GU: "પૅક થયેલા ગ્લુકોઝ બિસ્કિટ જે ઘણા શેલ્ફ બ્રાન્ડ્સ માટે વાપરી શકાય છે.",
           },
         ),
         aliases: [
-          { language: LanguageCode.EN, value: "Parle-G" },
           { language: LanguageCode.EN, value: "glucose biscuits" },
-          { language: LanguageCode.HI, value: "पारले जी" },
-          { language: LanguageCode.GU, value: "પાર્લે જી" },
+          { language: LanguageCode.HI, value: "ग्लूकोज़ बिस्किट" },
+          { language: LanguageCode.GU, value: "ગ્લુકોઝ બિસ્કિટ" },
         ],
         defaultUnitCode: "pack",
-        defaultBrandName: "Parle",
         tags: ["biscuits", "glucose", "tea-time", "snacks"],
-        hasVariants: true,
-        variantTemplates: [
-          {
-            code: "79_9G",
-            name: "79.9 g Pack",
-            skuSuffix: "79.9G",
-            attributes: {
-              size: "79.9 g",
-              packType: "Pack",
-            },
-            defaultCostPrice: "8.50",
-            defaultSellingPrice: "10.00",
-            defaultMrp: "10.00",
-            reorderLevel: "40",
-            minStockLevel: "30",
-            maxStockLevel: "250",
-            weight: "79.9",
-            unitCode: "pack",
-            isDefault: true,
-            translations: names("79.9 g Pack", "79.9 ग्राम पैक", "79.9 ગ્રામ પેક"),
-          },
-          {
-            code: "143G",
-            name: "143 g Family Pack",
-            skuSuffix: "143G",
-            attributes: {
-              size: "143 g",
-              packType: "Family Pack",
-            },
-            defaultCostPrice: "18.00",
-            defaultSellingPrice: "22.00",
-            defaultMrp: "22.00",
-            reorderLevel: "30",
-            minStockLevel: "20",
-            maxStockLevel: "180",
-            weight: "143",
-            unitCode: "pack",
-            translations: names("143 g Family Pack", "143 ग्राम फैमिली पैक", "143 ગ્રામ ફેમિલી પેક"),
-          },
-        ],
       },
       {
         code: "grocery_packaged_water",
@@ -799,9 +775,8 @@ const industries: IndustrySeed[] = [
         canonicalName: "Packaged Water",
         canonicalDescription: "Sealed drinking water bottles.",
         translations: withDescriptions(names("Packaged Water", "पैक्ड पानी", "પૅકેજ્ડ પાણી")),
-        defaultTrackMethod: TrackMethod.VOLUME,
-        defaultUnitCode: "l",
-        defaultBrandName: "Bisleri",
+        defaultTrackMethod: TrackMethod.PIECE,
+        defaultUnitCode: "pack",
       },
       {
         code: "grocery_rice",
@@ -810,9 +785,8 @@ const industries: IndustrySeed[] = [
         canonicalDescription: "Popular everyday rice grades.",
         translations: withDescriptions(names("Rice", "चावल", "ચોખા")),
         aliases: [{ language: LanguageCode.HI, value: "चावल" }],
-        defaultTrackMethod: TrackMethod.WEIGHT,
-        defaultUnitCode: "kg",
-        defaultBrandName: "India Gate",
+        defaultTrackMethod: TrackMethod.PIECE,
+        defaultUnitCode: "pack",
       },
       {
         code: "grocery_wheat_flour",
@@ -820,9 +794,8 @@ const industries: IndustrySeed[] = [
         canonicalName: "Wheat Flour",
         canonicalDescription: "Fresh chakki atta and packaged flour.",
         translations: withDescriptions(names("Wheat Flour", "आटा", "ઘઉંનો લોટ")),
-        defaultTrackMethod: TrackMethod.WEIGHT,
-        defaultUnitCode: "kg",
-        defaultBrandName: "Aashirvaad",
+        defaultTrackMethod: TrackMethod.PIECE,
+        defaultUnitCode: "pack",
       },
       {
         code: "grocery_cooking_oil",
@@ -830,30 +803,30 @@ const industries: IndustrySeed[] = [
         canonicalName: "Cooking Oil",
         canonicalDescription: "Refined cooking oil for home use.",
         translations: withDescriptions(names("Cooking Oil", "खाना पकाने का तेल", "રસોઈનું તેલ")),
-        defaultTrackMethod: TrackMethod.VOLUME,
-        defaultUnitCode: "l",
-        defaultBrandName: "Fortune",
+        defaultTrackMethod: TrackMethod.PIECE,
+        defaultUnitCode: "pack",
       },
       {
         code: "grocery_tea",
         categoryCode: "beverages",
-        canonicalName: "Tea",
-        canonicalDescription: "Daily chai blends and packaged tea leaves.",
-        translations: withDescriptions(names("Tea", "चाय", "ચા")),
-        aliases: [{ language: LanguageCode.EN, value: "chai" }],
+        canonicalName: getSuggestedMasterCatalogName("grocery_tea", "Packaged Tea"),
+        canonicalDescription: "Branded packaged tea sold as counted retail packs.",
+        translations: withDescriptions(names("Packaged Tea", "पैक्ड चाय", "પૅકેજ્ડ ચા")),
+        aliases: [
+          { language: LanguageCode.EN, value: "chai" },
+          { language: LanguageCode.EN, value: "tea pack" },
+        ],
         defaultUnitCode: "pack",
-        defaultBrandName: "Tata Tea",
         tags: ["tea", "breakfast", "chai"],
       },
       {
         code: "grocery_noodles",
         categoryCode: "snacks",
-        canonicalName: "Instant Noodles",
+        canonicalName: getSuggestedMasterCatalogName("grocery_noodles", "Instant Noodles"),
         canonicalDescription: "Ready-to-cook instant noodles for quick meals.",
         translations: withDescriptions(names("Instant Noodles", "इंस्टेंट नूडल्स", "ઇન્સ્ટન્ટ નૂડલ્સ")),
         aliases: [{ language: LanguageCode.EN, value: "2 minute noodles" }],
         defaultUnitCode: "pack",
-        defaultBrandName: "Maggi",
         tags: ["instant-food", "snacks"],
       },
       {
@@ -863,9 +836,8 @@ const industries: IndustrySeed[] = [
         canonicalDescription: "Split pigeon peas used in daily Indian cooking.",
         translations: withDescriptions(names("Toor Dal", "तूर दाल", "તુવેર દાળ")),
         aliases: [{ language: LanguageCode.EN, value: "arhar dal" }],
-        defaultTrackMethod: TrackMethod.WEIGHT,
-        defaultUnitCode: "kg",
-        defaultBrandName: "Tata Sampann",
+        defaultTrackMethod: TrackMethod.PIECE,
+        defaultUnitCode: "pack",
         tags: ["dal", "staples", "indian-kitchen"],
       },
     ],
@@ -2352,22 +2324,20 @@ const groceryDemoBranches: OrgBranchSeed[] = [
   },
 ];
 
-const groceryDemoBrands: OrgBrandSeed[] = [
+const groceryDemoBrandsBase: OrgBrandSeed[] = [
   { slug: "amul", translations: { EN: "Amul", HI: "अमूल" } },
   { slug: "mother-dairy", translations: { EN: "Mother Dairy", HI: "मदर डेयरी" } },
-  { slug: "britannia", translations: { EN: "Britannia", HI: "ब्रिटानिया" } },
   { slug: "haldiram", translations: { EN: "Haldiram", HI: "हल्दीराम" } },
   { slug: "bisleri", translations: { EN: "Bisleri", HI: "बिसलेरी" } },
   { slug: "india-gate", translations: { EN: "India Gate", HI: "इंडिया गेट" } },
   { slug: "aashirvaad", translations: { EN: "Aashirvaad", HI: "आशीर्वाद" } },
   { slug: "fortune", translations: { EN: "Fortune", HI: "फॉर्च्यून" } },
-  { slug: "parle", translations: { EN: "Parle", HI: "पारले" } },
   { slug: "tata-sampann", translations: { EN: "Tata Sampann", HI: "टाटा संपन्न" } },
   { slug: "tata-tea", translations: { EN: "Tata Tea", HI: "टाटा टी" } },
   { slug: "maggi", translations: { EN: "Maggi", HI: "मैगी" } },
 ];
 
-const groceryDemoCategories: OrgCategorySeed[] = [
+const groceryDemoCategoriesBase: OrgCategorySeed[] = [
   {
     slug: "milk-dairy",
     sortOrder: 1,
@@ -2435,6 +2405,18 @@ const groceryDemoCategories: OrgCategorySeed[] = [
   },
 ];
 
+const groceryDemoBrands = mergeSeedByKey(
+  groceryDemoBrandsBase,
+  groceryFmcgBrandPatch,
+  (brand) => brand.slug,
+);
+
+const groceryDemoCategories = mergeSeedByKey(
+  groceryDemoCategoriesBase,
+  groceryFmcgCategoryPatch,
+  (category) => category.slug,
+);
+
 const grocerySuppliers: OrgSupplierSeed[] = [
   {
     code: "SUP-AMUL-01",
@@ -2479,47 +2461,109 @@ const groceryCustomers: OrgCustomerSeed[] = [
   { name: "Manan Desai", phone: "+91-9870001005", email: "manan.desai@example.com", notes: "Corporate pantry purchaser." },
 ];
 
-const groceryProducts: OrgProductSeed[] = [
+function normalizeGroceryFmcgPatchProduct(product: OrgProductSeed): OrgProductSeed {
+  switch (product.slug) {
+    case "maggi-2-minute-noodles-masala":
+      return {
+        ...product,
+        slug: "maggi-noodles",
+        variants: product.variants.map((variant) => {
+          if (variant.name === "70 g Pack") {
+            return { ...variant, sku: "MAGGI-70G" };
+          }
+
+          if (variant.name === "140 g Pack") {
+            return { ...variant, sku: "MAGGI-140G" };
+          }
+
+          if (variant.name === "280 g Pack") {
+            return { ...variant, sku: "MAGGI-280G" };
+          }
+
+          return variant;
+        }),
+      };
+    case "parle-g-gluco-biscuits":
+      return {
+        ...product,
+        variants: product.variants.map((variant) => {
+          if (variant.name === "79.9 g Pack") {
+            return { ...variant, sku: "PARLE-G-79.9G" };
+          }
+
+          if (variant.name === "143 g Family Pack") {
+            return { ...variant, sku: "PARLE-G-143G" };
+          }
+
+          return variant;
+        }),
+      };
+    default:
+      return product;
+  }
+}
+
+const groceryProductsBase: OrgProductSeed[] = [
   {
     slug: "amul-fresh-milk",
     masterItemCode: "grocery_milk",
     industryCode: "grocery",
     categorySlug: "milk-dairy",
     brandSlug: "amul",
-    name: "Amul Fresh Milk",
-    nameHi: "अमूल फ्रेश दूध",
-    description: "Fresh pouch milk for daily retail sale.",
-    descriptionHi: "रोज़ाना रिटेल बिक्री के लिए ताज़ा दूध पाउच।",
-    primaryUnitCode: "l",
-    trackMethod: TrackMethod.VOLUME,
+    name: "Fresh Milk",
+    nameHi: "फ्रेश दूध",
+    description: "Packaged fresh milk sold in counted retail pouches for daily replenishment.",
+    descriptionHi: "रोज़ की रीप्लेनिशमेंट के लिए गिने जाने वाले रिटेल पाउच में पैक्ड फ्रेश दूध।",
+    primaryUnitCode: "pack",
+    trackMethod: TrackMethod.PIECE,
     tags: ["milk", "daily", "cold-chain"],
+    metadata: {
+      ownerCompany: "GCMMF",
+      manufacturerName: "Gujarat Cooperative Milk Marketing Federation Ltd.",
+      brandHierarchy: {
+        ownerCompany: "Amul",
+        brand: "Amul",
+        subBrand: "Fresh Milk",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
-        name: "500 ml",
+        name: "500 ml Pouch",
         sku: "AMUL-MILK-500",
-        attributes: { size: "500 ml" },
+        attributes: {
+          sizeLabel: "500 ml",
+          netQuantity: 500,
+          netQuantityUnit: "ml",
+          packType: "pouch",
+        },
         costPrice: "26.00",
         sellingPrice: "29.00",
         mrp: "30.00",
         reorderLevel: "25",
         minStockLevel: "20",
         maxStockLevel: "180",
-        unitCode: "ml",
+        unitCode: "pack",
         isDefault: true,
-        translations: { EN: "500 ml", HI: "500 मि.ली." },
+        translations: { EN: "500 ml Pouch", HI: "500 मि.ली. पाउच" },
       },
       {
-        name: "1 Liter",
+        name: "1 Liter Pouch",
         sku: "AMUL-MILK-1L",
-        attributes: { size: "1 Liter" },
+        attributes: {
+          sizeLabel: "1 Liter",
+          netQuantity: 1,
+          netQuantityUnit: "l",
+          packType: "pouch",
+        },
         costPrice: "51.00",
         sellingPrice: "56.00",
         mrp: "58.00",
         reorderLevel: "20",
         minStockLevel: "15",
         maxStockLevel: "160",
-        unitCode: "l",
-        translations: { EN: "1 Liter", HI: "1 लीटर" },
+        unitCode: "pack",
+        translations: { EN: "1 Liter Pouch", HI: "1 लीटर पाउच" },
       },
     ],
   },
@@ -2529,39 +2573,59 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "milk-dairy",
     brandSlug: "amul",
-    name: "Amul Paneer",
-    nameHi: "अमूल पनीर",
-    description: "Fresh paneer cubes for home cooking and quick meals.",
-    descriptionHi: "घर के खाना पकाने और क्विक मील्स के लिए ताज़ा पनीर क्यूब्स।",
-    primaryUnitCode: "kg",
-    trackMethod: TrackMethod.WEIGHT,
+    name: "Paneer",
+    nameHi: "पनीर",
+    description: "Packaged paneer blocks for home cooking and quick meals.",
+    descriptionHi: "घर के खाना पकाने और क्विक मील्स के लिए पैक्ड पनीर ब्लॉक्स।",
+    primaryUnitCode: "pack",
+    trackMethod: TrackMethod.PIECE,
     tags: ["paneer", "dairy", "protein"],
+    metadata: {
+      ownerCompany: "GCMMF",
+      manufacturerName: "Gujarat Cooperative Milk Marketing Federation Ltd.",
+      brandHierarchy: {
+        ownerCompany: "Amul",
+        brand: "Amul",
+        subBrand: "Paneer",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
         name: "200 g Pack",
         sku: "AMUL-PANEER-200",
-        attributes: { size: "200 g" },
+        attributes: {
+          sizeLabel: "200 g",
+          netQuantity: 200,
+          netQuantityUnit: "g",
+          packType: "vacuum-pack",
+        },
         costPrice: "78.00",
         sellingPrice: "88.00",
         mrp: "90.00",
         reorderLevel: "16",
         minStockLevel: "12",
         maxStockLevel: "90",
-        unitCode: "g",
+        unitCode: "pack",
         isDefault: true,
         translations: { EN: "200 g Pack", HI: "200 ग्राम पैक" },
       },
       {
         name: "500 g Pack",
         sku: "AMUL-PANEER-500",
-        attributes: { size: "500 g" },
+        attributes: {
+          sizeLabel: "500 g",
+          netQuantity: 500,
+          netQuantityUnit: "g",
+          packType: "vacuum-pack",
+        },
         costPrice: "188.00",
         sellingPrice: "210.00",
         mrp: "215.00",
         reorderLevel: "10",
         minStockLevel: "8",
         maxStockLevel: "60",
-        unitCode: "g",
+        unitCode: "pack",
         translations: { EN: "500 g Pack", HI: "500 ग्राम पैक" },
       },
     ],
@@ -2572,40 +2636,60 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "milk-dairy",
     brandSlug: "mother-dairy",
-    name: "Mother Dairy Curd",
-    nameHi: "मदर डेयरी दही",
-    description: "Fresh curd tubs for home and hostel use.",
-    descriptionHi: "घर और हॉस्टल उपयोग के लिए ताज़ा दही टब।",
-    primaryUnitCode: "kg",
-    trackMethod: TrackMethod.WEIGHT,
+    name: "Curd",
+    nameHi: "दही",
+    description: "Packaged curd tubs for home and hostel use.",
+    descriptionHi: "घर और हॉस्टल उपयोग के लिए पैक्ड दही टब।",
+    primaryUnitCode: "pack",
+    trackMethod: TrackMethod.PIECE,
     tags: ["curd", "daily", "cold-chain"],
+    metadata: {
+      ownerCompany: "Mother Dairy Fruit & Vegetable Pvt. Ltd.",
+      manufacturerName: "Mother Dairy Fruit & Vegetable Pvt. Ltd.",
+      brandHierarchy: {
+        ownerCompany: "Mother Dairy",
+        brand: "Mother Dairy",
+        subBrand: "Curd",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
-        name: "400 g",
+        name: "400 g Tub",
         sku: "MD-CURD-400G",
-        attributes: { size: "400 g" },
+        attributes: {
+          sizeLabel: "400 g",
+          netQuantity: 400,
+          netQuantityUnit: "g",
+          packType: "tub",
+        },
         costPrice: "30.00",
         sellingPrice: "35.00",
         mrp: "36.00",
         reorderLevel: "18",
         minStockLevel: "12",
         maxStockLevel: "120",
-        unitCode: "g",
+        unitCode: "pack",
         isDefault: true,
-        translations: { EN: "400 g", HI: "400 ग्राम" },
+        translations: { EN: "400 g Tub", HI: "400 ग्राम टब" },
       },
       {
-        name: "1 kg",
+        name: "1 kg Tub",
         sku: "MD-CURD-1KG",
-        attributes: { size: "1 kg" },
+        attributes: {
+          sizeLabel: "1 kg",
+          netQuantity: 1,
+          netQuantityUnit: "kg",
+          packType: "tub",
+        },
         costPrice: "65.00",
         sellingPrice: "74.00",
         mrp: "76.00",
         reorderLevel: "10",
         minStockLevel: "8",
         maxStockLevel: "90",
-        unitCode: "kg",
-        translations: { EN: "1 kg", HI: "1 किलो" },
+        unitCode: "pack",
+        translations: { EN: "1 kg Tub", HI: "1 किलो टब" },
       },
     ],
   },
@@ -2660,18 +2744,33 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "snacks",
     brandSlug: "haldiram",
-    name: "Haldiram Potato Chips",
-    nameHi: "हल्दीराम आलू चिप्स",
+    name: "Potato Chips",
+    nameHi: "आलू चिप्स",
     description: "Popular salted and masala chips.",
     descriptionHi: "लोकप्रिय नमकीन और मसाला चिप्स।",
     primaryUnitCode: "pack",
     trackMethod: TrackMethod.PIECE,
     tags: ["chips", "snacks"],
+    metadata: {
+      ownerCompany: "Haldiram Snacks",
+      manufacturerName: "Haldiram Snacks Pvt. Ltd.",
+      brandHierarchy: {
+        ownerCompany: "Haldiram",
+        brand: "Haldiram",
+        subBrand: "Potato Chips",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
         name: "52 g Pack",
         sku: "HAL-CHIPS-52",
-        attributes: { size: "52 g" },
+        attributes: {
+          sizeLabel: "52 g",
+          netQuantity: 52,
+          netQuantityUnit: "g",
+          packType: "pouch",
+        },
         costPrice: "17.00",
         sellingPrice: "20.00",
         mrp: "20.00",
@@ -2685,7 +2784,12 @@ const groceryProducts: OrgProductSeed[] = [
       {
         name: "90 g Pack",
         sku: "HAL-CHIPS-90",
-        attributes: { size: "90 g" },
+        attributes: {
+          sizeLabel: "90 g",
+          netQuantity: 90,
+          netQuantityUnit: "g",
+          packType: "pouch",
+        },
         costPrice: "26.00",
         sellingPrice: "30.00",
         mrp: "30.00",
@@ -2703,39 +2807,59 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "beverages",
     brandSlug: "bisleri",
-    name: "Bisleri Mineral Water",
-    nameHi: "बिसलेरी मिनरल वाटर",
+    name: "Mineral Water",
+    nameHi: "मिनरल वाटर",
     description: "Packaged drinking water for home, office, and travel use.",
     descriptionHi: "घर, ऑफिस और यात्रा के लिए पैक्ड पीने का पानी।",
-    primaryUnitCode: "l",
-    trackMethod: TrackMethod.VOLUME,
+    primaryUnitCode: "pack",
+    trackMethod: TrackMethod.PIECE,
     tags: ["water", "beverages", "daily-use"],
+    metadata: {
+      ownerCompany: "Bisleri International",
+      manufacturerName: "Bisleri International Pvt. Ltd.",
+      brandHierarchy: {
+        ownerCompany: "Bisleri",
+        brand: "Bisleri",
+        subBrand: "Mineral Water",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
         name: "1 Liter Bottle",
         sku: "BIS-WATER-1L",
-        attributes: { size: "1 Liter" },
+        attributes: {
+          sizeLabel: "1 Liter",
+          netQuantity: 1,
+          netQuantityUnit: "l",
+          packType: "bottle",
+        },
         costPrice: "16.00",
         sellingPrice: "20.00",
         mrp: "20.00",
         reorderLevel: "36",
         minStockLevel: "24",
         maxStockLevel: "220",
-        unitCode: "l",
+        unitCode: "pack",
         isDefault: true,
         translations: { EN: "1 Liter Bottle", HI: "1 लीटर बोतल" },
       },
       {
         name: "2 Liter Bottle",
         sku: "BIS-WATER-2L",
-        attributes: { size: "2 Liter" },
+        attributes: {
+          sizeLabel: "2 Liter",
+          netQuantity: 2,
+          netQuantityUnit: "l",
+          packType: "bottle",
+        },
         costPrice: "28.00",
         sellingPrice: "35.00",
         mrp: "35.00",
         reorderLevel: "20",
         minStockLevel: "14",
         maxStockLevel: "140",
-        unitCode: "l",
+        unitCode: "pack",
         translations: { EN: "2 Liter Bottle", HI: "2 लीटर बोतल" },
       },
     ],
@@ -2746,39 +2870,59 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "rice-atta",
     brandSlug: "india-gate",
-    name: "India Gate Rice",
-    nameHi: "इंडिया गेट चावल",
+    name: "Basmati Rice",
+    nameHi: "बासमती चावल",
     description: "Everyday rice for families and hostels.",
     descriptionHi: "परिवार और हॉस्टल के लिए रोज़मर्रा का चावल।",
-    primaryUnitCode: "kg",
-    trackMethod: TrackMethod.WEIGHT,
+    primaryUnitCode: "pack",
+    trackMethod: TrackMethod.PIECE,
     tags: ["rice", "staples"],
+    metadata: {
+      ownerCompany: "KRBL",
+      manufacturerName: "KRBL Limited",
+      brandHierarchy: {
+        ownerCompany: "KRBL",
+        brand: "India Gate",
+        subBrand: "Basmati Rice",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
         name: "5 kg Bag",
         sku: "IG-RICE-5KG",
-        attributes: { size: "5 kg" },
+        attributes: {
+          sizeLabel: "5 kg",
+          netQuantity: 5,
+          netQuantityUnit: "kg",
+          packType: "bag",
+        },
         costPrice: "255.00",
         sellingPrice: "290.00",
         mrp: "299.00",
         reorderLevel: "15",
         minStockLevel: "10",
         maxStockLevel: "80",
-        unitCode: "kg",
+        unitCode: "pack",
         isDefault: true,
         translations: { EN: "5 kg Bag", HI: "5 किलो बैग" },
       },
       {
         name: "10 kg Bag",
         sku: "IG-RICE-10KG",
-        attributes: { size: "10 kg" },
+        attributes: {
+          sizeLabel: "10 kg",
+          netQuantity: 10,
+          netQuantityUnit: "kg",
+          packType: "bag",
+        },
         costPrice: "500.00",
         sellingPrice: "565.00",
         mrp: "580.00",
         reorderLevel: "10",
         minStockLevel: "6",
         maxStockLevel: "60",
-        unitCode: "kg",
+        unitCode: "pack",
         translations: { EN: "10 kg Bag", HI: "10 किलो बैग" },
       },
     ],
@@ -2789,39 +2933,59 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "rice-atta",
     brandSlug: "aashirvaad",
-    name: "Aashirvaad Atta",
-    nameHi: "आशीर्वाद आटा",
+    name: "Whole Wheat Atta",
+    nameHi: "होल व्हीट आटा",
     description: "Whole wheat flour for homes and kitchens.",
     descriptionHi: "घर और रसोई के लिए गेहूं का आटा।",
-    primaryUnitCode: "kg",
-    trackMethod: TrackMethod.WEIGHT,
+    primaryUnitCode: "pack",
+    trackMethod: TrackMethod.PIECE,
     tags: ["atta", "staples"],
+    metadata: {
+      ownerCompany: "ITC",
+      manufacturerName: "ITC Limited",
+      brandHierarchy: {
+        ownerCompany: "ITC",
+        brand: "Aashirvaad",
+        subBrand: "Whole Wheat Atta",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
         name: "5 kg Pack",
         sku: "AA-ATTA-5KG",
-        attributes: { size: "5 kg" },
+        attributes: {
+          sizeLabel: "5 kg",
+          netQuantity: 5,
+          netQuantityUnit: "kg",
+          packType: "bag",
+        },
         costPrice: "210.00",
         sellingPrice: "235.00",
         mrp: "240.00",
         reorderLevel: "14",
         minStockLevel: "10",
         maxStockLevel: "90",
-        unitCode: "kg",
+        unitCode: "pack",
         isDefault: true,
         translations: { EN: "5 kg Pack", HI: "5 किलो पैक" },
       },
       {
         name: "10 kg Pack",
         sku: "AA-ATTA-10KG",
-        attributes: { size: "10 kg" },
+        attributes: {
+          sizeLabel: "10 kg",
+          netQuantity: 10,
+          netQuantityUnit: "kg",
+          packType: "bag",
+        },
         costPrice: "405.00",
         sellingPrice: "455.00",
         mrp: "465.00",
         reorderLevel: "8",
         minStockLevel: "6",
         maxStockLevel: "60",
-        unitCode: "kg",
+        unitCode: "pack",
         translations: { EN: "10 kg Pack", HI: "10 किलो पैक" },
       },
     ],
@@ -2832,39 +2996,59 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "pulses-spices",
     brandSlug: "tata-sampann",
-    name: "Tata Sampann Toor Dal",
-    nameHi: "टाटा संपन्न तूर दाल",
+    name: "Toor Dal",
+    nameHi: "तूर दाल",
     description: "Everyday toor dal for Indian home cooking.",
     descriptionHi: "भारतीय घरों के रोज़मर्रा खाना पकाने के लिए तूर दाल।",
-    primaryUnitCode: "kg",
-    trackMethod: TrackMethod.WEIGHT,
+    primaryUnitCode: "pack",
+    trackMethod: TrackMethod.PIECE,
     tags: ["dal", "staples", "protein"],
+    metadata: {
+      ownerCompany: "Tata Consumer Products",
+      manufacturerName: "Tata Consumer Products Limited",
+      brandHierarchy: {
+        ownerCompany: "Tata",
+        brand: "Tata Sampann",
+        subBrand: "Toor Dal",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
         name: "1 kg Pack",
         sku: "TS-TOOR-1KG",
-        attributes: { size: "1 kg" },
+        attributes: {
+          sizeLabel: "1 kg",
+          netQuantity: 1,
+          netQuantityUnit: "kg",
+          packType: "bag",
+        },
         costPrice: "155.00",
         sellingPrice: "172.00",
         mrp: "175.00",
         reorderLevel: "18",
         minStockLevel: "12",
         maxStockLevel: "110",
-        unitCode: "kg",
+        unitCode: "pack",
         isDefault: true,
         translations: { EN: "1 kg Pack", HI: "1 किलो पैक" },
       },
       {
         name: "2 kg Pack",
         sku: "TS-TOOR-2KG",
-        attributes: { size: "2 kg" },
+        attributes: {
+          sizeLabel: "2 kg",
+          netQuantity: 2,
+          netQuantityUnit: "kg",
+          packType: "bag",
+        },
         costPrice: "302.00",
         sellingPrice: "334.00",
         mrp: "340.00",
         reorderLevel: "12",
         minStockLevel: "8",
         maxStockLevel: "70",
-        unitCode: "kg",
+        unitCode: "pack",
         translations: { EN: "2 kg Pack", HI: "2 किलो पैक" },
       },
     ],
@@ -2875,39 +3059,59 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "oils-ghee",
     brandSlug: "fortune",
-    name: "Fortune Cooking Oil",
-    nameHi: "फॉर्च्यून कुकिंग ऑयल",
+    name: "Refined Cooking Oil",
+    nameHi: "रिफाइंड कुकिंग ऑयल",
     description: "Refined oil for daily cooking.",
     descriptionHi: "रोज़ की कुकिंग के लिए रिफाइंड तेल।",
-    primaryUnitCode: "l",
-    trackMethod: TrackMethod.VOLUME,
+    primaryUnitCode: "pack",
+    trackMethod: TrackMethod.PIECE,
     tags: ["oil", "kitchen"],
+    metadata: {
+      ownerCompany: "AWL Agri Business",
+      manufacturerName: "AWL Agri Business Limited",
+      brandHierarchy: {
+        ownerCompany: "Fortune",
+        brand: "Fortune",
+        subBrand: "Refined Cooking Oil",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
         name: "1 Liter Pouch",
         sku: "FORT-OIL-1L",
-        attributes: { size: "1 Liter" },
+        attributes: {
+          sizeLabel: "1 Liter",
+          netQuantity: 1,
+          netQuantityUnit: "l",
+          packType: "pouch",
+        },
         costPrice: "128.00",
         sellingPrice: "145.00",
         mrp: "148.00",
         reorderLevel: "20",
         minStockLevel: "16",
         maxStockLevel: "120",
-        unitCode: "l",
+        unitCode: "pack",
         isDefault: true,
         translations: { EN: "1 Liter Pouch", HI: "1 लीटर पाउच" },
       },
       {
         name: "5 Liter Jar",
         sku: "FORT-OIL-5L",
-        attributes: { size: "5 Liter" },
+        attributes: {
+          sizeLabel: "5 Liter",
+          netQuantity: 5,
+          netQuantityUnit: "l",
+          packType: "jar",
+        },
         costPrice: "620.00",
         sellingPrice: "690.00",
         mrp: "710.00",
         reorderLevel: "10",
         minStockLevel: "8",
         maxStockLevel: "70",
-        unitCode: "l",
+        unitCode: "pack",
         translations: { EN: "5 Liter Jar", HI: "5 लीटर जार" },
       },
     ],
@@ -2918,18 +3122,33 @@ const groceryProducts: OrgProductSeed[] = [
     industryCode: "grocery",
     categorySlug: "tea-breakfast",
     brandSlug: "tata-tea",
-    name: "Tata Tea Gold",
-    nameHi: "टाटा टी गोल्ड",
+    name: "Gold Tea",
+    nameHi: "गोल्ड चाय",
     description: "Strong daily chai blend for homes and offices.",
     descriptionHi: "घर और ऑफिस के लिए मज़बूत रोज़ाना चाय ब्लेंड।",
     primaryUnitCode: "pack",
     trackMethod: TrackMethod.PIECE,
     tags: ["tea", "breakfast", "chai"],
+    metadata: {
+      ownerCompany: "Tata Consumer Products",
+      manufacturerName: "Tata Consumer Products Limited",
+      brandHierarchy: {
+        ownerCompany: "Tata",
+        brand: "Tata Tea",
+        subBrand: "Gold",
+      },
+      merchandisingType: "packaged-fmcg",
+    },
     variants: [
       {
         name: "500 g Pack",
         sku: "TT-GOLD-500",
-        attributes: { size: "500 g" },
+        attributes: {
+          sizeLabel: "500 g",
+          netQuantity: 500,
+          netQuantityUnit: "g",
+          packType: "pouch",
+        },
         costPrice: "248.00",
         sellingPrice: "275.00",
         mrp: "280.00",
@@ -2943,7 +3162,12 @@ const groceryProducts: OrgProductSeed[] = [
       {
         name: "1 kg Pack",
         sku: "TT-GOLD-1KG",
-        attributes: { size: "1 kg" },
+        attributes: {
+          sizeLabel: "1 kg",
+          netQuantity: 1,
+          netQuantityUnit: "kg",
+          packType: "pouch",
+        },
         costPrice: "485.00",
         sellingPrice: "535.00",
         mrp: "545.00",
@@ -2999,6 +3223,14 @@ const groceryProducts: OrgProductSeed[] = [
     ],
   },
 ];
+
+// FMCG hierarchy for grocery demo data:
+// Brand = shelf brand, Product = product family, Variant = sellable pack/SKU.
+const groceryProducts = mergeSeedByKey(
+  groceryProductsBase,
+  groceryFmcgProductPatch.map((product) => normalizeGroceryFmcgPatchProduct(product)),
+  (product) => product.slug,
+);
 
 const groceryInventory: InventorySeed[] = [
   { branchCode: "GROC-WH-1", sku: "AMUL-MILK-500", onHand: "90", openingCost: "26.00", note: "Opening stock" },

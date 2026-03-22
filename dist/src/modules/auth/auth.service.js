@@ -36,7 +36,10 @@ function serializeMemberships(memberships) {
         role: membership.role,
         isDefault: membership.isDefault,
         branchAccess: (0, branchAccess_1.normalizeBranchAccess)(membership.branchAccess),
-        organization: membership.organization,
+        organization: {
+            ...membership.organization,
+            industries: membership.organization.industryConfigs,
+        },
     }));
 }
 async function buildAuthenticatedSession(userId, requestedOrganizationId) {
@@ -60,6 +63,11 @@ async function buildAuthenticatedSession(userId, requestedOrganizationId) {
                             slug: true,
                             email: true,
                             status: true,
+                            industryConfigs: {
+                                include: {
+                                    industry: true,
+                                },
+                            },
                         },
                     },
                 },
@@ -428,6 +436,11 @@ async function getMe(userId, activeOrganizationId, role) {
                             slug: true,
                             email: true,
                             status: true,
+                            industryConfigs: {
+                                include: {
+                                    industry: true,
+                                },
+                            },
                         },
                     },
                 },

@@ -176,7 +176,23 @@ export async function translateText(
     }
   }
 
-  const translatedText = await requestLibreTranslate(normalizedValue, sourceLanguage, targetLanguage);
+  let translatedText: string;
+
+  try {
+    translatedText = await requestLibreTranslate(normalizedValue, sourceLanguage, targetLanguage);
+  } catch (error) {
+    if (!env.AUTO_TRANSLATE_FAIL_OPEN) {
+      throw error;
+    }
+
+    console.warn("LibreTranslate request failed; returning source text due to fail-open mode", {
+      sourceLanguage,
+      targetLanguage,
+      error,
+    });
+
+    return normalizedValue;
+  }
 
   if (redis) {
     try {

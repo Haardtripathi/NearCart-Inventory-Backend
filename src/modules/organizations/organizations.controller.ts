@@ -14,7 +14,7 @@ export async function createOrganizationController(req: Request, res: Response) 
 }
 
 export async function getMyOrganizationsController(req: Request, res: Response) {
-  const data = await getMyOrganizations(req.auth!.userId);
+  const data = await getMyOrganizations(req.auth!.userId, req.auth!.role);
   return sendSuccess(res, 200, "Organizations fetched successfully", data);
 }
 

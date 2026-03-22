@@ -334,7 +334,47 @@ async function createOrganization(currentUserId, currentRole, input) {
         };
     });
 }
-async function getMyOrganizations(userId) {
+async function getMyOrganizations(userId, requesterRole) {
+    if (requesterRole === client_1.UserRole.SUPER_ADMIN) {
+        const organizations = await prisma_1.prisma.organization.findMany({
+            where: {
+                deletedAt: null,
+            },
+            include: {
+                industryConfigs: {
+                    include: {
+                        industry: true,
+                    },
+                },
+                memberships: {
+                    where: {
+                        userId,
+                        status: client_1.MembershipStatus.ACTIVE,
+                        user: {
+                            isActive: true,
+                        },
+                    },
+                    select: {
+                        role: true,
+                        isDefault: true,
+                    },
+                    take: 1,
+                },
+            },
+            orderBy: {
+                createdAt: "asc",
+            },
+        });
+        return organizations.map((organization) => ({
+            id: organization.id,
+            name: organization.name,
+            slug: organization.slug,
+            status: organization.status,
+            role: organization.memberships[0]?.role ?? client_1.UserRole.SUPER_ADMIN,
+            isDefault: organization.memberships[0]?.isDefault ?? false,
+            industries: organization.industryConfigs,
+        }));
+    }
     const memberships = await prisma_1.prisma.organizationMembership.findMany({
         where: {
             userId,

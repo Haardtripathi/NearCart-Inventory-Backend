@@ -8,6 +8,7 @@ exports.resetPasswordController = resetPasswordController;
 exports.changePasswordController = changePasswordController;
 exports.updateMyPreferencesController = updateMyPreferencesController;
 exports.meController = meController;
+const client_1 = require("@prisma/client");
 const ApiResponse_1 = require("../../utils/ApiResponse");
 const request_1 = require("../../utils/request");
 const auth_service_1 = require("./auth.service");
@@ -40,6 +41,9 @@ async function updateMyPreferencesController(req, res) {
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Preferences updated successfully", data);
 }
 async function meController(req, res) {
-    const data = await (0, auth_service_1.getMe)(req.auth.userId, req.auth.activeOrganizationId, req.auth.role);
+    const requestedOrganizationId = req.auth.role === client_1.UserRole.SUPER_ADMIN && typeof req.headers["x-organization-id"] === "string"
+        ? req.headers["x-organization-id"]
+        : req.auth.activeOrganizationId;
+    const data = await (0, auth_service_1.getMe)(req.auth.userId, requestedOrganizationId, req.auth.role);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Authenticated user fetched successfully", data);
 }

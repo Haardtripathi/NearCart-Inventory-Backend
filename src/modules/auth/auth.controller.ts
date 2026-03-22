@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { UserRole } from "@prisma/client";
 
 import { sendSuccess } from "../../utils/ApiResponse";
 import { getRequestMeta } from "../../utils/request";
@@ -49,6 +50,10 @@ export async function updateMyPreferencesController(req: Request, res: Response)
 }
 
 export async function meController(req: Request, res: Response) {
-  const data = await getMe(req.auth!.userId, req.auth!.activeOrganizationId, req.auth!.role);
+  const requestedOrganizationId =
+    req.auth!.role === UserRole.SUPER_ADMIN && typeof req.headers["x-organization-id"] === "string"
+      ? req.headers["x-organization-id"]
+      : req.auth!.activeOrganizationId;
+  const data = await getMe(req.auth!.userId, requestedOrganizationId, req.auth!.role);
   return sendSuccess(res, 200, "Authenticated user fetched successfully", data);
 }

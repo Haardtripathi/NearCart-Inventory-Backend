@@ -11,7 +11,7 @@ async function createOrganizationController(req, res) {
     return (0, ApiResponse_1.sendSuccess)(res, 201, "Organization created successfully", data);
 }
 async function getMyOrganizationsController(req, res) {
-    const data = await (0, organizations_service_1.getMyOrganizations)(req.auth.userId);
+    const data = await (0, organizations_service_1.getMyOrganizations)(req.auth.userId, req.auth.role);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Organizations fetched successfully", data);
 }
 async function getOrganizationByIdController(req, res) {

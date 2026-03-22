@@ -65,6 +65,11 @@ LIBRETRANSLATE_API_KEY=
 AUTO_TRANSLATE_ON_WRITE=false
 AUTO_TRANSLATE_FAIL_OPEN=true
 TRANSLATION_CACHE_TTL_SECONDS=2592000
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+CLOUDINARY_UPLOAD_FOLDER=nearcart-inventory
+IMAGE_UPLOAD_MAX_BYTES=5242880
 ```
 
 Notes:
@@ -73,6 +78,7 @@ Notes:
 - Redis is optional but recommended for rate-limit consistency and translation cache.
 - Redis connection priority is `REDIS_URL` first, then Upstash REST (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`).
 - For self-hosted Redis in the future, set `REDIS_URL` and leave Upstash REST values empty.
+- Set the Cloudinary values to enable backend-managed image uploads through `POST /api/uploads/images`.
 
 ## Bootstrap Super Admin
 
@@ -186,6 +192,7 @@ Base path: `/api`
 - `GET|POST|PATCH|DELETE /api/customers`
 - `GET|POST|PATCH|DELETE /api/products`
 - `GET|POST|PATCH|DELETE /api/products/:id/variants`
+- `POST /api/uploads/images`
 - `GET /api/master-catalog/categories`
 - `GET /api/master-catalog/categories/tree`
 - `POST|PATCH /api/master-catalog/categories`

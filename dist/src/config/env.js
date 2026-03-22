@@ -35,11 +35,21 @@ const envSchema = zod_1.z
     AUTO_TRANSLATE_ON_WRITE: booleanFromEnv.default(true),
     AUTO_TRANSLATE_FAIL_OPEN: booleanFromEnv.default(false),
     TRANSLATION_CACHE_TTL_SECONDS: zod_1.z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
+    CLOUDINARY_CLOUD_NAME: zod_1.z.string().trim().min(1).optional(),
+    CLOUDINARY_API_KEY: zod_1.z.string().trim().min(1).optional(),
+    CLOUDINARY_API_SECRET: zod_1.z.string().trim().min(1).optional(),
+    CLOUDINARY_UPLOAD_FOLDER: zod_1.z.string().trim().min(1).default("nearcart-inventory"),
+    IMAGE_UPLOAD_MAX_BYTES: zod_1.z.coerce.number().int().positive().default(5 * 1024 * 1024),
 })
     .refine((values) => (!!values.UPSTASH_REDIS_REST_URL && !!values.UPSTASH_REDIS_REST_TOKEN) ||
     (!values.UPSTASH_REDIS_REST_URL && !values.UPSTASH_REDIS_REST_TOKEN), {
     message: "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set together when using Upstash REST",
     path: ["UPSTASH_REDIS_REST_URL"],
+})
+    .refine((values) => (!!values.CLOUDINARY_CLOUD_NAME && !!values.CLOUDINARY_API_KEY && !!values.CLOUDINARY_API_SECRET) ||
+    (!values.CLOUDINARY_CLOUD_NAME && !values.CLOUDINARY_API_KEY && !values.CLOUDINARY_API_SECRET), {
+    message: "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET must be set together when enabling uploads",
+    path: ["CLOUDINARY_CLOUD_NAME"],
 });
 const parsed = envSchema.safeParse({
     ...process.env,

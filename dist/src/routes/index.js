@@ -23,6 +23,7 @@ const stock_transfers_route_1 = require("../modules/stock-transfers/stock-transf
 const audit_route_1 = require("../modules/audit/audit.route");
 const users_route_1 = require("../modules/users/users.route");
 const translation_route_1 = require("../modules/translation/translation.route");
+const uploads_route_1 = require("../modules/uploads/uploads.route");
 exports.apiRouter = (0, express_1.Router)();
 exports.apiRouter.get("/health", (_req, res) => {
     return (0, ApiResponse_1.sendSuccess)(res, 200, "NearCart Inventory backend is healthy", {
@@ -50,3 +51,4 @@ exports.apiRouter.use("/stock-transfers", stock_transfers_route_1.stockTransfers
 exports.apiRouter.use("/audit-logs", audit_route_1.auditRouter);
 exports.apiRouter.use("/users", users_route_1.usersRouter);
 exports.apiRouter.use("/translate-item", translation_route_1.translationRouter);
+exports.apiRouter.use("/uploads", uploads_route_1.uploadsRouter);

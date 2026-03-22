@@ -19,6 +19,15 @@ const importMasterCatalogItemInclude = {
                     language: "asc",
                 },
             },
+            parent: {
+                include: {
+                    translations: {
+                        orderBy: {
+                            language: "asc",
+                        },
+                    },
+                },
+            },
         },
     },
     translations: {
@@ -182,49 +191,56 @@ async function ensureImportCategory(db, organizationId, input, masterItem) {
     if (!masterItem.category) {
         return null;
     }
-    const canonicalFields = getCategoryCanonicalFields(masterItem.category);
+    return ensureImportCategoryFromMasterCategory(db, organizationId, masterItem.category);
+}
+async function ensureImportCategoryFromMasterCategory(db, organizationId, masterCategory) {
+    const parentCategory = ("parent" in masterCategory && masterCategory.parent ? masterCategory.parent : null);
+    const parentId = parentCategory
+        ? await ensureImportCategoryFromMasterCategory(db, organizationId, parentCategory)
+        : null;
+    const canonicalFields = getCategoryCanonicalFields(masterCategory);
     const existingCategory = await db.category.findFirst({
         where: {
             organizationId,
-            slug: masterItem.category.slug,
+            slug: masterCategory.slug,
         },
     });
     if (existingCategory) {
-        const restoredCategory = existingCategory.deletedAt
-            ? await db.category.update({
-                where: {
-                    id: existingCategory.id,
-                },
-                data: {
-                    name: canonicalFields.name,
-                    description: canonicalFields.description,
-                    isActive: true,
-                    deletedAt: null,
-                    customFields: (0, json_1.toNullableJsonValue)({
-                        masterCatalogCategoryId: masterItem.category.id,
-                        importedFromMasterCatalog: true,
-                    }),
-                },
-            })
-            : existingCategory;
-        await syncCategoryTranslationsFromMaster(db, restoredCategory.id, masterItem.category);
+        const restoredCategory = await db.category.update({
+            where: {
+                id: existingCategory.id,
+            },
+            data: {
+                name: canonicalFields.name,
+                description: canonicalFields.description,
+                parentId,
+                isActive: true,
+                ...(existingCategory.deletedAt ? { deletedAt: null } : {}),
+                customFields: (0, json_1.toNullableJsonValue)({
+                    masterCatalogCategoryId: masterCategory.id,
+                    importedFromMasterCatalog: true,
+                }),
+            },
+        });
+        await syncCategoryTranslationsFromMaster(db, restoredCategory.id, masterCategory);
         return restoredCategory.id;
     }
     const createdCategory = await db.category.create({
         data: {
             organizationId,
+            parentId,
             name: canonicalFields.name,
-            slug: masterItem.category.slug,
+            slug: masterCategory.slug,
             description: canonicalFields.description,
             isActive: true,
-            sortOrder: masterItem.category.sortOrder,
+            sortOrder: masterCategory.sortOrder,
             customFields: (0, json_1.toNullableJsonValue)({
-                masterCatalogCategoryId: masterItem.category.id,
+                masterCatalogCategoryId: masterCategory.id,
                 importedFromMasterCatalog: true,
             }),
         },
     });
-    await syncCategoryTranslationsFromMaster(db, createdCategory.id, masterItem.category);
+    await syncCategoryTranslationsFromMaster(db, createdCategory.id, masterCategory);
     return createdCategory.id;
 }
 async function generateUniqueProductSlug(db, organizationId, baseName) {

@@ -96,9 +96,27 @@ const productInclude = {
           language: "asc",
         },
       },
+      parent: {
+        include: {
+          translations: {
+            orderBy: {
+              language: "asc",
+            },
+          },
+        },
+      },
     },
   },
   brand: {
+    include: {
+      translations: {
+        orderBy: {
+          language: "asc",
+        },
+      },
+    },
+  },
+  industry: {
     include: {
       translations: {
         orderBy: {
@@ -167,8 +185,16 @@ function serializeProduct(product: ProductRecord, localeContext: LocaleContext) 
 
   return {
     ...localizedProduct,
-    category: product.category ? serializeLocalizedEntity(product.category, localeContext) : null,
+    category: product.category
+      ? {
+          ...serializeLocalizedEntity(product.category, localeContext),
+          parent: product.category.parent
+            ? serializeLocalizedEntity(product.category.parent, localeContext)
+            : null,
+        }
+      : null,
     brand: product.brand ? serializeLocalizedEntity(product.brand, localeContext) : null,
+    industry: product.industry ? serializeLocalizedEntity(product.industry, localeContext) : null,
     primaryUnit: product.primaryUnit ? serializeLocalizedEntity(product.primaryUnit, localeContext) : null,
     variants: product.variants.map((variant) => serializeVariant(variant, localeContext)),
   };

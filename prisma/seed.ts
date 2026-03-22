@@ -29,8 +29,19 @@ type VariantSeed = {
   code: string;
   name: string;
   skuSuffix?: string;
+  barcode?: string;
+  attributes?: Prisma.InputJsonValue;
+  defaultCostPrice?: string;
+  defaultSellingPrice?: string;
+  defaultMrp?: string;
+  reorderLevel?: string;
+  minStockLevel?: string;
+  maxStockLevel?: string;
+  weight?: string;
   unitCode?: string;
   isDefault?: boolean;
+  isActive?: boolean;
+  metadata?: Prisma.InputJsonValue;
   translations?: TranslationTriple;
 };
 
@@ -60,6 +71,7 @@ type MasterItemSeed = {
 
 type CategorySeed = {
   code: string;
+  parentCode?: string;
   translations: TranslationWithDescriptionTriple;
   sortOrder: number;
 };
@@ -144,6 +156,7 @@ function mirroredTranslations(name: string, description?: string): TranslationWi
 interface GeneratedCategorySpec {
   code: string;
   name: string;
+  parentCode?: string;
 }
 
 interface GeneratedItemSpec {
@@ -187,6 +200,7 @@ function buildGeneratedIndustry(spec: GeneratedIndustrySpec): IndustrySeed {
     defaultFeatures: spec.defaultFeatures ?? generatedIndustryFeatureSet,
     categories: spec.categories.map((category, index) => ({
       code: category.code,
+      parentCode: category.parentCode,
       sortOrder: index + 1,
       translations: mirroredTranslations(category.name),
     })),
@@ -636,7 +650,27 @@ const industries: IndustrySeed[] = [
       {
         code: "snacks",
         sortOrder: 2,
-        translations: withDescriptions(names("Snacks", "स्नैक्स", "નાસ્તો")),
+        translations: withDescriptions(
+          names("Snacks", "स्नैक्स", "નાસ્તા"),
+          {
+            EN: "Packaged salty and sweet snack items.",
+            HI: "पैक्ड नमकीन और मीठे स्नैक आइटम।",
+            GU: "પૅક થયેલા મીઠા અને ખારા નાસ્તાના આઇટમ્સ.",
+          },
+        ),
+      },
+      {
+        code: "biscuits",
+        parentCode: "snacks",
+        sortOrder: 1,
+        translations: withDescriptions(
+          names("Biscuits", "बिस्किट", "બિસ્કિટ"),
+          {
+            EN: "Glucose, cream, and tea-time biscuit packs.",
+            HI: "ग्लूकोज, क्रीम और चाय-समय के बिस्किट पैक।",
+            GU: "ગ્લુકોઝ, ક્રીમ અને ચા-સમયના બિસ્કિટ પૅક્સ.",
+          },
+        ),
       },
       {
         code: "beverages",
@@ -698,12 +732,66 @@ const industries: IndustrySeed[] = [
       },
       {
         code: "grocery_biscuits",
-        categoryCode: "snacks",
-        canonicalName: "Biscuits",
-        canonicalDescription: "Tea-time sweet and salted biscuits.",
-        translations: withDescriptions(names("Biscuits", "बिस्किट", "બિસ્કિટ")),
+        categoryCode: "biscuits",
+        canonicalName: "Parle-G Gluco Biscuits",
+        canonicalDescription: "Classic glucose biscuits for tea-time and everyday snacking.",
+        translations: withDescriptions(
+          names("Parle-G Gluco Biscuits", "पारले-जी ग्लूको बिस्किट", "પાર્લે-જી ગ્લુકો બિસ્કિટ"),
+          {
+            EN: "Classic glucose biscuits for tea-time and everyday snacking.",
+            HI: "चाय-समय और रोज़मर्रा के स्नैक के लिए क्लासिक ग्लूकोज़ बिस्किट।",
+            GU: "ચા સમય અને રોજિંદા નાસ્તા માટેના ક્લાસિક ગ્લુકોઝ બિસ્કિટ.",
+          },
+        ),
+        aliases: [
+          { language: LanguageCode.EN, value: "Parle-G" },
+          { language: LanguageCode.EN, value: "glucose biscuits" },
+          { language: LanguageCode.HI, value: "पारले जी" },
+          { language: LanguageCode.GU, value: "પાર્લે જી" },
+        ],
         defaultUnitCode: "pack",
-        defaultBrandName: "Britannia",
+        defaultBrandName: "Parle",
+        tags: ["biscuits", "glucose", "tea-time", "snacks"],
+        hasVariants: true,
+        variantTemplates: [
+          {
+            code: "79_9G",
+            name: "79.9 g Pack",
+            skuSuffix: "79.9G",
+            attributes: {
+              size: "79.9 g",
+              packType: "Pack",
+            },
+            defaultCostPrice: "8.50",
+            defaultSellingPrice: "10.00",
+            defaultMrp: "10.00",
+            reorderLevel: "40",
+            minStockLevel: "30",
+            maxStockLevel: "250",
+            weight: "79.9",
+            unitCode: "pack",
+            isDefault: true,
+            translations: names("79.9 g Pack", "79.9 ग्राम पैक", "79.9 ગ્રામ પેક"),
+          },
+          {
+            code: "143G",
+            name: "143 g Family Pack",
+            skuSuffix: "143G",
+            attributes: {
+              size: "143 g",
+              packType: "Family Pack",
+            },
+            defaultCostPrice: "18.00",
+            defaultSellingPrice: "22.00",
+            defaultMrp: "22.00",
+            reorderLevel: "30",
+            minStockLevel: "20",
+            maxStockLevel: "180",
+            weight: "143",
+            unitCode: "pack",
+            translations: names("143 g Family Pack", "143 ग्राम फैमिली पैक", "143 ગ્રામ ફેમિલી પેક"),
+          },
+        ],
       },
       {
         code: "grocery_packaged_water",
@@ -1543,6 +1631,7 @@ async function seedIndustryCatalog(industrySeed: IndustrySeed) {
       update: {
         slug: slugify(categorySeed.code),
         sortOrder: categorySeed.sortOrder,
+        parentId: null,
         isActive: true,
       },
       create: {
@@ -1550,6 +1639,7 @@ async function seedIndustryCatalog(industrySeed: IndustrySeed) {
         code: categorySeed.code,
         slug: slugify(categorySeed.code),
         sortOrder: categorySeed.sortOrder,
+        parentId: null,
         isActive: true,
       },
     });
@@ -1581,6 +1671,20 @@ async function seedIndustryCatalog(industrySeed: IndustrySeed) {
       })
     ).map((category) => [category.code, category.id]),
   );
+
+  for (const categorySeed of industrySeed.categories) {
+    await prisma.masterCatalogCategory.update({
+      where: {
+        industryId_code: {
+          industryId: industry.id,
+          code: categorySeed.code,
+        },
+      },
+      data: {
+        parentId: categorySeed.parentCode ? categoriesByCode.get(categorySeed.parentCode) ?? null : null,
+      },
+    });
+  }
 
   for (const itemSeed of industrySeed.items) {
     const masterItemSlug = slugify(`${industrySeed.code}-${itemSeed.canonicalName}`);
@@ -1708,20 +1812,20 @@ async function seedIndustryCatalog(industrySeed: IndustrySeed) {
           code: variantSeed.code,
           name: variantSeed.name,
           skuSuffix: variantSeed.skuSuffix ?? null,
-          barcode: null,
-          attributes: undefined,
-          defaultCostPrice: null,
-          defaultSellingPrice: null,
-          defaultMrp: null,
-          reorderLevel: 0,
-          minStockLevel: 0,
-          maxStockLevel: null,
-          weight: null,
+          barcode: variantSeed.barcode ?? null,
+          attributes: variantSeed.attributes ?? undefined,
+          defaultCostPrice: decimal(variantSeed.defaultCostPrice),
+          defaultSellingPrice: decimal(variantSeed.defaultSellingPrice),
+          defaultMrp: decimal(variantSeed.defaultMrp),
+          reorderLevel: decimal(variantSeed.reorderLevel ?? "0")!,
+          minStockLevel: decimal(variantSeed.minStockLevel ?? "0")!,
+          maxStockLevel: decimal(variantSeed.maxStockLevel),
+          weight: decimal(variantSeed.weight),
           unitCode: variantSeed.unitCode ?? itemSeed.defaultUnitCode ?? "pcs",
           isDefault: variantSeed.isDefault ?? index === 0,
-          isActive: true,
+          isActive: variantSeed.isActive ?? true,
           sortOrder: index,
-          metadata: undefined,
+          metadata: variantSeed.metadata ?? undefined,
         },
       });
 
@@ -2273,11 +2377,20 @@ const groceryDemoCategories: OrgCategorySeed[] = [
     },
   },
   {
-    slug: "snacks-biscuits",
+    slug: "snacks",
     sortOrder: 2,
     translations: {
-      EN: { name: "Snacks & Biscuits", description: "Chips, namkeen, and biscuit packs." },
-      HI: { name: "स्नैक्स और बिस्किट", description: "चिप्स, नमकीन और बिस्किट पैक।" },
+      EN: { name: "Snacks", description: "Chips, namkeen, and other quick snack packs." },
+      HI: { name: "स्नैक्स", description: "चिप्स, नमकीन और दूसरे क्विक स्नैक पैक।" },
+    },
+  },
+  {
+    slug: "biscuits",
+    parentSlug: "snacks",
+    sortOrder: 1,
+    translations: {
+      EN: { name: "Biscuits", description: "Glucose, cream, and tea-time biscuit packs." },
+      HI: { name: "बिस्किट", description: "ग्लूकोज, क्रीम और चाय-समय के बिस्किट पैक।" },
     },
   },
   {
@@ -2497,45 +2610,47 @@ const groceryProducts: OrgProductSeed[] = [
     ],
   },
   {
-    slug: "britannia-biscuits",
+    slug: "parle-g-gluco-biscuits",
     masterItemCode: "grocery_biscuits",
     industryCode: "grocery",
-    categorySlug: "snacks-biscuits",
-    brandSlug: "britannia",
-    name: "Britannia Biscuits",
-    nameHi: "ब्रिटानिया बिस्किट",
-    description: "Tea-time biscuit packs.",
-    descriptionHi: "चाय के समय के बिस्किट पैक।",
+    categorySlug: "biscuits",
+    brandSlug: "parle",
+    name: "Parle-G Gluco Biscuits",
+    nameHi: "पारले-जी ग्लूको बिस्किट",
+    description: "Classic glucose biscuits for tea-time and everyday snacking.",
+    descriptionHi: "चाय-समय और रोज़मर्रा के स्नैक के लिए क्लासिक ग्लूकोज़ बिस्किट।",
     primaryUnitCode: "pack",
     trackMethod: TrackMethod.PIECE,
-    tags: ["biscuits", "snacks"],
+    tags: ["biscuits", "glucose", "tea-time", "snacks"],
     variants: [
       {
-        name: "60 g Pack",
-        sku: "BRIT-BISC-60",
-        attributes: { size: "60 g" },
+        name: "79.9 g Pack",
+        sku: "PARLE-G-79.9G",
+        attributes: { size: "79.9 g", packType: "Pack" },
         costPrice: "8.50",
         sellingPrice: "10.00",
         mrp: "10.00",
         reorderLevel: "40",
         minStockLevel: "30",
         maxStockLevel: "250",
+        weight: "79.9",
         unitCode: "pack",
         isDefault: true,
-        translations: { EN: "60 g Pack", HI: "60 ग्राम पैक" },
+        translations: { EN: "79.9 g Pack", HI: "79.9 ग्राम पैक" },
       },
       {
-        name: "120 g Pack",
-        sku: "BRIT-BISC-120",
-        attributes: { size: "120 g" },
+        name: "143 g Family Pack",
+        sku: "PARLE-G-143G",
+        attributes: { size: "143 g", packType: "Family Pack" },
         costPrice: "18.00",
         sellingPrice: "22.00",
         mrp: "22.00",
         reorderLevel: "30",
         minStockLevel: "20",
         maxStockLevel: "180",
+        weight: "143",
         unitCode: "pack",
-        translations: { EN: "120 g Pack", HI: "120 ग्राम पैक" },
+        translations: { EN: "143 g Family Pack", HI: "143 ग्राम फैमिली पैक" },
       },
     ],
   },
@@ -2543,7 +2658,7 @@ const groceryProducts: OrgProductSeed[] = [
     slug: "haldiram-potato-chips",
     masterItemCode: "grocery_potato_chips",
     industryCode: "grocery",
-    categorySlug: "snacks-biscuits",
+    categorySlug: "snacks",
     brandSlug: "haldiram",
     name: "Haldiram Potato Chips",
     nameHi: "हल्दीराम आलू चिप्स",
@@ -2890,8 +3005,8 @@ const groceryInventory: InventorySeed[] = [
   { branchCode: "GROC-WH-1", sku: "AMUL-MILK-1L", onHand: "80", openingCost: "51.00", note: "Opening stock" },
   { branchCode: "GROC-WH-1", sku: "MD-CURD-400G", onHand: "70", openingCost: "30.00" },
   { branchCode: "GROC-WH-1", sku: "MD-CURD-1KG", onHand: "45", openingCost: "65.00" },
-  { branchCode: "GROC-WH-1", sku: "BRIT-BISC-60", onHand: "220", openingCost: "8.50" },
-  { branchCode: "GROC-WH-1", sku: "BRIT-BISC-120", onHand: "140", openingCost: "18.00" },
+  { branchCode: "GROC-WH-1", sku: "PARLE-G-79.9G", onHand: "220", openingCost: "8.50" },
+  { branchCode: "GROC-WH-1", sku: "PARLE-G-143G", onHand: "140", openingCost: "18.00" },
   { branchCode: "GROC-WH-1", sku: "HAL-CHIPS-52", onHand: "180", openingCost: "17.00" },
   { branchCode: "GROC-WH-1", sku: "HAL-CHIPS-90", onHand: "130", openingCost: "26.00" },
   { branchCode: "GROC-WH-1", sku: "IG-RICE-5KG", onHand: "55", openingCost: "255.00" },
@@ -2904,14 +3019,14 @@ const groceryInventory: InventorySeed[] = [
   { branchCode: "GROC-STORE-1", sku: "AMUL-MILK-500", onHand: "24", reserved: "3", openingCost: "26.00" },
   { branchCode: "GROC-STORE-1", sku: "AMUL-MILK-1L", onHand: "18", reserved: "2", openingCost: "51.00" },
   { branchCode: "GROC-STORE-1", sku: "MD-CURD-400G", onHand: "20", openingCost: "30.00" },
-  { branchCode: "GROC-STORE-1", sku: "BRIT-BISC-60", onHand: "65", reserved: "4", openingCost: "8.50" },
+  { branchCode: "GROC-STORE-1", sku: "PARLE-G-79.9G", onHand: "65", reserved: "4", openingCost: "8.50" },
   { branchCode: "GROC-STORE-1", sku: "HAL-CHIPS-52", onHand: "54", openingCost: "17.00" },
   { branchCode: "GROC-STORE-1", sku: "IG-RICE-5KG", onHand: "16", openingCost: "255.00" },
   { branchCode: "GROC-STORE-1", sku: "AA-ATTA-5KG", onHand: "15", openingCost: "210.00" },
   { branchCode: "GROC-STORE-1", sku: "FORT-OIL-1L", onHand: "20", openingCost: "128.00" },
 
   { branchCode: "GROC-DS-1", sku: "AMUL-MILK-500", onHand: "12", reserved: "4", incoming: "10", openingCost: "26.00" },
-  { branchCode: "GROC-DS-1", sku: "BRIT-BISC-60", onHand: "25", reserved: "2", openingCost: "8.50" },
+  { branchCode: "GROC-DS-1", sku: "PARLE-G-79.9G", onHand: "25", reserved: "2", openingCost: "8.50" },
   { branchCode: "GROC-DS-1", sku: "HAL-CHIPS-52", onHand: "22", reserved: "2", openingCost: "17.00" },
   { branchCode: "GROC-DS-1", sku: "FORT-OIL-1L", onHand: "10", reserved: "1", openingCost: "128.00" },
 ];
@@ -2992,7 +3107,7 @@ const groceryOrders: SalesOrderSeed[] = [
     notes: "Fast delivery order from WhatsApp.",
     items: [
       { sku: "AMUL-MILK-500", quantity: "2", unitPrice: "29.00", taxRate: "5" },
-      { sku: "BRIT-BISC-60", quantity: "3", unitPrice: "10.00", taxRate: "12" },
+      { sku: "PARLE-G-79.9G", quantity: "3", unitPrice: "10.00", taxRate: "12" },
       { sku: "FORT-OIL-1L", quantity: "1", unitPrice: "145.00", taxRate: "5" },
     ],
   },
@@ -3024,7 +3139,7 @@ const groceryTransfers: StockTransferSeed[] = [
     approvedAt: "2026-03-21T08:15:00.000Z",
     items: [
       { sku: "AMUL-MILK-500", quantity: "10", unitCost: "26.00" },
-      { sku: "BRIT-BISC-60", quantity: "20", unitCost: "8.50" },
+      { sku: "PARLE-G-79.9G", quantity: "20", unitCost: "8.50" },
       { sku: "HAL-CHIPS-52", quantity: "15", unitCost: "17.00" },
       { sku: "FORT-OIL-1L", quantity: "8", unitCost: "128.00" },
     ],

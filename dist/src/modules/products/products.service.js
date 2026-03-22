@@ -34,9 +34,27 @@ const productInclude = {
                     language: "asc",
                 },
             },
+            parent: {
+                include: {
+                    translations: {
+                        orderBy: {
+                            language: "asc",
+                        },
+                    },
+                },
+            },
         },
     },
     brand: {
+        include: {
+            translations: {
+                orderBy: {
+                    language: "asc",
+                },
+            },
+        },
+    },
+    industry: {
         include: {
             translations: {
                 orderBy: {
@@ -96,8 +114,16 @@ function serializeProduct(product, localeContext) {
     const localizedProduct = (0, localization_1.serializeLocalizedEntity)(product, localeContext);
     return {
         ...localizedProduct,
-        category: product.category ? (0, localization_1.serializeLocalizedEntity)(product.category, localeContext) : null,
+        category: product.category
+            ? {
+                ...(0, localization_1.serializeLocalizedEntity)(product.category, localeContext),
+                parent: product.category.parent
+                    ? (0, localization_1.serializeLocalizedEntity)(product.category.parent, localeContext)
+                    : null,
+            }
+            : null,
         brand: product.brand ? (0, localization_1.serializeLocalizedEntity)(product.brand, localeContext) : null,
+        industry: product.industry ? (0, localization_1.serializeLocalizedEntity)(product.industry, localeContext) : null,
         primaryUnit: product.primaryUnit ? (0, localization_1.serializeLocalizedEntity)(product.primaryUnit, localeContext) : null,
         variants: product.variants.map((variant) => serializeVariant(variant, localeContext)),
     };

@@ -61,7 +61,7 @@ async function getSupportedLanguagesTargets() {
     headers: {
       Accept: "application/json",
     },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(60_000),
   });
 
   if (!response.ok) {
@@ -124,7 +124,7 @@ async function requestLibreTranslate(
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body,
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(60_000),
   });
 
   const payload = (await response.json().catch(() => null)) as LibreTranslateResponse | null;

@@ -831,7 +831,10 @@ export async function getOrganizationById(requesterUserId: string, requesterRole
     throw ApiError.notFound("Organization not found");
   }
 
-  return organization;
+  return {
+    ...organization,
+    industries: organization.industryConfigs,
+  };
 }
 
 export async function addIndustryToOrganization(

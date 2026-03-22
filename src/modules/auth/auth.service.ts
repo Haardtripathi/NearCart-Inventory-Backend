@@ -99,6 +99,12 @@ function serializeMemberships(
       slug: string;
       email: string | null;
       status: string;
+      industryConfigs: Array<{
+        id: string;
+        industryId: string;
+        isPrimary: boolean;
+        industry: unknown;
+      }>;
     };
   }>,
 ) {
@@ -108,7 +114,10 @@ function serializeMemberships(
     role: membership.role,
     isDefault: membership.isDefault,
     branchAccess: normalizeBranchAccess(membership.branchAccess),
-    organization: membership.organization,
+    organization: {
+      ...membership.organization,
+      industries: membership.organization.industryConfigs,
+    },
   }));
 }
 
@@ -133,6 +142,11 @@ async function buildAuthenticatedSession(userId: string, requestedOrganizationId
               slug: true,
               email: true,
               status: true,
+              industryConfigs: {
+                include: {
+                  industry: true,
+                },
+              },
             },
           },
         },

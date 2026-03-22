@@ -581,6 +581,11 @@ export async function getMe(userId: string, activeOrganizationId: string | null,
               slug: true,
               email: true,
               status: true,
+              industryConfigs: {
+                include: {
+                  industry: true,
+                },
+              },
             },
           },
         },

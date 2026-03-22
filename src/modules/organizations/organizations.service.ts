@@ -72,6 +72,59 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+function getEmailSlugPart(email?: string | null) {
+  if (!email) {
+    return "";
+  }
+
+  return slugify(email.split("@")[0] ?? "");
+}
+
+async function generateUniqueOrganizationSlug(
+  tx: DbClient,
+  input: Pick<CreateOrganizationInput, "slug" | "name" | "email" | "owner">,
+) {
+  const requestedSlug = slugify(input.slug ?? "");
+  const baseSlug = requestedSlug || slugify(input.name);
+  const emailSlug = getEmailSlugPart(input.email ?? input.owner?.email ?? null);
+  const candidateBases = Array.from(new Set([baseSlug, emailSlug ? `${baseSlug}-${emailSlug}` : ""]).values()).filter(Boolean);
+
+  for (const candidate of candidateBases) {
+    const existing = await tx.organization.findUnique({
+      where: {
+        slug: candidate,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!existing) {
+      return candidate;
+    }
+  }
+
+  const fallbackBase = candidateBases[0] ?? "organization";
+
+  for (let suffix = 2; suffix < 10_000; suffix += 1) {
+    const candidate = `${fallbackBase}-${suffix}`;
+    const existing = await tx.organization.findUnique({
+      where: {
+        slug: candidate,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!existing) {
+      return candidate;
+    }
+  }
+
+  throw ApiError.conflict("Unable to generate a unique organization slug");
+}
+
 async function assertOrganizationManageAccess(
   requesterUserId: string,
   requesterRole: UserRole,
@@ -288,11 +341,12 @@ export async function createOrganizationWithResolvedOwner(
       userId: options.owner.id,
     },
   });
+  const organizationSlug = await generateUniqueOrganizationSlug(tx, input);
 
   const organization = await tx.organization.create({
     data: {
       name: input.name.trim(),
-      slug: slugify(input.slug ?? input.name),
+      slug: organizationSlug,
       legalName: input.legalName ?? null,
       phone: input.phone ?? null,
       email: input.email ?? null,
@@ -484,6 +538,7 @@ export async function getMyOrganizations(userId: string, requesterRole: UserRole
       id: organization.id,
       name: organization.name,
       slug: organization.slug,
+      email: organization.email,
       status: organization.status,
       role: organization.memberships[0]?.role ?? UserRole.SUPER_ADMIN,
       isDefault: organization.memberships[0]?.isDefault ?? false,
@@ -522,6 +577,7 @@ export async function getMyOrganizations(userId: string, requesterRole: UserRole
     id: membership.organization.id,
     name: membership.organization.name,
     slug: membership.organization.slug,
+    email: membership.organization.email,
     status: membership.organization.status,
     role: membership.role,
     isDefault: membership.isDefault,

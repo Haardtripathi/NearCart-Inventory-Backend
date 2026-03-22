@@ -97,6 +97,7 @@ function serializeMemberships(
       id: string;
       name: string;
       slug: string;
+      email: string | null;
       status: string;
     };
   }>,
@@ -130,6 +131,7 @@ async function buildAuthenticatedSession(userId: string, requestedOrganizationId
               id: true,
               name: true,
               slug: true,
+              email: true,
               status: true,
             },
           },
@@ -560,6 +562,7 @@ export async function getMe(userId: string, activeOrganizationId: string | null,
               id: true,
               name: true,
               slug: true,
+              email: true,
               status: true,
             },
           },

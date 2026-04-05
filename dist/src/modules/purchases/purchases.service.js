@@ -16,6 +16,10 @@ const numbering_1 = require("../../utils/numbering");
 const pagination_1 = require("../../utils/pagination");
 const audit_service_1 = require("../audit/audit.service");
 const inventory_service_1 = require("../inventory/inventory.service");
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 30_000,
+};
 async function preparePurchaseItems(organizationId, items) {
     let subtotal = (0, decimal_1.toDecimal)(0);
     let taxTotal = (0, decimal_1.toDecimal)(0);
@@ -226,7 +230,7 @@ async function updatePurchase(organizationId, purchaseId, actorUserId, input) {
             entityId: purchaseId,
             fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
         });
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const updated = await getPurchaseById(organizationId, purchaseId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
@@ -286,6 +290,6 @@ async function postPurchase(organizationId, purchaseId, actorUserId) {
             after: updated,
         });
         return updated;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return posted;
 }

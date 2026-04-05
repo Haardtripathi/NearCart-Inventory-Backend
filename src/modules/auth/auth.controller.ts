@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { UserRole } from "@prisma/client";
 
 import { sendSuccess } from "../../utils/ApiResponse";
+import { resolveLocaleContext } from "../../utils/localization";
 import { getRequestMeta } from "../../utils/request";
 import {
   bootstrapSuperAdmin,
@@ -20,22 +21,26 @@ export async function bootstrapSuperAdminController(req: Request, res: Response)
 }
 
 export async function loginController(req: Request, res: Response) {
-  const data = await login(req.body, getRequestMeta(req));
+  const localeContext = await resolveLocaleContext(req);
+  const data = await login(req.body, getRequestMeta(req), localeContext);
   return sendSuccess(res, 200, "Login successful", data);
 }
 
 export async function registerOrganizationOwnerController(req: Request, res: Response) {
-  const data = await registerOrganizationOwner(req.body, getRequestMeta(req));
+  const localeContext = await resolveLocaleContext(req);
+  const data = await registerOrganizationOwner(req.body, getRequestMeta(req), localeContext);
   return sendSuccess(res, 201, "Organization owner registered successfully", data);
 }
 
 export async function completeAccountSetupController(req: Request, res: Response) {
-  const data = await completeAccountSetup(req.body, getRequestMeta(req));
+  const localeContext = await resolveLocaleContext(req);
+  const data = await completeAccountSetup(req.body, getRequestMeta(req), localeContext);
   return sendSuccess(res, 200, "Account setup completed successfully", data);
 }
 
 export async function resetPasswordController(req: Request, res: Response) {
-  const data = await resetPasswordWithToken(req.body, getRequestMeta(req));
+  const localeContext = await resolveLocaleContext(req);
+  const data = await resetPasswordWithToken(req.body, getRequestMeta(req), localeContext);
   return sendSuccess(res, 200, "Password reset successfully", data);
 }
 
@@ -50,10 +55,11 @@ export async function updateMyPreferencesController(req: Request, res: Response)
 }
 
 export async function meController(req: Request, res: Response) {
+  const localeContext = await resolveLocaleContext(req);
   const requestedOrganizationId =
     req.auth!.role === UserRole.SUPER_ADMIN && typeof req.headers["x-organization-id"] === "string"
       ? req.headers["x-organization-id"]
       : req.auth!.activeOrganizationId;
-  const data = await getMe(req.auth!.userId, requestedOrganizationId, req.auth!.role);
+  const data = await getMe(req.auth!.userId, requestedOrganizationId, req.auth!.role, localeContext);
   return sendSuccess(res, 200, "Authenticated user fetched successfully", data);
 }

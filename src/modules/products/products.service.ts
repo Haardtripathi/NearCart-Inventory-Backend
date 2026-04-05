@@ -173,6 +173,11 @@ type ProductRecord = Prisma.ProductGetPayload<{
 
 type ProductVariantRecord = ProductRecord["variants"][number];
 
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 function serializeVariant(variant: ProductVariantRecord, localeContext: LocaleContext) {
   return {
     ...serializeLocalizedEntity(variant, localeContext),
@@ -616,43 +621,46 @@ export async function createProduct(
   const normalizedVariants = normalizeVariantPayload(input.name, computedHasVariants, rawVariants);
   const slug = slugify(input.slug ?? input.name);
 
-  const productId = await prisma.$transaction(async (tx) => {
-    const product = await tx.product.create({
-      data: {
-        organizationId,
-        categoryId: input.categoryId ?? null,
-        brandId: input.brandId ?? null,
-        taxRateId: input.taxRateId ?? null,
-        industryId: input.industryId ?? null,
-        name: input.name.trim(),
-        slug,
-        description: input.description ?? null,
-        productType: input.productType,
-        sourceType: ProductSourceType.MANUAL,
-        status: input.status ?? ProductStatus.ACTIVE,
-        hasVariants: computedHasVariants,
-        trackInventory: input.trackInventory ?? true,
-        allowBackorder: input.allowBackorder ?? false,
-        allowNegativeStock: input.allowNegativeStock ?? false,
-        trackMethod: input.trackMethod ?? TrackMethod.PIECE,
-        primaryUnitId: input.primaryUnitId ?? null,
-        imageUrl: input.imageUrl ?? null,
-        tags: toNullableJsonValue(input.tags),
-        customFields: toNullableJsonValue(input.customFields),
-        metadata: toNullableJsonValue(input.metadata),
-        createdById: actorUserId,
-        updatedById: actorUserId,
-      },
-    });
+  const productId = await prisma.$transaction(
+    async (tx) => {
+      const product = await tx.product.create({
+        data: {
+          organizationId,
+          categoryId: input.categoryId ?? null,
+          brandId: input.brandId ?? null,
+          taxRateId: input.taxRateId ?? null,
+          industryId: input.industryId ?? null,
+          name: input.name.trim(),
+          slug,
+          description: input.description ?? null,
+          productType: input.productType,
+          sourceType: ProductSourceType.MANUAL,
+          status: input.status ?? ProductStatus.ACTIVE,
+          hasVariants: computedHasVariants,
+          trackInventory: input.trackInventory ?? true,
+          allowBackorder: input.allowBackorder ?? false,
+          allowNegativeStock: input.allowNegativeStock ?? false,
+          trackMethod: input.trackMethod ?? TrackMethod.PIECE,
+          primaryUnitId: input.primaryUnitId ?? null,
+          imageUrl: input.imageUrl ?? null,
+          tags: toNullableJsonValue(input.tags),
+          customFields: toNullableJsonValue(input.customFields),
+          metadata: toNullableJsonValue(input.metadata),
+          createdById: actorUserId,
+          updatedById: actorUserId,
+        },
+      });
 
-    await upsertProductTranslations(tx, product.id, translations);
+      await upsertProductTranslations(tx, product.id, translations);
 
-    for (const variant of normalizedVariants) {
-      await createVariantRecord(tx, organizationId, product.id, variant);
-    }
+      for (const variant of normalizedVariants) {
+        await createVariantRecord(tx, organizationId, product.id, variant);
+      }
 
-    return product.id;
-  });
+      return product.id;
+    },
+    INTERACTIVE_TRANSACTION_OPTIONS,
+  );
 
   const product = await getProductRecordById(organizationId, productId);
 
@@ -730,35 +738,38 @@ export async function updateProduct(
     throw ApiError.badRequest("Cannot convert a product with multiple variants into a simple product");
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.product.update({
-      where: { id: productId },
-      data: {
-        ...(input.categoryId !== undefined ? { categoryId: input.categoryId || null } : {}),
-        ...(input.brandId !== undefined ? { brandId: input.brandId || null } : {}),
-        ...(input.taxRateId !== undefined ? { taxRateId: input.taxRateId || null } : {}),
-        ...(input.industryId !== undefined ? { industryId: input.industryId || null } : {}),
-        ...(input.name ? { name: input.name.trim() } : {}),
-        ...(input.slug ? { slug: slugify(input.slug) } : {}),
-        ...(input.description !== undefined ? { description: input.description || null } : {}),
-        ...(input.productType ? { productType: input.productType } : {}),
-        ...(input.status ? { status: input.status } : {}),
-        ...(input.hasVariants !== undefined ? { hasVariants: input.hasVariants } : {}),
-        ...(input.trackInventory !== undefined ? { trackInventory: input.trackInventory } : {}),
-        ...(input.allowBackorder !== undefined ? { allowBackorder: input.allowBackorder } : {}),
-        ...(input.allowNegativeStock !== undefined ? { allowNegativeStock: input.allowNegativeStock } : {}),
-        ...(input.trackMethod ? { trackMethod: input.trackMethod } : {}),
-        ...(input.primaryUnitId !== undefined ? { primaryUnitId: input.primaryUnitId || null } : {}),
-        ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl || null } : {}),
-        ...(input.tags !== undefined ? { tags: toNullableJsonValue(input.tags) } : {}),
-        ...(input.customFields !== undefined ? { customFields: toNullableJsonValue(input.customFields) } : {}),
-        ...(input.metadata !== undefined ? { metadata: toNullableJsonValue(input.metadata) } : {}),
-        updatedById: actorUserId,
-      },
-    });
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.product.update({
+        where: { id: productId },
+        data: {
+          ...(input.categoryId !== undefined ? { categoryId: input.categoryId || null } : {}),
+          ...(input.brandId !== undefined ? { brandId: input.brandId || null } : {}),
+          ...(input.taxRateId !== undefined ? { taxRateId: input.taxRateId || null } : {}),
+          ...(input.industryId !== undefined ? { industryId: input.industryId || null } : {}),
+          ...(input.name ? { name: input.name.trim() } : {}),
+          ...(input.slug ? { slug: slugify(input.slug) } : {}),
+          ...(input.description !== undefined ? { description: input.description || null } : {}),
+          ...(input.productType ? { productType: input.productType } : {}),
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.hasVariants !== undefined ? { hasVariants: input.hasVariants } : {}),
+          ...(input.trackInventory !== undefined ? { trackInventory: input.trackInventory } : {}),
+          ...(input.allowBackorder !== undefined ? { allowBackorder: input.allowBackorder } : {}),
+          ...(input.allowNegativeStock !== undefined ? { allowNegativeStock: input.allowNegativeStock } : {}),
+          ...(input.trackMethod ? { trackMethod: input.trackMethod } : {}),
+          ...(input.primaryUnitId !== undefined ? { primaryUnitId: input.primaryUnitId || null } : {}),
+          ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl || null } : {}),
+          ...(input.tags !== undefined ? { tags: toNullableJsonValue(input.tags) } : {}),
+          ...(input.customFields !== undefined ? { customFields: toNullableJsonValue(input.customFields) } : {}),
+          ...(input.metadata !== undefined ? { metadata: toNullableJsonValue(input.metadata) } : {}),
+          updatedById: actorUserId,
+        },
+      });
 
-    await upsertProductTranslations(tx, productId, translations);
-  });
+      await upsertProductTranslations(tx, productId, translations);
+    },
+    INTERACTIVE_TRANSACTION_OPTIONS,
+  );
 
   const updated = await getProductRecordById(organizationId, productId);
 
@@ -778,27 +789,30 @@ export async function updateProduct(
 export async function deleteProduct(organizationId: string, productId: string, actorUserId: string) {
   const existing = await getProductRecordById(organizationId, productId);
 
-  const deleted = await prisma.$transaction(async (tx) => {
-    await tx.productVariant.updateMany({
-      where: {
-        productId,
-        deletedAt: null,
-      },
-      data: {
-        isActive: false,
-        deletedAt: new Date(),
-      },
-    });
+  const deleted = await prisma.$transaction(
+    async (tx) => {
+      await tx.productVariant.updateMany({
+        where: {
+          productId,
+          deletedAt: null,
+        },
+        data: {
+          isActive: false,
+          deletedAt: new Date(),
+        },
+      });
 
-    return tx.product.update({
-      where: { id: productId },
-      data: {
-        status: ProductStatus.ARCHIVED,
-        deletedAt: new Date(),
-        updatedById: actorUserId,
-      },
-    });
-  });
+      return tx.product.update({
+        where: { id: productId },
+        data: {
+          status: ProductStatus.ARCHIVED,
+          deletedAt: new Date(),
+          updatedById: actorUserId,
+        },
+      });
+    },
+    INTERACTIVE_TRANSACTION_OPTIONS,
+  );
 
   await createAuditLog(prisma, {
     organizationId,
@@ -846,22 +860,25 @@ export async function createVariant(
   const shouldBeDefault = input.isDefault ?? product.variants.every((variant) => !variant.isDefault);
   const normalized = normalizeVariantPayload(product.name, true, [{ ...input, isDefault: shouldBeDefault }])[0]!;
 
-  const created = await prisma.$transaction(async (tx) => {
-    if (shouldBeDefault) {
-      await tx.productVariant.updateMany({
-        where: {
-          organizationId,
-          productId,
-          deletedAt: null,
-        },
-        data: {
-          isDefault: false,
-        },
-      });
-    }
+  const created = await prisma.$transaction(
+    async (tx) => {
+      if (shouldBeDefault) {
+        await tx.productVariant.updateMany({
+          where: {
+            organizationId,
+            productId,
+            deletedAt: null,
+          },
+          data: {
+            isDefault: false,
+          },
+        });
+      }
 
-    return createVariantRecord(tx, organizationId, productId, normalized);
-  });
+      return createVariantRecord(tx, organizationId, productId, normalized);
+    },
+    INTERACTIVE_TRANSACTION_OPTIONS,
+  );
 
   const createdVariant = await prisma.productVariant.findUniqueOrThrow({
     where: { id: created.id },
@@ -940,55 +957,58 @@ export async function updateVariant(
 
   const shouldBeDefault = input.isDefault === true;
 
-  const updated = await prisma.$transaction(async (tx) => {
-    if (shouldBeDefault) {
-      await tx.productVariant.updateMany({
-        where: {
-          organizationId,
-          productId,
-          deletedAt: null,
-        },
+  const updated = await prisma.$transaction(
+    async (tx) => {
+      if (shouldBeDefault) {
+        await tx.productVariant.updateMany({
+          where: {
+            organizationId,
+            productId,
+            deletedAt: null,
+          },
+          data: {
+            isDefault: false,
+          },
+        });
+      }
+
+      if (!product.hasVariants && input.isActive === false) {
+        throw ApiError.badRequest("Simple products must keep one active default variant");
+      }
+
+      const variant = await tx.productVariant.update({
+        where: { id: variantId },
         data: {
-          isDefault: false,
+          ...(input.name !== undefined ? { name: input.name || product.name } : {}),
+          ...(input.sku ? { sku: input.sku.trim() } : {}),
+          ...(input.barcode !== undefined ? { barcode: input.barcode || null } : {}),
+          ...(input.attributes !== undefined ? { attributes: toNullableJsonValue(input.attributes) } : {}),
+          ...(input.costPrice !== undefined ? { costPrice: toDecimal(input.costPrice) } : {}),
+          ...(input.sellingPrice !== undefined ? { sellingPrice: toDecimal(input.sellingPrice) } : {}),
+          ...(input.mrp !== undefined ? { mrp: toDecimal(input.mrp) } : {}),
+          ...(input.reorderLevel !== undefined ? { reorderLevel: toDecimal(input.reorderLevel) } : {}),
+          ...(input.minStockLevel !== undefined ? { minStockLevel: toDecimal(input.minStockLevel) } : {}),
+          ...(input.maxStockLevel !== undefined ? { maxStockLevel: toDecimal(input.maxStockLevel) } : {}),
+          ...(input.weight !== undefined ? { weight: toDecimal(input.weight) } : {}),
+          ...(input.unitId !== undefined
+            ? input.unitId
+              ? { unit: { connect: { id: input.unitId } } }
+              : { unit: { disconnect: true } }
+            : {}),
+          ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
+          ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+          ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl || null } : {}),
+          ...(input.customFields !== undefined ? { customFields: toNullableJsonValue(input.customFields) } : {}),
+          ...(input.metadata !== undefined ? { metadata: toNullableJsonValue(input.metadata) } : {}),
         },
       });
-    }
 
-    if (!product.hasVariants && input.isActive === false) {
-      throw ApiError.badRequest("Simple products must keep one active default variant");
-    }
+      await upsertVariantTranslations(tx, variantId, translations);
 
-    const variant = await tx.productVariant.update({
-      where: { id: variantId },
-      data: {
-        ...(input.name !== undefined ? { name: input.name || product.name } : {}),
-        ...(input.sku ? { sku: input.sku.trim() } : {}),
-        ...(input.barcode !== undefined ? { barcode: input.barcode || null } : {}),
-        ...(input.attributes !== undefined ? { attributes: toNullableJsonValue(input.attributes) } : {}),
-        ...(input.costPrice !== undefined ? { costPrice: toDecimal(input.costPrice) } : {}),
-        ...(input.sellingPrice !== undefined ? { sellingPrice: toDecimal(input.sellingPrice) } : {}),
-        ...(input.mrp !== undefined ? { mrp: toDecimal(input.mrp) } : {}),
-        ...(input.reorderLevel !== undefined ? { reorderLevel: toDecimal(input.reorderLevel) } : {}),
-        ...(input.minStockLevel !== undefined ? { minStockLevel: toDecimal(input.minStockLevel) } : {}),
-        ...(input.maxStockLevel !== undefined ? { maxStockLevel: toDecimal(input.maxStockLevel) } : {}),
-        ...(input.weight !== undefined ? { weight: toDecimal(input.weight) } : {}),
-        ...(input.unitId !== undefined
-          ? input.unitId
-            ? { unit: { connect: { id: input.unitId } } }
-            : { unit: { disconnect: true } }
-          : {}),
-        ...(input.isDefault !== undefined ? { isDefault: input.isDefault } : {}),
-        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-        ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl || null } : {}),
-        ...(input.customFields !== undefined ? { customFields: toNullableJsonValue(input.customFields) } : {}),
-        ...(input.metadata !== undefined ? { metadata: toNullableJsonValue(input.metadata) } : {}),
-      },
-    });
-
-    await upsertVariantTranslations(tx, variantId, translations);
-
-    return variant;
-  });
+      return variant;
+    },
+    INTERACTIVE_TRANSACTION_OPTIONS,
+  );
 
   const updatedVariant = await prisma.productVariant.findUniqueOrThrow({
     where: {
@@ -1035,43 +1055,46 @@ export async function deleteVariant(
     throw ApiError.badRequest("Simple products must keep exactly one active default variant");
   }
 
-  const deleted = await prisma.$transaction(async (tx) => {
-    const removed = await tx.productVariant.update({
-      where: { id: variantId },
-      data: {
-        isActive: false,
-        deletedAt: new Date(),
-        isDefault: false,
-      },
-    });
-
-    if (existing.isDefault) {
-      const fallback = await tx.productVariant.findFirst({
-        where: {
-          organizationId,
-          productId,
-          deletedAt: null,
-          id: {
-            not: variantId,
-          },
-        },
-        orderBy: {
-          createdAt: "asc",
+  const deleted = await prisma.$transaction(
+    async (tx) => {
+      const removed = await tx.productVariant.update({
+        where: { id: variantId },
+        data: {
+          isActive: false,
+          deletedAt: new Date(),
+          isDefault: false,
         },
       });
 
-      if (fallback) {
-        await tx.productVariant.update({
-          where: { id: fallback.id },
-          data: {
-            isDefault: true,
+      if (existing.isDefault) {
+        const fallback = await tx.productVariant.findFirst({
+          where: {
+            organizationId,
+            productId,
+            deletedAt: null,
+            id: {
+              not: variantId,
+            },
+          },
+          orderBy: {
+            createdAt: "asc",
           },
         });
-      }
-    }
 
-    return removed;
-  });
+        if (fallback) {
+          await tx.productVariant.update({
+            where: { id: fallback.id },
+            data: {
+              isDefault: true,
+            },
+          });
+        }
+      }
+
+      return removed;
+    },
+    INTERACTIVE_TRANSACTION_OPTIONS,
+  );
 
   await createAuditLog(prisma, {
     organizationId,

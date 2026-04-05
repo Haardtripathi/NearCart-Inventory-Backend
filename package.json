@@ -12,7 +12,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
-    "translations:backfill": "node --import tsx src/scripts/backfill-translations.ts"
+    "prisma:seed:catalog": "SEED_SCOPE=catalog prisma db seed",
+    "translations:backfill": "node --import tsx src/scripts/backfill-translations.ts",
+    "catalog:backfill": "node --import tsx src/scripts/backfill-industry-defaults.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

@@ -34,6 +34,11 @@ interface ApplyStockMovementInput {
   createdById?: string;
 }
 
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 async function upsertBatch(db: DbClient, input: {
   organizationId: string;
   branchId: string;
@@ -414,5 +419,5 @@ export async function createAdjustment(
     });
 
     return result;
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 }

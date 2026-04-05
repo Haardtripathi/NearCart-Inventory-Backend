@@ -14,6 +14,7 @@ import { ApiError } from "../../utils/ApiError";
 import { normalizeBranchAccess } from "../../utils/branchAccess";
 import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { signAuthToken } from "../../utils/jwt";
+import { createLocaleContext, type LocaleContext, serializeLocalizedEntity } from "../../utils/localization";
 import {
   getUserActionTokenByRawToken,
   markUserActionTokenUsed,
@@ -99,14 +100,29 @@ function serializeMemberships(
       slug: string;
       email: string | null;
       status: string;
+      defaultLanguage: LanguageCode;
       industryConfigs: Array<{
         id: string;
         industryId: string;
         isPrimary: boolean;
-        industry: unknown;
+        industry: {
+          id: string;
+          code: string;
+          name: string;
+          description: string | null;
+          isActive: boolean;
+          defaultFeatures: unknown;
+          defaultSettings: unknown;
+          translations: Array<{
+            language: LanguageCode;
+            name: string;
+            description: string | null;
+          }>;
+        };
       }>;
     };
   }>,
+  localeContext: LocaleContext,
 ) {
   return memberships.map((membership) => ({
     id: membership.id,
@@ -116,12 +132,26 @@ function serializeMemberships(
     branchAccess: normalizeBranchAccess(membership.branchAccess),
     organization: {
       ...membership.organization,
-      industries: membership.organization.industryConfigs,
+      industries: membership.organization.industryConfigs.map((config) => ({
+        ...config,
+        industry: serializeLocalizedEntity(
+          config.industry,
+          createLocaleContext({
+            requestedLanguage: localeContext.requestedLanguage,
+            userPreferredLanguage: localeContext.userPreferredLanguage,
+            orgDefaultLanguage: membership.organization.defaultLanguage,
+          }),
+        ),
+      })),
     },
   }));
 }
 
-async function buildAuthenticatedSession(userId: string, requestedOrganizationId?: string | null) {
+async function buildAuthenticatedSession(
+  userId: string,
+  requestedOrganizationId?: string | null,
+  localeContext?: LocaleContext,
+) {
   const user = await prisma.user.findUnique({
     where: {
       id: userId,
@@ -142,9 +172,18 @@ async function buildAuthenticatedSession(userId: string, requestedOrganizationId
               slug: true,
               email: true,
               status: true,
+              defaultLanguage: true,
               industryConfigs: {
                 include: {
-                  industry: true,
+                  industry: {
+                    include: {
+                      translations: {
+                        orderBy: {
+                          language: "asc",
+                        },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -182,6 +221,12 @@ async function buildAuthenticatedSession(userId: string, requestedOrganizationId
     throw ApiError.forbidden("Unable to determine role for this user");
   }
 
+  const resolvedLocaleContext =
+    localeContext ??
+    createLocaleContext({
+      userPreferredLanguage: user.preferredLanguage,
+    });
+
   const token = buildTokenPayload({
     userId: user.id,
     activeOrganizationId,
@@ -201,7 +246,7 @@ async function buildAuthenticatedSession(userId: string, requestedOrganizationId
     },
     activeOrganizationId,
     role,
-    memberships: serializeMemberships(user.memberships),
+    memberships: serializeMemberships(user.memberships, resolvedLocaleContext),
   };
 }
 
@@ -261,7 +306,7 @@ export async function bootstrapSuperAdmin(input: BootstrapSuperAdminInput, meta:
   return user;
 }
 
-export async function login(input: LoginInput, meta: RequestMeta) {
+export async function login(input: LoginInput, meta: RequestMeta, localeContext?: LocaleContext) {
   const user = await prisma.user.findUnique({
     where: {
       email: normalizeEmail(input.email),
@@ -291,7 +336,7 @@ export async function login(input: LoginInput, meta: RequestMeta) {
     data: { lastLoginAt: new Date() },
   });
 
-  const session = await buildAuthenticatedSession(user.id, input.organizationId ?? null);
+  const session = await buildAuthenticatedSession(user.id, input.organizationId ?? null, localeContext);
 
   await createAuditLog(prisma, {
     organizationId: session.activeOrganizationId,
@@ -310,7 +355,11 @@ export async function login(input: LoginInput, meta: RequestMeta) {
   return session;
 }
 
-export async function registerOrganizationOwner(input: RegisterOrganizationOwnerInput, meta: RequestMeta) {
+export async function registerOrganizationOwner(
+  input: RegisterOrganizationOwnerInput,
+  meta: RequestMeta,
+  localeContext?: LocaleContext,
+) {
   const email = normalizeEmail(input.email);
 
   const existingUser = await prisma.user.findUnique({
@@ -412,7 +461,7 @@ export async function registerOrganizationOwner(input: RegisterOrganizationOwner
     },
   });
 
-  const session = await buildAuthenticatedSession(created.userId, created.organizationId);
+  const session = await buildAuthenticatedSession(created.userId, created.organizationId, localeContext);
 
   await createAuditLog(prisma, {
     organizationId: created.organizationId,
@@ -437,6 +486,7 @@ async function completeCredentialFlow(
   purpose: UserActionTokenPurpose,
   password: string,
   meta: RequestMeta,
+  localeContext?: LocaleContext,
 ) {
   const tokenRecord = await getUserActionTokenByRawToken(prisma, token, purpose);
 
@@ -490,15 +540,23 @@ async function completeCredentialFlow(
     });
   });
 
-  return buildAuthenticatedSession(tokenRecord.userId, tokenRecord.organizationId ?? null);
+  return buildAuthenticatedSession(tokenRecord.userId, tokenRecord.organizationId ?? null, localeContext);
 }
 
-export async function completeAccountSetup(input: ActionTokenPasswordInput, meta: RequestMeta) {
-  return completeCredentialFlow(input.token, UserActionTokenPurpose.ACCOUNT_SETUP, input.password, meta);
+export async function completeAccountSetup(
+  input: ActionTokenPasswordInput,
+  meta: RequestMeta,
+  localeContext?: LocaleContext,
+) {
+  return completeCredentialFlow(input.token, UserActionTokenPurpose.ACCOUNT_SETUP, input.password, meta, localeContext);
 }
 
-export async function resetPasswordWithToken(input: ActionTokenPasswordInput, meta: RequestMeta) {
-  return completeCredentialFlow(input.token, UserActionTokenPurpose.PASSWORD_RESET, input.password, meta);
+export async function resetPasswordWithToken(
+  input: ActionTokenPasswordInput,
+  meta: RequestMeta,
+  localeContext?: LocaleContext,
+) {
+  return completeCredentialFlow(input.token, UserActionTokenPurpose.PASSWORD_RESET, input.password, meta, localeContext);
 }
 
 export async function changePassword(userId: string, input: ChangePasswordInput) {
@@ -562,7 +620,12 @@ export async function updateMyPreferences(userId: string, input: UpdatePreferenc
   return user;
 }
 
-export async function getMe(userId: string, activeOrganizationId: string | null, role: UserRole) {
+export async function getMe(
+  userId: string,
+  activeOrganizationId: string | null,
+  role: UserRole,
+  localeContext?: LocaleContext,
+) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
@@ -581,9 +644,18 @@ export async function getMe(userId: string, activeOrganizationId: string | null,
               slug: true,
               email: true,
               status: true,
+              defaultLanguage: true,
               industryConfigs: {
                 include: {
-                  industry: true,
+                  industry: {
+                    include: {
+                      translations: {
+                        orderBy: {
+                          language: "asc",
+                        },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -600,6 +672,12 @@ export async function getMe(userId: string, activeOrganizationId: string | null,
     throw ApiError.notFound("User not found");
   }
 
+  const resolvedLocaleContext =
+    localeContext ??
+    createLocaleContext({
+      userPreferredLanguage: user.preferredLanguage,
+    });
+
   return {
     id: user.id,
     fullName: user.fullName,
@@ -609,7 +687,7 @@ export async function getMe(userId: string, activeOrganizationId: string | null,
     preferredLanguage: user.preferredLanguage,
     activeOrganizationId,
     role,
-    memberships: serializeMemberships(user.memberships),
+    memberships: serializeMemberships(user.memberships, resolvedLocaleContext),
     lastLoginAt: user.lastLoginAt,
   };
 }

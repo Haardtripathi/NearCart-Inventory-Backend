@@ -16,7 +16,18 @@ function createRawToken() {
     return node_crypto_1.default.randomBytes(32).toString("hex");
 }
 function getAppBaseUrl() {
-    return env_1.env.CORS_ORIGIN.replace(/\/+$/, "");
+    const candidateOrigins = env_1.env.CORS_ORIGIN.split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean);
+    for (const origin of candidateOrigins) {
+        try {
+            return new URL(origin).toString().replace(/\/+$/, "");
+        }
+        catch {
+            continue;
+        }
+    }
+    throw new Error("CORS_ORIGIN must contain at least one valid absolute URL");
 }
 function buildUserActionLink(pathname, token) {
     const url = new URL(pathname, `${getAppBaseUrl()}/`);

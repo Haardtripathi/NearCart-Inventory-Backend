@@ -22,6 +22,11 @@ interface StockTransferItemInput {
   unitCost?: string | number;
 }
 
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 async function prepareTransferItems(organizationId: string, items: StockTransferItemInput[]) {
   const prepared = [];
 
@@ -245,7 +250,7 @@ export async function updateStockTransfer(
       entityId: transferId,
       fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
     });
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   const updated = await getStockTransferById(organizationId, transferId);
 
@@ -322,7 +327,7 @@ export async function approveStockTransfer(organizationId: string, transferId: s
     });
 
     return updated;
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   return approved;
 }

@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/ApiResponse";
+import { resolveLocaleContext } from "../../utils/localization";
 import {
   addIndustryToOrganization,
   createOrganization,
@@ -14,12 +15,14 @@ export async function createOrganizationController(req: Request, res: Response) 
 }
 
 export async function getMyOrganizationsController(req: Request, res: Response) {
-  const data = await getMyOrganizations(req.auth!.userId, req.auth!.role);
+  const localeContext = await resolveLocaleContext(req);
+  const data = await getMyOrganizations(req.auth!.userId, req.auth!.role, localeContext);
   return sendSuccess(res, 200, "Organizations fetched successfully", data);
 }
 
 export async function getOrganizationByIdController(req: Request, res: Response) {
-  const data = await getOrganizationById(req.auth!.userId, req.auth!.role, req.params.id!);
+  const localeContext = await resolveLocaleContext(req);
+  const data = await getOrganizationById(req.auth!.userId, req.auth!.role, req.params.id!, localeContext);
   return sendSuccess(res, 200, "Organization fetched successfully", data);
 }
 

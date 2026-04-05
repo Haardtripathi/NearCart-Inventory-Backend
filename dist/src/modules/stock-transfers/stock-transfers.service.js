@@ -16,6 +16,10 @@ const numbering_1 = require("../../utils/numbering");
 const pagination_1 = require("../../utils/pagination");
 const audit_service_1 = require("../audit/audit.service");
 const inventory_service_1 = require("../inventory/inventory.service");
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 30_000,
+};
 async function prepareTransferItems(organizationId, items) {
     const prepared = [];
     for (const item of items) {
@@ -179,7 +183,7 @@ async function updateStockTransfer(organizationId, transferId, actorUserId, inpu
             entityId: transferId,
             fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
         });
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const updated = await getStockTransferById(organizationId, transferId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
@@ -245,7 +249,7 @@ async function approveStockTransfer(organizationId, transferId, actorUserId) {
             after: updated,
         });
         return updated;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return approved;
 }
 async function cancelStockTransfer(organizationId, transferId, actorUserId) {

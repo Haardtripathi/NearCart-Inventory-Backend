@@ -100,6 +100,34 @@ export function parseAcceptLanguageHeader(headerValue: string | null | undefined
   return parsed[0]?.language ?? null;
 }
 
+function buildFallbackLanguages(
+  resolvedLanguage: LanguageCode,
+  orgDefaultLanguage: LanguageCode | null,
+) {
+  return Array.from(
+    new Set([resolvedLanguage, orgDefaultLanguage ?? null, LanguageCode.EN].filter(Boolean)),
+  ) as LanguageCode[];
+}
+
+export function createLocaleContext(options?: {
+  requestedLanguage?: LanguageCode | null;
+  userPreferredLanguage?: LanguageCode | null;
+  orgDefaultLanguage?: LanguageCode | null;
+}): LocaleContext {
+  const requestedLanguage = sanitizeSupportedLanguageCode(options?.requestedLanguage ?? null);
+  const userPreferredLanguage = sanitizeSupportedLanguageCode(options?.userPreferredLanguage ?? null);
+  const orgDefaultLanguage = sanitizeSupportedLanguageCode(options?.orgDefaultLanguage ?? null);
+  const resolvedLanguage = requestedLanguage ?? userPreferredLanguage ?? orgDefaultLanguage ?? LanguageCode.EN;
+
+  return {
+    requestedLanguage,
+    resolvedLanguage,
+    orgDefaultLanguage,
+    userPreferredLanguage,
+    fallbackLanguages: buildFallbackLanguages(resolvedLanguage, orgDefaultLanguage),
+  };
+}
+
 export async function resolveLocaleContext(
   req: Request,
   options?: {
@@ -138,18 +166,11 @@ export async function resolveLocaleContext(
     orgDefaultLanguage = sanitizeSupportedLanguageCode(organization?.defaultLanguage ?? null);
   }
 
-  const resolvedLanguage = requestedLanguage ?? userPreferredLanguage ?? orgDefaultLanguage ?? LanguageCode.EN;
-  const fallbackLanguages = Array.from(
-    new Set([resolvedLanguage, orgDefaultLanguage ?? null, LanguageCode.EN].filter(Boolean)),
-  ) as LanguageCode[];
-
-  return {
+  return createLocaleContext({
     requestedLanguage,
-    resolvedLanguage,
     orgDefaultLanguage,
     userPreferredLanguage,
-    fallbackLanguages,
-  };
+  });
 }
 
 export function resolveLocalizedText<TTranslation extends TranslationRecordBase>(

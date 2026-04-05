@@ -14,6 +14,10 @@ const numbering_1 = require("../../utils/numbering");
 const pagination_1 = require("../../utils/pagination");
 const stock_1 = require("../../utils/stock");
 const audit_service_1 = require("../audit/audit.service");
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 30_000,
+};
 async function upsertBatch(db, input) {
     const delta = (0, decimal_1.toDecimal)(input.quantityDelta);
     const existing = await db.inventoryBatch.findFirst({
@@ -309,5 +313,5 @@ async function createAdjustment(organizationId, actorUserId, input) {
             },
         });
         return result;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
 }

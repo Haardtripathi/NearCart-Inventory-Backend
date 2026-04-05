@@ -15,7 +15,14 @@ const guards_1 = require("../../utils/guards");
 const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const json_1 = require("../../utils/json");
 const branchCode_1 = require("../../utils/branchCode");
+const localization_1 = require("../../utils/localization");
 const defaultBrandTranslationLanguages = [client_1.LanguageCode.EN, client_1.LanguageCode.HI, client_1.LanguageCode.GU];
+const defaultOrganizationTaxRates = [
+    { code: "GST0", name: "GST 0%", rate: "0" },
+    { code: "GST5", name: "GST 5%", rate: "5" },
+    { code: "GST12", name: "GST 12%", rate: "12" },
+    { code: "GST18", name: "GST 18%", rate: "18" },
+];
 function normalizeEmail(email) {
     return email.trim().toLowerCase();
 }
@@ -68,7 +75,45 @@ function getMasterCategoryCanonicalFields(category) {
         description: fallbackTranslation?.description ?? null,
     };
 }
+async function ensureOrganizationDefaultTaxRates(tx, organizationId) {
+    for (const taxRate of defaultOrganizationTaxRates) {
+        const existing = await tx.taxRate.findFirst({
+            where: {
+                organizationId,
+                code: taxRate.code,
+            },
+            select: {
+                id: true,
+            },
+        });
+        if (existing) {
+            await tx.taxRate.update({
+                where: {
+                    id: existing.id,
+                },
+                data: {
+                    name: taxRate.name,
+                    rate: taxRate.rate,
+                    isInclusive: false,
+                    isActive: true,
+                },
+            });
+            continue;
+        }
+        await tx.taxRate.create({
+            data: {
+                organizationId,
+                code: taxRate.code,
+                name: taxRate.name,
+                rate: taxRate.rate,
+                isInclusive: false,
+                isActive: true,
+            },
+        });
+    }
+}
 async function seedOrganizationCatalogDefaultsForIndustry(tx, organizationId, industryId) {
+    await ensureOrganizationDefaultTaxRates(tx, organizationId);
     const masterCategories = await tx.masterCatalogCategory.findMany({
         where: {
             industryId,
@@ -238,6 +283,16 @@ async function assertOrganizationManageAccess(requesterUserId, requesterRole, or
     if (!membership || membership.role !== client_1.UserRole.ORG_ADMIN) {
         throw ApiError_1.ApiError.forbidden("Only org admins can update organization industries");
     }
+}
+function serializeOrganizationIndustryConfig(config, localeContext, orgDefaultLanguage) {
+    return {
+        ...config,
+        industry: (0, localization_1.serializeLocalizedEntity)(config.industry, (0, localization_1.createLocaleContext)({
+            requestedLanguage: localeContext.requestedLanguage,
+            userPreferredLanguage: localeContext.userPreferredLanguage,
+            orgDefaultLanguage,
+        })),
+    };
 }
 async function resolveOrganizationOwner(tx, currentUserId, currentRole, input) {
     if (currentRole !== client_1.UserRole.SUPER_ADMIN) {
@@ -540,7 +595,7 @@ async function createOrganization(currentUserId, currentRole, input) {
         timeout: 30_000,
     });
 }
-async function getMyOrganizations(userId, requesterRole) {
+async function getMyOrganizations(userId, requesterRole, localeContext) {
     if (requesterRole === client_1.UserRole.SUPER_ADMIN) {
         const organizations = await prisma_1.prisma.organization.findMany({
             where: {
@@ -549,7 +604,15 @@ async function getMyOrganizations(userId, requesterRole) {
             include: {
                 industryConfigs: {
                     include: {
-                        industry: true,
+                        industry: {
+                            include: {
+                                translations: {
+                                    orderBy: {
+                                        language: "asc",
+                                    },
+                                },
+                            },
+                        },
                     },
                 },
                 memberships: {
@@ -579,7 +642,7 @@ async function getMyOrganizations(userId, requesterRole) {
             status: organization.status,
             role: organization.memberships[0]?.role ?? client_1.UserRole.SUPER_ADMIN,
             isDefault: organization.memberships[0]?.isDefault ?? false,
-            industries: organization.industryConfigs,
+            industries: organization.industryConfigs.map((config) => serializeOrganizationIndustryConfig(config, localeContext, organization.defaultLanguage)),
         }));
     }
     const memberships = await prisma_1.prisma.organizationMembership.findMany({
@@ -598,7 +661,15 @@ async function getMyOrganizations(userId, requesterRole) {
                 include: {
                     industryConfigs: {
                         include: {
-                            industry: true,
+                            industry: {
+                                include: {
+                                    translations: {
+                                        orderBy: {
+                                            language: "asc",
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
@@ -616,10 +687,10 @@ async function getMyOrganizations(userId, requesterRole) {
         status: membership.organization.status,
         role: membership.role,
         isDefault: membership.isDefault,
-        industries: membership.organization.industryConfigs,
+        industries: membership.organization.industryConfigs.map((config) => serializeOrganizationIndustryConfig(config, localeContext, membership.organization.defaultLanguage)),
     }));
 }
-async function getOrganizationById(requesterUserId, requesterRole, organizationId) {
+async function getOrganizationById(requesterUserId, requesterRole, organizationId, localeContext) {
     if (requesterRole !== client_1.UserRole.SUPER_ADMIN) {
         const membership = await prisma_1.prisma.organizationMembership.findFirst({
             where: {
@@ -644,7 +715,15 @@ async function getOrganizationById(requesterUserId, requesterRole, organizationI
         include: {
             industryConfigs: {
                 include: {
-                    industry: true,
+                    industry: {
+                        include: {
+                            translations: {
+                                orderBy: {
+                                    language: "asc",
+                                },
+                            },
+                        },
+                    },
                 },
             },
             branches: {
@@ -662,7 +741,7 @@ async function getOrganizationById(requesterUserId, requesterRole, organizationI
     }
     return {
         ...organization,
-        industries: organization.industryConfigs,
+        industries: organization.industryConfigs.map((config) => serializeOrganizationIndustryConfig(config, localeContext, organization.defaultLanguage)),
     };
 }
 async function addIndustryToOrganization(requesterUserId, requesterRole, organizationId, input) {

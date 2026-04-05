@@ -19,6 +19,10 @@ const numbering_1 = require("../../utils/numbering");
 const pagination_1 = require("../../utils/pagination");
 const audit_service_1 = require("../audit/audit.service");
 const inventory_service_1 = require("../inventory/inventory.service");
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 30_000,
+};
 async function prepareSalesOrderItems(organizationId, items) {
     let subtotal = (0, decimal_1.toDecimal)(0);
     let taxTotal = (0, decimal_1.toDecimal)(0);
@@ -265,7 +269,7 @@ async function updateSalesOrder(organizationId, orderId, actorUserId, input) {
             entityId: orderId,
             fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
         });
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const updated = await getSalesOrderById(organizationId, orderId);
     for (const item of updated.items) {
         await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
@@ -335,7 +339,7 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
             after: updated,
         });
         return updated;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return confirmed;
 }
 async function rejectSalesOrder(organizationId, orderId, actorUserId, rejectionReason) {
@@ -411,7 +415,7 @@ async function cancelSalesOrder(organizationId, orderId, actorUserId) {
             after: updated,
         });
         return updated;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return cancelled;
 }
 async function deliverSalesOrder(organizationId, orderId, actorUserId) {

@@ -104,6 +104,10 @@ const productInclude = {
         orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     },
 };
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 30_000,
+};
 function serializeVariant(variant, localeContext) {
     return {
         ...(0, localization_1.serializeLocalizedEntity)(variant, localeContext),
@@ -458,7 +462,7 @@ async function createProduct(organizationId, actorUserId, input, localeContext) 
             await createVariantRecord(tx, organizationId, product.id, variant);
         }
         return product.id;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const product = await getProductRecordById(organizationId, productId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
@@ -522,7 +526,7 @@ async function updateProduct(organizationId, productId, actorUserId, input, loca
             },
         });
         await upsertProductTranslations(tx, productId, translations);
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const updated = await getProductRecordById(organizationId, productId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
@@ -556,7 +560,7 @@ async function deleteProduct(organizationId, productId, actorUserId) {
                 updatedById: actorUserId,
             },
         });
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -599,7 +603,7 @@ async function createVariant(organizationId, productId, actorUserId, input, loca
             });
         }
         return createVariantRecord(tx, organizationId, productId, normalized);
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const createdVariant = await prisma_1.prisma.productVariant.findUniqueOrThrow({
         where: { id: created.id },
         include: {
@@ -698,7 +702,7 @@ async function updateVariant(organizationId, productId, variantId, actorUserId, 
         });
         await upsertVariantTranslations(tx, variantId, translations);
         return variant;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const updatedVariant = await prisma_1.prisma.productVariant.findUniqueOrThrow({
         where: {
             id: updated.id,
@@ -765,7 +769,7 @@ async function deleteVariant(organizationId, productId, variantId, actorUserId) 
             }
         }
         return removed;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,

@@ -15,6 +15,7 @@ import { assertIndustryExists, assertOrganizationExists } from "../../utils/guar
 import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 import { generateUniqueBranchCode } from "../../utils/branchCode";
+import { createLocaleContext, type LocaleContext, serializeLocalizedEntity } from "../../utils/localization";
 
 export interface CreateOrganizationInput {
   name: string;
@@ -69,6 +70,12 @@ interface ResolvedOrganizationOwner {
 }
 
 const defaultBrandTranslationLanguages: LanguageCode[] = [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU];
+const defaultOrganizationTaxRates = [
+  { code: "GST0", name: "GST 0%", rate: "0" },
+  { code: "GST5", name: "GST 5%", rate: "5" },
+  { code: "GST12", name: "GST 12%", rate: "12" },
+  { code: "GST18", name: "GST 18%", rate: "18" },
+] as const;
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -144,11 +151,56 @@ function getMasterCategoryCanonicalFields(category: {
   };
 }
 
+async function ensureOrganizationDefaultTaxRates(
+  tx: DbClient,
+  organizationId: string,
+) {
+  for (const taxRate of defaultOrganizationTaxRates) {
+    const existing = await tx.taxRate.findFirst({
+      where: {
+        organizationId,
+        code: taxRate.code,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (existing) {
+      await tx.taxRate.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          name: taxRate.name,
+          rate: taxRate.rate,
+          isInclusive: false,
+          isActive: true,
+        },
+      });
+      continue;
+    }
+
+    await tx.taxRate.create({
+      data: {
+        organizationId,
+        code: taxRate.code,
+        name: taxRate.name,
+        rate: taxRate.rate,
+        isInclusive: false,
+        isActive: true,
+      },
+    });
+  }
+}
+
 async function seedOrganizationCatalogDefaultsForIndustry(
   tx: DbClient,
   organizationId: string,
   industryId: string,
 ) {
+  await ensureOrganizationDefaultTaxRates(tx, organizationId);
+
   const masterCategories = await tx.masterCatalogCategory.findMany({
     where: {
       industryId,
@@ -347,6 +399,42 @@ async function assertOrganizationManageAccess(
   if (!membership || membership.role !== UserRole.ORG_ADMIN) {
     throw ApiError.forbidden("Only org admins can update organization industries");
   }
+}
+
+function serializeOrganizationIndustryConfig(
+  config: {
+    id: string;
+    industryId: string;
+    isPrimary: boolean;
+    industry: {
+      id: string;
+      code: string;
+      name: string;
+      description: string | null;
+      isActive: boolean;
+      defaultFeatures: unknown;
+      defaultSettings: unknown;
+      translations: Array<{
+        language: LanguageCode;
+        name: string;
+        description: string | null;
+      }>;
+    };
+  },
+  localeContext: LocaleContext,
+  orgDefaultLanguage: LanguageCode,
+) {
+  return {
+    ...config,
+    industry: serializeLocalizedEntity(
+      config.industry,
+      createLocaleContext({
+        requestedLanguage: localeContext.requestedLanguage,
+        userPreferredLanguage: localeContext.userPreferredLanguage,
+        orgDefaultLanguage,
+      }),
+    ),
+  };
 }
 
 async function resolveOrganizationOwner(
@@ -703,7 +791,11 @@ export async function createOrganization(
   });
 }
 
-export async function getMyOrganizations(userId: string, requesterRole: UserRole) {
+export async function getMyOrganizations(
+  userId: string,
+  requesterRole: UserRole,
+  localeContext: LocaleContext,
+) {
   if (requesterRole === UserRole.SUPER_ADMIN) {
     const organizations = await prisma.organization.findMany({
       where: {
@@ -712,7 +804,15 @@ export async function getMyOrganizations(userId: string, requesterRole: UserRole
       include: {
         industryConfigs: {
           include: {
-            industry: true,
+            industry: {
+              include: {
+                translations: {
+                  orderBy: {
+                    language: "asc",
+                  },
+                },
+              },
+            },
           },
         },
         memberships: {
@@ -743,7 +843,9 @@ export async function getMyOrganizations(userId: string, requesterRole: UserRole
       status: organization.status,
       role: organization.memberships[0]?.role ?? UserRole.SUPER_ADMIN,
       isDefault: organization.memberships[0]?.isDefault ?? false,
-      industries: organization.industryConfigs,
+      industries: organization.industryConfigs.map((config) =>
+        serializeOrganizationIndustryConfig(config, localeContext, organization.defaultLanguage),
+      ),
     }));
   }
 
@@ -763,7 +865,15 @@ export async function getMyOrganizations(userId: string, requesterRole: UserRole
         include: {
           industryConfigs: {
             include: {
-              industry: true,
+              industry: {
+                include: {
+                  translations: {
+                    orderBy: {
+                      language: "asc",
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -782,11 +892,18 @@ export async function getMyOrganizations(userId: string, requesterRole: UserRole
     status: membership.organization.status,
     role: membership.role,
     isDefault: membership.isDefault,
-    industries: membership.organization.industryConfigs,
+    industries: membership.organization.industryConfigs.map((config) =>
+      serializeOrganizationIndustryConfig(config, localeContext, membership.organization.defaultLanguage),
+    ),
   }));
 }
 
-export async function getOrganizationById(requesterUserId: string, requesterRole: UserRole, organizationId: string) {
+export async function getOrganizationById(
+  requesterUserId: string,
+  requesterRole: UserRole,
+  organizationId: string,
+  localeContext: LocaleContext,
+) {
   if (requesterRole !== UserRole.SUPER_ADMIN) {
     const membership = await prisma.organizationMembership.findFirst({
       where: {
@@ -813,7 +930,15 @@ export async function getOrganizationById(requesterUserId: string, requesterRole
     include: {
       industryConfigs: {
         include: {
-          industry: true,
+          industry: {
+            include: {
+              translations: {
+                orderBy: {
+                  language: "asc",
+                },
+              },
+            },
+          },
         },
       },
       branches: {
@@ -833,7 +958,9 @@ export async function getOrganizationById(requesterUserId: string, requesterRole
 
   return {
     ...organization,
-    industries: organization.industryConfigs,
+    industries: organization.industryConfigs.map((config) =>
+      serializeOrganizationIndustryConfig(config, localeContext, organization.defaultLanguage),
+    ),
   };
 }
 

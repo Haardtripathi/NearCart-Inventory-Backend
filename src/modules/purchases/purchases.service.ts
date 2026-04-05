@@ -23,6 +23,11 @@ interface PurchaseItemInput {
   metadata?: unknown;
 }
 
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 async function preparePurchaseItems(organizationId: string, items: PurchaseItemInput[]) {
   let subtotal = toDecimal(0);
   let taxTotal = toDecimal(0);
@@ -300,7 +305,7 @@ export async function updatePurchase(
       entityId: purchaseId,
       fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
     });
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   const updated = await getPurchaseById(organizationId, purchaseId);
 
@@ -370,7 +375,7 @@ export async function postPurchase(organizationId: string, purchaseId: string, a
     });
 
     return updated;
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   return posted;
 }

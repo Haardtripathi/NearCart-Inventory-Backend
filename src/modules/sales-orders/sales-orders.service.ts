@@ -28,6 +28,11 @@ interface SalesOrderItemInput {
   metadata?: unknown;
 }
 
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 async function prepareSalesOrderItems(organizationId: string, items: SalesOrderItemInput[]) {
   let subtotal = toDecimal(0);
   let taxTotal = toDecimal(0);
@@ -347,7 +352,7 @@ export async function updateSalesOrder(
       entityId: orderId,
       fields: [{ fieldKey: "notes", value: input.notes ?? existing.notes }],
     });
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   const updated = await getSalesOrderById(organizationId, orderId);
 
@@ -428,7 +433,7 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
     });
 
     return updated;
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   return confirmed;
 }
@@ -524,7 +529,7 @@ export async function cancelSalesOrder(organizationId: string, orderId: string, 
     });
 
     return updated;
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   return cancelled;
 }

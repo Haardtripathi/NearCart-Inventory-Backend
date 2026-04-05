@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SUPPORTED_LANGUAGE_CODES = void 0;
 exports.normalizeLanguageCode = normalizeLanguageCode;
 exports.parseAcceptLanguageHeader = parseAcceptLanguageHeader;
+exports.createLocaleContext = createLocaleContext;
 exports.resolveLocaleContext = resolveLocaleContext;
 exports.resolveLocalizedText = resolveLocalizedText;
 exports.serializeLocalizedEntity = serializeLocalizedEntity;
@@ -64,6 +65,22 @@ function parseAcceptLanguageHeader(headerValue) {
     });
     return parsed[0]?.language ?? null;
 }
+function buildFallbackLanguages(resolvedLanguage, orgDefaultLanguage) {
+    return Array.from(new Set([resolvedLanguage, orgDefaultLanguage ?? null, client_1.LanguageCode.EN].filter(Boolean)));
+}
+function createLocaleContext(options) {
+    const requestedLanguage = sanitizeSupportedLanguageCode(options?.requestedLanguage ?? null);
+    const userPreferredLanguage = sanitizeSupportedLanguageCode(options?.userPreferredLanguage ?? null);
+    const orgDefaultLanguage = sanitizeSupportedLanguageCode(options?.orgDefaultLanguage ?? null);
+    const resolvedLanguage = requestedLanguage ?? userPreferredLanguage ?? orgDefaultLanguage ?? client_1.LanguageCode.EN;
+    return {
+        requestedLanguage,
+        resolvedLanguage,
+        orgDefaultLanguage,
+        userPreferredLanguage,
+        fallbackLanguages: buildFallbackLanguages(resolvedLanguage, orgDefaultLanguage),
+    };
+}
 async function resolveLocaleContext(req, options) {
     const queryLanguage = typeof req.query.lang === "string" ? normalizeLanguageCode(req.query.lang) : null;
     const headerLanguage = parseAcceptLanguageHeader(typeof req.headers["accept-language"] === "string" ? req.headers["accept-language"] : null);
@@ -86,15 +103,11 @@ async function resolveLocaleContext(req, options) {
         });
         orgDefaultLanguage = sanitizeSupportedLanguageCode(organization?.defaultLanguage ?? null);
     }
-    const resolvedLanguage = requestedLanguage ?? userPreferredLanguage ?? orgDefaultLanguage ?? client_1.LanguageCode.EN;
-    const fallbackLanguages = Array.from(new Set([resolvedLanguage, orgDefaultLanguage ?? null, client_1.LanguageCode.EN].filter(Boolean)));
-    return {
+    return createLocaleContext({
         requestedLanguage,
-        resolvedLanguage,
         orgDefaultLanguage,
         userPreferredLanguage,
-        fallbackLanguages,
-    };
+    });
 }
 function resolveLocalizedText(args) {
     const normalizedBaseName = normalizeText(args.baseName);

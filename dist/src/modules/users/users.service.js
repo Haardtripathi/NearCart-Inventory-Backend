@@ -15,6 +15,10 @@ const userActionTokens_1 = require("../../utils/userActionTokens");
 const audit_service_1 = require("../audit/audit.service");
 const ACCOUNT_SETUP_TOKEN_HOURS = 24 * 7;
 const PASSWORD_RESET_TOKEN_HOURS = 24;
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 30_000,
+};
 function normalizeEmail(email) {
     return email.trim().toLowerCase();
 }
@@ -367,7 +371,7 @@ async function createOrganizationUser(actorUserId, actorRole, organizationId, in
             membership,
             accessLink,
         };
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const branchMap = await resolveBranchMap(organizationId, [result.membership]);
     return {
         user: serializeMembership(result.membership, branchMap),
@@ -450,7 +454,7 @@ async function updateOrganizationUser(actorUserId, actorRole, organizationId, us
             },
         });
         return membership;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     const branchMap = await resolveBranchMap(organizationId, [updated]);
     return serializeMembership(updated, branchMap);
 }

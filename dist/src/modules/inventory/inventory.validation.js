@@ -11,6 +11,7 @@ exports.inventoryBalanceQuerySchema = validation_1.paginationQuerySchema.extend(
     lowStock: zod_1.z.coerce.boolean().optional(),
 });
 exports.inventoryLedgerQuerySchema = validation_1.paginationQuerySchema.extend({
+    search: validation_1.optionalTrimmedString,
     branchId: validation_1.optionalTrimmedString,
     productId: validation_1.optionalTrimmedString,
     variantId: validation_1.optionalTrimmedString,

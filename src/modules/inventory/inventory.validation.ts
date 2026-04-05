@@ -18,6 +18,7 @@ export const inventoryBalanceQuerySchema = paginationQuerySchema.extend({
 });
 
 export const inventoryLedgerQuerySchema = paginationQuerySchema.extend({
+  search: optionalTrimmedString,
   branchId: optionalTrimmedString,
   productId: optionalTrimmedString,
   variantId: optionalTrimmedString,

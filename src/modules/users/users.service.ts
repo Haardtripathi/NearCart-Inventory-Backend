@@ -20,6 +20,10 @@ import { createAuditLog } from "../audit/audit.service";
 
 const ACCOUNT_SETUP_TOKEN_HOURS = 24 * 7;
 const PASSWORD_RESET_TOKEN_HOURS = 24;
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -456,7 +460,7 @@ export async function createOrganizationUser(
       membership,
       accessLink,
     };
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   const branchMap = await resolveBranchMap(organizationId, [result.membership]);
 
@@ -571,7 +575,7 @@ export async function updateOrganizationUser(
     });
 
     return membership;
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   const branchMap = await resolveBranchMap(organizationId, [updated]);
   return serializeMembership(updated as never, branchMap);

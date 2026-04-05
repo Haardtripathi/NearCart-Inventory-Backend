@@ -11,10 +11,17 @@ exports.updateMasterCatalogItemController = updateMasterCatalogItemController;
 exports.importMasterCatalogItemController = importMasterCatalogItemController;
 exports.importManyMasterCatalogItemsController = importManyMasterCatalogItemsController;
 exports.getFeaturedMasterCatalogItemsController = getFeaturedMasterCatalogItemsController;
+const client_1 = require("@prisma/client");
 const ApiResponse_1 = require("../../utils/ApiResponse");
 const localization_1 = require("../../utils/localization");
 const master_catalog_service_1 = require("./master-catalog.service");
 const master_catalog_import_service_1 = require("./master-catalog.import.service");
+function resolveRequestedOrganizationId(req) {
+    if (req.auth?.role === client_1.UserRole.SUPER_ADMIN && typeof req.headers["x-organization-id"] === "string") {
+        return req.headers["x-organization-id"];
+    }
+    return req.auth?.activeOrganizationId ?? null;
+}
 async function getMasterCatalogCategoriesController(req, res) {
     const localeContext = await (0, localization_1.resolveLocaleContext)(req);
     const data = await (0, master_catalog_service_1.getMasterCatalogCategories)(req.query, localeContext);
@@ -37,12 +44,12 @@ async function updateMasterCatalogCategoryController(req, res) {
 }
 async function getMasterCatalogItemsController(req, res) {
     const localeContext = await (0, localization_1.resolveLocaleContext)(req);
-    const data = await (0, master_catalog_service_1.getMasterCatalogItems)(req.query, localeContext, req.auth?.activeOrganizationId ?? null);
+    const data = await (0, master_catalog_service_1.getMasterCatalogItems)(req.query, localeContext, resolveRequestedOrganizationId(req));
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Master catalog items fetched successfully", data);
 }
 async function getMasterCatalogItemController(req, res) {
     const localeContext = await (0, localization_1.resolveLocaleContext)(req);
-    const data = await (0, master_catalog_service_1.getMasterCatalogItemById)(req.params.id, localeContext, req.auth?.activeOrganizationId ?? null);
+    const data = await (0, master_catalog_service_1.getMasterCatalogItemById)(req.params.id, localeContext, resolveRequestedOrganizationId(req));
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Master catalog item fetched successfully", data);
 }
 async function createMasterCatalogItemController(req, res) {
@@ -67,6 +74,6 @@ async function importManyMasterCatalogItemsController(req, res) {
 }
 async function getFeaturedMasterCatalogItemsController(req, res) {
     const localeContext = await (0, localization_1.resolveLocaleContext)(req);
-    const data = await (0, master_catalog_service_1.getFeaturedMasterCatalogItems)(req.params.industryId, req.query, localeContext, req.auth?.activeOrganizationId ?? null);
+    const data = await (0, master_catalog_service_1.getFeaturedMasterCatalogItems)(req.params.industryId, req.query, localeContext, resolveRequestedOrganizationId(req));
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Featured master catalog items fetched successfully", data);
 }

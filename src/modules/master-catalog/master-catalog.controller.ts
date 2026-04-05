@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { UserRole } from "@prisma/client";
 
 import { sendSuccess } from "../../utils/ApiResponse";
 import { resolveLocaleContext } from "../../utils/localization";
@@ -14,6 +15,14 @@ import {
   updateMasterCatalogItem,
 } from "./master-catalog.service";
 import { importManyMasterCatalogItems, importMasterCatalogItem } from "./master-catalog.import.service";
+
+function resolveRequestedOrganizationId(req: Request) {
+  if (req.auth?.role === UserRole.SUPER_ADMIN && typeof req.headers["x-organization-id"] === "string") {
+    return req.headers["x-organization-id"];
+  }
+
+  return req.auth?.activeOrganizationId ?? null;
+}
 
 export async function getMasterCatalogCategoriesController(req: Request, res: Response) {
   const localeContext = await resolveLocaleContext(req);
@@ -41,13 +50,13 @@ export async function updateMasterCatalogCategoryController(req: Request, res: R
 
 export async function getMasterCatalogItemsController(req: Request, res: Response) {
   const localeContext = await resolveLocaleContext(req);
-  const data = await getMasterCatalogItems(req.query as never, localeContext, req.auth?.activeOrganizationId ?? null);
+  const data = await getMasterCatalogItems(req.query as never, localeContext, resolveRequestedOrganizationId(req));
   return sendSuccess(res, 200, "Master catalog items fetched successfully", data);
 }
 
 export async function getMasterCatalogItemController(req: Request, res: Response) {
   const localeContext = await resolveLocaleContext(req);
-  const data = await getMasterCatalogItemById(req.params.id!, localeContext, req.auth?.activeOrganizationId ?? null);
+  const data = await getMasterCatalogItemById(req.params.id!, localeContext, resolveRequestedOrganizationId(req));
   return sendSuccess(res, 200, "Master catalog item fetched successfully", data);
 }
 
@@ -92,7 +101,7 @@ export async function getFeaturedMasterCatalogItemsController(req: Request, res:
     req.params.industryId!,
     req.query as never,
     localeContext,
-    req.auth?.activeOrganizationId ?? null,
+    resolveRequestedOrganizationId(req),
   );
   return sendSuccess(res, 200, "Featured master catalog items fetched successfully", data);
 }

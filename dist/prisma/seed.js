@@ -10,10 +10,14 @@ const masterCatalog_1 = require("../src/utils/masterCatalog");
 const slug_1 = require("../src/utils/slug");
 const nearcart_grocery_fmcg_seed_patch_1 = require("./nearcart_grocery_fmcg_seed_patch");
 const prisma = new client_1.PrismaClient();
+const seedScope = (process.env.SEED_SCOPE ?? "full").trim().toLowerCase();
 const seedSuperAdminConfig = {
     email: (process.env.SEED_SUPER_ADMIN_EMAIL ?? "superadmin@nearcart.local").trim().toLowerCase(),
     fullName: (process.env.SEED_SUPER_ADMIN_FULL_NAME ?? "NearCart Platform Admin").trim(),
     password: (process.env.SEED_SUPER_ADMIN_PASSWORD ?? "StrongPassword123").trim(),
+};
+const seedOrganizationUserConfig = {
+    password: (process.env.SEED_ORG_USER_PASSWORD ?? seedSuperAdminConfig.password).trim(),
 };
 const systemUnits = [
     { code: "pcs", name: "Pieces", symbol: "pcs", allowsDecimal: false },
@@ -3606,23 +3610,27 @@ function bilingualTranslationRows(translations) {
     ];
 }
 async function upsertUserSeed(params) {
+    const passwordHash = await bcrypt_1.default.hash(seedOrganizationUserConfig.password, 12);
     return prisma.user.upsert({
         where: { email: params.email },
         update: {
             fullName: params.fullName,
+            passwordHash,
             platformRole: params.platformRole ?? null,
             preferredLanguage: params.preferredLanguage ?? client_1.LanguageCode.EN,
             isActive: true,
             passwordSetupRequired: false,
+            passwordChangedAt: new Date(),
         },
         create: {
             email: params.email,
             fullName: params.fullName,
-            passwordHash: "seed-password-not-for-production",
+            passwordHash,
             platformRole: params.platformRole ?? null,
             preferredLanguage: params.preferredLanguage ?? client_1.LanguageCode.EN,
             isActive: true,
             passwordSetupRequired: false,
+            passwordChangedAt: new Date(),
         },
     });
 }
@@ -4781,6 +4789,9 @@ async function main() {
     await seedUnitTranslations();
     for (const industrySeed of [...industries, ...extraIndustries]) {
         await seedIndustryCatalog(industrySeed);
+    }
+    if (seedScope === "catalog" || seedScope === "core") {
+        return;
     }
     await seedDemoOrganizationCatalog({
         organizationSlug: "nearcart-grocery-demo",

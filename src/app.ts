@@ -16,12 +16,24 @@ if (env.NODE_ENV === "production") {
   app.set("trust proxy", 1);
 }
 
-const corsOrigins = env.CORS_ORIGIN.split(",")
+const configuredCorsOrigins = env.CORS_ORIGIN.split(",")
   .map((value) => value.trim())
   .filter(Boolean)
   .map((origin) =>
     /^https?:\/\//i.test(origin) ? origin : `http://${origin}`,
   );
+const developmentCorsOrigins =
+  env.NODE_ENV === "development"
+    ? [
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+      ]
+    : [];
+const corsOrigins = Array.from(
+  new Set([...configuredCorsOrigins, ...developmentCorsOrigins]),
+);
 
 app.use(helmet());
 app.use(

@@ -79,6 +79,11 @@ interface UpdatePreferencesInput {
   preferredLanguage: LanguageCode;
 }
 
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
@@ -447,10 +452,7 @@ export async function registerOrganizationOwner(
       userId: user.id,
       organizationId: organization.organization.id,
     };
-  }, {
-    maxWait: 10_000,
-    timeout: 30_000,
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   await prisma.user.update({
     where: {
@@ -538,7 +540,7 @@ async function completeCredentialFlow(
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     });
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   return buildAuthenticatedSession(tokenRecord.userId, tokenRecord.organizationId ?? null, localeContext);
 }

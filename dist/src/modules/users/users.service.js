@@ -488,7 +488,7 @@ async function generateOrganizationUserAccessLink(actorUserId, organizationId, u
             },
         });
         return created;
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return serializeAccessLink({
         purpose,
         rawToken: token.rawToken,

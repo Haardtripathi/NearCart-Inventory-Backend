@@ -24,6 +24,10 @@ const userActionTokens_1 = require("../../utils/userActionTokens");
 const guards_1 = require("../../utils/guards");
 const organizations_service_1 = require("../organizations/organizations.service");
 const audit_service_1 = require("../audit/audit.service");
+const INTERACTIVE_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 30_000,
+};
 function normalizeEmail(email) {
     return email.trim().toLowerCase();
 }
@@ -303,10 +307,7 @@ async function registerOrganizationOwner(input, meta, localeContext) {
             userId: user.id,
             organizationId: organization.organization.id,
         };
-    }, {
-        maxWait: 10_000,
-        timeout: 30_000,
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     await prisma_1.prisma.user.update({
         where: {
             id: created.userId,
@@ -377,7 +378,7 @@ async function completeCredentialFlow(token, purpose, password, meta, localeCont
             ipAddress: meta.ipAddress,
             userAgent: meta.userAgent,
         });
-    });
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return buildAuthenticatedSession(tokenRecord.userId, tokenRecord.organizationId ?? null, localeContext);
 }
 async function completeAccountSetup(input, meta, localeContext) {

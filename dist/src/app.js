@@ -18,10 +18,19 @@ if (env_1.env.NODE_ENV === "production") {
     // Render and similar platforms terminate TLS at a proxy and set X-Forwarded-For.
     exports.app.set("trust proxy", 1);
 }
-const corsOrigins = env_1.env.CORS_ORIGIN.split(",")
+const configuredCorsOrigins = env_1.env.CORS_ORIGIN.split(",")
     .map((value) => value.trim())
     .filter(Boolean)
     .map((origin) => /^https?:\/\//i.test(origin) ? origin : `http://${origin}`);
+const developmentCorsOrigins = env_1.env.NODE_ENV === "development"
+    ? [
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    : [];
+const corsOrigins = Array.from(new Set([...configuredCorsOrigins, ...developmentCorsOrigins]));
 exports.app.use((0, helmet_1.default)());
 exports.app.use((0, cors_1.default)({
     origin: corsOrigins,

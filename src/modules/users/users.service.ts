@@ -618,7 +618,7 @@ export async function generateOrganizationUserAccessLink(
     });
 
     return created;
-  });
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   return serializeAccessLink({
     purpose,

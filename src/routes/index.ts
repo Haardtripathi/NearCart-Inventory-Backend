@@ -22,6 +22,7 @@ import { auditRouter } from "../modules/audit/audit.route";
 import { usersRouter } from "../modules/users/users.route";
 import { translationRouter } from "../modules/translation/translation.route";
 import { uploadsRouter } from "../modules/uploads/uploads.route";
+import { marketplaceRouter } from "../modules/marketplace/marketplace.route";
 
 export const apiRouter = Router();
 
@@ -53,3 +54,4 @@ apiRouter.use("/audit-logs", auditRouter);
 apiRouter.use("/users", usersRouter);
 apiRouter.use("/translate-item", translationRouter);
 apiRouter.use("/uploads", uploadsRouter);
+apiRouter.use("/internal/marketplace", marketplaceRouter);

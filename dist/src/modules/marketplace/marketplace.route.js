@@ -1,0 +1,17 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.marketplaceRouter = void 0;
+const express_1 = require("express");
+const internalService_middleware_1 = require("../../middlewares/internalService.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const marketplace_controller_1 = require("./marketplace.controller");
+const marketplace_validation_1 = require("./marketplace.validation");
+exports.marketplaceRouter = (0, express_1.Router)();
+exports.marketplaceRouter.use(internalService_middleware_1.requireInternalServiceAuth);
+exports.marketplaceRouter.get("/organizations", (0, validate_middleware_1.validateRequest)({ query: marketplace_validation_1.marketplaceOrganizationsQuerySchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.listMarketplaceOrganizationsController));
+exports.marketplaceRouter.get("/organizations/:organizationId/catalog", (0, validate_middleware_1.validateRequest)({ query: marketplace_validation_1.marketplaceCatalogQuerySchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.listMarketplaceCatalogController));
+exports.marketplaceRouter.get("/organizations/:organizationId/catalog/:productId", (0, validate_middleware_1.validateRequest)({ query: marketplace_validation_1.marketplaceScopedQuerySchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.getMarketplaceCatalogProductController));
+exports.marketplaceRouter.post("/organizations/:organizationId/availability-check", (0, validate_middleware_1.validateRequest)({ body: marketplace_validation_1.marketplaceAvailabilitySchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.checkMarketplaceAvailabilityController));
+exports.marketplaceRouter.get("/organizations/:organizationId/categories", (0, validate_middleware_1.validateRequest)({ query: marketplace_validation_1.marketplaceScopedQuerySchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.listMarketplaceCategoriesController));
+exports.marketplaceRouter.get("/organizations/:organizationId/brands", (0, validate_middleware_1.validateRequest)({ query: marketplace_validation_1.marketplaceScopedQuerySchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.listMarketplaceBrandsController));

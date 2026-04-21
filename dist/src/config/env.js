@@ -40,6 +40,7 @@ const envSchema = zod_1.z
     CLOUDINARY_API_SECRET: zod_1.z.string().trim().min(1).optional(),
     CLOUDINARY_UPLOAD_FOLDER: zod_1.z.string().trim().min(1).default("nearcart-inventory"),
     IMAGE_UPLOAD_MAX_BYTES: zod_1.z.coerce.number().int().positive().default(5 * 1024 * 1024),
+    MARKETPLACE_INTERNAL_TOKEN: zod_1.z.string().trim().min(1).optional(),
 })
     .refine((values) => (!!values.UPSTASH_REDIS_REST_URL && !!values.UPSTASH_REDIS_REST_TOKEN) ||
     (!values.UPSTASH_REDIS_REST_URL && !values.UPSTASH_REDIS_REST_TOKEN), {

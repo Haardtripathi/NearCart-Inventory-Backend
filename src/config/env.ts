@@ -42,6 +42,7 @@ const envSchema = z
     CLOUDINARY_API_SECRET: z.string().trim().min(1).optional(),
     CLOUDINARY_UPLOAD_FOLDER: z.string().trim().min(1).default("nearcart-inventory"),
     IMAGE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
+    MARKETPLACE_INTERNAL_TOKEN: z.string().trim().min(1).optional(),
   })
   .refine(
     (values) =>

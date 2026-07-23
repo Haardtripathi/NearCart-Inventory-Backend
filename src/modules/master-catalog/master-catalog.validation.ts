@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   decimalInputSchema,
   languageCodeSchema,
-  optionalDecimalInputSchema,
   optionalTrimmedString,
   paginationQuerySchema,
   trimmedString,
@@ -29,11 +28,18 @@ const aliasSchema = z.object({
   value: trimmedString,
 });
 
+const nonNegativeDecimalInputSchema = decimalInputSchema.refine(
+  (value) => Number(value) >= 0,
+  { message: "Value must not be negative" },
+);
+
+const optionalNonNegativeDecimalInputSchema = nonNegativeDecimalInputSchema.optional();
+
 const pricingOverrideSchema = z.object({
   masterVariantTemplateId: optionalTrimmedString,
-  sellingPrice: decimalInputSchema.optional(),
-  costPrice: decimalInputSchema.optional(),
-  mrp: decimalInputSchema.optional(),
+  sellingPrice: optionalNonNegativeDecimalInputSchema,
+  costPrice: optionalNonNegativeDecimalInputSchema,
+  mrp: optionalNonNegativeDecimalInputSchema,
 });
 
 const namingOverrideSchema = z.object({
@@ -46,13 +52,13 @@ const masterVariantTemplateSchema = z.object({
   skuSuffix: optionalTrimmedString,
   barcode: optionalTrimmedString,
   attributes: z.unknown().optional(),
-  defaultCostPrice: optionalDecimalInputSchema,
-  defaultSellingPrice: optionalDecimalInputSchema,
-  defaultMrp: optionalDecimalInputSchema,
-  reorderLevel: optionalDecimalInputSchema,
-  minStockLevel: optionalDecimalInputSchema,
-  maxStockLevel: optionalDecimalInputSchema,
-  weight: optionalDecimalInputSchema,
+  defaultCostPrice: optionalNonNegativeDecimalInputSchema,
+  defaultSellingPrice: optionalNonNegativeDecimalInputSchema,
+  defaultMrp: optionalNonNegativeDecimalInputSchema,
+  reorderLevel: optionalNonNegativeDecimalInputSchema,
+  minStockLevel: optionalNonNegativeDecimalInputSchema,
+  maxStockLevel: optionalNonNegativeDecimalInputSchema,
+  weight: optionalNonNegativeDecimalInputSchema,
   unitCode: optionalTrimmedString,
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
@@ -88,13 +94,22 @@ export const createMasterCatalogCategorySchema = z.object({
 
 export const updateMasterCatalogCategorySchema = createMasterCatalogCategorySchema.partial();
 
+// NOTE: `z.coerce.boolean()` is a footgun for query params: `Boolean("false")` is `true` in
+// JS because it only checks for a non-empty string, so `?isActive=false` was silently coerced
+// to `true` and the "inactive only" / "single variant" filters on this list endpoint were
+// unusable (they behaved identically to their `true` counterpart). Parse the literal string
+// instead.
+const booleanQueryParamSchema = z
+  .union([z.literal("true"), z.literal("false"), z.boolean()])
+  .transform((value) => value === true || value === "true");
+
 export const masterCatalogItemsQuerySchema = paginationQuerySchema.omit({ search: true }).extend({
   industryId: trimmedString,
   categoryId: optionalTrimmedString,
   q: optionalTrimmedString,
   lang: optionalTrimmedString,
-  hasVariants: z.coerce.boolean().optional(),
-  isActive: z.coerce.boolean().optional(),
+  hasVariants: booleanQueryParamSchema.optional(),
+  isActive: booleanQueryParamSchema.optional(),
 });
 
 export const createMasterCatalogItemSchema = z.object({
@@ -133,6 +148,7 @@ export const importMasterCatalogItemSchema = z
     allowDuplicate: z.boolean().optional(),
     strictIndustryMatch: z.boolean().optional(),
     forceImport: z.boolean().optional(),
+    defaultVariantTemplateId: optionalTrimmedString,
     pricingOverrides: z
       .object({
         variantPrices: z.array(pricingOverrideSchema).optional(),
@@ -162,6 +178,7 @@ export const importManyMasterCatalogItemsSchema = z
       .array(
         z.object({
           masterItemId: trimmedString,
+          defaultVariantTemplateId: optionalTrimmedString,
           pricingOverrides: z
             .object({
               variantPrices: z.array(pricingOverrideSchema).optional(),

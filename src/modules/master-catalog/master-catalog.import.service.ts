@@ -76,6 +76,7 @@ interface ImportMasterCatalogItemInput {
   allowDuplicate?: boolean;
   strictIndustryMatch?: boolean;
   forceImport?: boolean;
+  defaultVariantTemplateId?: string;
   pricingOverrides?: {
     variantPrices?: ImportPricingOverride[];
   };
@@ -442,16 +443,18 @@ async function createProductTranslations(
   productId: string,
   masterItem: ImportMasterCatalogItemRecord,
 ) {
-  for (const translation of masterItem.translations) {
-    await db.productTranslation.create({
-      data: {
-        productId,
-        language: translation.language,
-        name: translation.name,
-        description: translation.description,
-      },
-    });
+  if (masterItem.translations.length === 0) {
+    return;
   }
+
+  await db.productTranslation.createMany({
+    data: masterItem.translations.map((translation) => ({
+      productId,
+      language: translation.language,
+      name: translation.name,
+      description: translation.description,
+    })),
+  });
 }
 
 async function createVariantTranslations(
@@ -459,19 +462,31 @@ async function createVariantTranslations(
   variantId: string,
   translations: Array<{ language: string; name: string }>,
 ) {
-  for (const translation of translations) {
-    await db.productVariantTranslation.create({
-      data: {
-        variantId,
-        language: translation.language as never,
-        name: translation.name,
-      },
-    });
+  if (translations.length === 0) {
+    return;
   }
+
+  await db.productVariantTranslation.createMany({
+    data: translations.map((translation) => ({
+      variantId,
+      language: translation.language as never,
+      name: translation.name,
+    })),
+  });
 }
 
-function normalizeTemplateDefaultFlags(templates: ImportMasterCatalogItemRecord["variantTemplates"]) {
-  const preferredDefaultId = templates.find((template) => template.isDefault)?.id ?? templates[0]?.id ?? null;
+function normalizeTemplateDefaultFlags(
+  templates: ImportMasterCatalogItemRecord["variantTemplates"],
+  requestedDefaultTemplateId?: string,
+) {
+  const preferredDefaultId =
+    (requestedDefaultTemplateId && templates.some((template) => template.id === requestedDefaultTemplateId)
+      ? requestedDefaultTemplateId
+      : null) ??
+    templates.find((template) => template.isDefault)?.id ??
+    templates[0]?.id ??
+    null;
+
   return templates.map((template) => ({
     ...template,
     isDefault: template.id === preferredDefaultId,
@@ -486,6 +501,7 @@ async function createImportedVariants(
   masterItem: ImportMasterCatalogItemRecord,
   primaryUnitId: string | null,
   pricingOverrides: ImportMasterCatalogItemInput["pricingOverrides"],
+  defaultVariantTemplateId?: string,
 ) {
   if (masterItem.variantTemplates.length === 0) {
     const priceOverride = getVariantPriceOverride(pricingOverrides);
@@ -529,7 +545,7 @@ async function createImportedVariants(
     return;
   }
 
-  const templates = normalizeTemplateDefaultFlags(masterItem.variantTemplates);
+  const templates = normalizeTemplateDefaultFlags(masterItem.variantTemplates, defaultVariantTemplateId);
 
   for (const template of templates) {
     const priceOverride = getVariantPriceOverride(pricingOverrides, template.id);
@@ -601,6 +617,13 @@ export async function importMasterCatalogItem(
   const masterItem = await getImportMasterCatalogItem(masterItemId);
   const industryWarning = await validateIndustryCompatibility(organizationId, masterItem, input);
 
+  if (
+    input.defaultVariantTemplateId &&
+    !masterItem.variantTemplates.some((template) => template.id === input.defaultVariantTemplateId)
+  ) {
+    throw ApiError.badRequest("defaultVariantTemplateId does not belong to this master catalog item");
+  }
+
   const existingProduct = await prisma.product.findFirst({
     where: {
       organizationId,
@@ -632,7 +655,8 @@ export async function importMasterCatalogItem(
     };
   }
 
-  const product = await prisma.$transaction(async (tx) => {
+  const product = await prisma.$transaction(
+    async (tx) => {
     const categoryId = await ensureImportCategory(tx, organizationId, input, masterItem);
     const primaryUnit = await resolveUnitByCode(tx, organizationId, masterItem.defaultUnitCode);
     const brandId = await resolveBrandId(tx, organizationId, masterItem.defaultBrandName);
@@ -684,10 +708,21 @@ export async function importMasterCatalogItem(
       masterItem,
       primaryUnit?.id ?? null,
       input.pricingOverrides,
+      input.defaultVariantTemplateId,
     );
 
-    return createdProduct;
-  });
+      return createdProduct;
+    },
+    {
+      // Imports with several variant templates issue many sequential queries
+      // (unit/brand/tax lookups, unique SKU/slug checks, per-variant + per-translation
+      // inserts). Prisma's default interactive transaction timeout is 5s, which was
+      // regularly exceeded (and the whole import failed) once an item had more than a
+      // couple of variant templates. Give it more headroom.
+      timeout: 20000,
+      maxWait: 10000,
+    },
+  );
 
   await createAuditLog(prisma, {
     organizationId,
@@ -722,6 +757,7 @@ export async function importManyMasterCatalogItems(
     forceImport?: boolean;
     items: Array<{
       masterItemId: string;
+      defaultVariantTemplateId?: string;
       pricingOverrides?: ImportMasterCatalogItemInput["pricingOverrides"];
       namingOverrides?: ImportMasterCatalogItemInput["namingOverrides"];
     }>;
@@ -742,6 +778,7 @@ export async function importManyMasterCatalogItems(
         allowDuplicate: input.allowDuplicate,
         strictIndustryMatch: input.strictIndustryMatch,
         forceImport: input.forceImport,
+        defaultVariantTemplateId: item.defaultVariantTemplateId,
         pricingOverrides: item.pricingOverrides,
         namingOverrides: item.namingOverrides,
       },

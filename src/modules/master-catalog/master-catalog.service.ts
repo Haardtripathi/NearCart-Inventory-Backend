@@ -501,6 +501,26 @@ async function normalizeMasterVariantDefaults(
   });
 }
 
+// Auto-translation calls out to the (self-hosted) LibreTranslate service over HTTP. That must
+// never happen while an interactive Prisma transaction is open: on any real network latency
+// (or a slow/unreachable translation service) it reliably blows past Prisma's 5s interactive
+// transaction timeout and the whole write fails with "Transaction already closed" even though
+// nothing was actually wrong with the database. So this is resolved up front, before the
+// caller opens its `$transaction`, and `upsertMasterVariantTemplates` only ever does DB writes.
+async function enrichVariantTemplateTranslations(
+  templates: MasterVariantTemplateInput[],
+): Promise<MasterVariantTemplateInput[]> {
+  return Promise.all(
+    templates.map(async (template) => ({
+      ...template,
+      translations: await enrichWithAutoTranslations<MasterVariantTranslationInput>({
+        baseName: template.name,
+        existingTranslations: template.translations,
+      }),
+    })),
+  );
+}
+
 async function upsertMasterVariantTemplates(
   db: DbClient,
   masterItemId: string,
@@ -547,10 +567,7 @@ async function upsertMasterVariantTemplates(
   const preferredDefaultCode = templates.find((template) => template.isDefault)?.code;
 
   for (const template of templates) {
-    const translations = await enrichWithAutoTranslations<MasterVariantTranslationInput>({
-      baseName: template.name,
-      existingTranslations: template.translations,
-    });
+    const translations = template.translations ?? [];
     const existing = existingByCode.get(template.code.trim());
 
     if (existing) {
@@ -931,41 +948,45 @@ export async function createMasterCatalogItem(
     baseDescription: input.canonicalDescription,
     existingTranslations: input.translations,
   });
+  const variantTemplates = await enrichVariantTemplateTranslations(input.variantTemplates ?? []);
 
-  const item = await prisma.$transaction(async (tx) => {
-    const created = await tx.masterCatalogItem.create({
-      data: {
-        industryId: input.industryId,
-        masterCategoryId: input.masterCategoryId ?? null,
-        code: slugify(input.code).replace(/-/g, "_"),
-        slug: slugify(input.slug ?? input.code),
-        canonicalName: input.canonicalName.trim(),
-        canonicalDescription: input.canonicalDescription?.trim() ?? null,
-        productType: input.productType,
-        defaultTrackMethod: input.defaultTrackMethod,
-        defaultUnitCode: input.defaultUnitCode?.trim() ?? null,
-        defaultBrandName: input.defaultBrandName?.trim() ?? null,
-        defaultTaxCode: input.defaultTaxCode?.trim() ?? null,
-        hasVariants: input.hasVariants ?? false,
-        trackInventory: input.trackInventory ?? true,
-        allowBackorder: input.allowBackorder ?? false,
-        allowNegativeStock: input.allowNegativeStock ?? false,
-        defaultImageUrl: input.defaultImageUrl?.trim() ?? null,
-        tags: toNullableJsonValue(input.tags),
-        customFieldsTemplate: toNullableJsonValue(input.customFieldsTemplate),
-        metadata: toNullableJsonValue(input.metadata),
-        searchText: "",
-        isActive: input.isActive ?? true,
-      },
-    });
+  const item = await prisma.$transaction(
+    async (tx) => {
+      const created = await tx.masterCatalogItem.create({
+        data: {
+          industryId: input.industryId,
+          masterCategoryId: input.masterCategoryId ?? null,
+          code: slugify(input.code).replace(/-/g, "_"),
+          slug: slugify(input.slug ?? input.code),
+          canonicalName: input.canonicalName.trim(),
+          canonicalDescription: input.canonicalDescription?.trim() ?? null,
+          productType: input.productType,
+          defaultTrackMethod: input.defaultTrackMethod,
+          defaultUnitCode: input.defaultUnitCode?.trim() ?? null,
+          defaultBrandName: input.defaultBrandName?.trim() ?? null,
+          defaultTaxCode: input.defaultTaxCode?.trim() ?? null,
+          hasVariants: input.hasVariants ?? false,
+          trackInventory: input.trackInventory ?? true,
+          allowBackorder: input.allowBackorder ?? false,
+          allowNegativeStock: input.allowNegativeStock ?? false,
+          defaultImageUrl: input.defaultImageUrl?.trim() ?? null,
+          tags: toNullableJsonValue(input.tags),
+          customFieldsTemplate: toNullableJsonValue(input.customFieldsTemplate),
+          metadata: toNullableJsonValue(input.metadata),
+          searchText: "",
+          isActive: input.isActive ?? true,
+        },
+      });
 
-    await upsertMasterItemTranslations(tx, created.id, translations);
-    await replaceMasterItemAliases(tx, created.id, input.aliases ?? []);
-    await upsertMasterVariantTemplates(tx, created.id, input.variantTemplates ?? []);
-    await rebuildMasterItemSearchText(tx, created.id);
+      await upsertMasterItemTranslations(tx, created.id, translations);
+      await replaceMasterItemAliases(tx, created.id, input.aliases ?? []);
+      await upsertMasterVariantTemplates(tx, created.id, variantTemplates);
+      await rebuildMasterItemSearchText(tx, created.id);
 
-    return created;
-  });
+      return created;
+    },
+    { timeout: 20000, maxWait: 10000 },
+  );
 
   const record = await getMasterCatalogItemRecordById(item.id);
 
@@ -1023,8 +1044,11 @@ export async function updateMasterCatalogItem(
         description: translation.description ?? undefined,
       })),
   });
+  const variantTemplates =
+    input.variantTemplates !== undefined ? await enrichVariantTemplateTranslations(input.variantTemplates) : undefined;
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(
+    async (tx) => {
     await tx.masterCatalogItem.update({
       where: {
         id: itemId,
@@ -1063,12 +1087,14 @@ export async function updateMasterCatalogItem(
       await replaceMasterItemAliases(tx, itemId, input.aliases);
     }
 
-    if (input.variantTemplates !== undefined) {
-      await upsertMasterVariantTemplates(tx, itemId, input.variantTemplates);
-    }
+      if (variantTemplates !== undefined) {
+        await upsertMasterVariantTemplates(tx, itemId, variantTemplates);
+      }
 
-    await rebuildMasterItemSearchText(tx, itemId);
-  });
+      await rebuildMasterItemSearchText(tx, itemId);
+    },
+    { timeout: 20000, maxWait: 10000 },
+  );
 
   const updated = await getMasterCatalogItemRecordById(itemId);
 

@@ -1,6 +1,7 @@
 import { BranchType, LanguageCode, OrganizationStatus } from "@prisma/client";
 import { z } from "zod";
 
+import { SIDEBAR_MODULE_KEYS } from "../../constants/pageVisibility";
 import {
   languageCodeSchema,
   optionalEmailSchema,
@@ -62,4 +63,14 @@ export const addOrganizationIndustrySchema = z.object({
   isPrimary: z.boolean().optional(),
   enabledFeatures: z.record(z.any()).optional(),
   customSettings: z.unknown().optional(),
+});
+
+const sidebarModuleKeyEnum = z.enum(SIDEBAR_MODULE_KEYS as [string, ...string[]]);
+
+export const updateEnabledPagesSchema = z.object({
+  enabledPages: z
+    .record(sidebarModuleKeyEnum, z.boolean())
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "At least one module toggle is required",
+    }),
 });

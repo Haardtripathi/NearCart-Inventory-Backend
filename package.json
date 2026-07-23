@@ -14,7 +14,9 @@
     "prisma:seed": "prisma db seed",
     "prisma:seed:catalog": "SEED_SCOPE=catalog prisma db seed",
     "translations:backfill": "node --import tsx src/scripts/backfill-translations.ts",
-    "catalog:backfill": "node --import tsx src/scripts/backfill-industry-defaults.ts"
+    "catalog:backfill": "node --import tsx src/scripts/backfill-industry-defaults.ts",
+    "translate:start": "bash ../python/libretranslate/start-local.sh",
+    "translate:check": "curl -sS -m 5 http://127.0.0.1:5000/languages > /dev/null && echo 'LibreTranslate is reachable at http://127.0.0.1:5000' || (echo 'LibreTranslate is NOT reachable. Auto-translate/translate-item calls will fail-open (return source text unchanged) until you run: npm run translate:start' && exit 1)"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",
@@ -27,7 +29,6 @@
     "helmet": "^8.0.0",
     "ioredis": "^5.10.1",
     "jsonwebtoken": "^9.0.2",
-    "libretranslate-ts": "^0.5.12",
     "morgan": "^1.10.0",
     "multer": "^2.1.1",
     "rate-limit-redis": "^4.3.1",

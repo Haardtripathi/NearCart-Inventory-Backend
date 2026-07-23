@@ -38,11 +38,54 @@ npm run prisma:migrate
 npm run prisma:seed
 ```
 
-5. Start the API in development:
+5. (Optional but recommended) Start the local translation service in a separate terminal - see
+   [Local translation service (LibreTranslate)](#local-translation-service-libretranslate) below:
+
+```bash
+npm run translate:start
+```
+
+6. Start the API in development:
 
 ```bash
 npm run dev
 ```
+
+## Local translation service (LibreTranslate)
+
+`POST /api/translate-item` and any write path with `AUTO_TRANSLATE_ON_WRITE=true` call out to a
+LibreTranslate HTTP server, configured via `LIBRETRANSLATE_URL`. In local dev this is the
+**self-hosted Python service** in `../python/libretranslate` (a sibling directory of this backend,
+its own git repo) - LibreTranslate also has a public hosted API at `https://libretranslate.com`,
+but that's a separate deployment choice, not what local dev is set up for.
+
+It is not started automatically by `npm run dev`. Start it separately, in its own terminal, before
+you rely on machine translation:
+
+```bash
+npm run translate:start          # runs ../python/libretranslate/start-local.sh, binds 127.0.0.1:5000
+npm run translate:check          # quick reachability check against LIBRETRANSLATE_URL
+```
+
+First run needs the Python venv set up once - see `python/libretranslate/README.md`. Cold start
+(first request after boot) can take 10-15s while LibreTranslate loads its EN/HI models; give it a
+moment before testing `/api/translate-item`.
+
+`translate:start` assumes the standard checkout layout, where `python/libretranslate` is a sibling
+of this `backend` directory (`NearCart-Inventory/backend` + `NearCart-Inventory/python/libretranslate`).
+If you're working from a git worktree or another checkout where that sibling directory doesn't
+exist at `../python/libretranslate`, just run `./start-local.sh` directly from the real
+`python/libretranslate` checkout instead.
+
+**You do not have to run this for normal development.** Every write path is designed to degrade
+gracefully when LibreTranslate is unreachable:
+- Explicit translations sent by the client (`translations: [...]` on create/update) never touch
+  LibreTranslate at all - only auto-generation of *missing* languages does, and only when
+  `AUTO_TRANSLATE_ON_WRITE=true` (default `false`).
+- `AUTO_TRANSLATE_FAIL_OPEN=true` (the default) means any LibreTranslate failure falls back to
+  storing the source-language text unchanged rather than failing the request.
+- `POST /api/translate-item` itself still works with LibreTranslate down; it just returns the
+  input text unchanged for every target language instead of a real translation.
 
 ## Environment
 
@@ -60,8 +103,7 @@ REDIS_URL=redis://localhost:6379
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 REDIS_KEY_PREFIX=nearcart
-LIBRETRANSLATE_ENDPOINT=https://libretranslate.com
-LIBRETRANSLATE_API_KEY=
+LIBRETRANSLATE_URL=http://127.0.0.1:5000
 AUTO_TRANSLATE_ON_WRITE=false
 AUTO_TRANSLATE_FAIL_OPEN=true
 TRANSLATION_CACHE_TTL_SECONDS=2592000
@@ -74,7 +116,8 @@ IMAGE_UPLOAD_MAX_BYTES=5242880
 
 Notes:
 
-- `AUTO_TRANSLATE_ON_WRITE=true` will auto-generate missing translations for newly created entities and persist them.
+- `AUTO_TRANSLATE_ON_WRITE=true` will auto-generate missing translations for newly created entities and persist them. Requires LibreTranslate to be reachable at `LIBRETRANSLATE_URL` - see [Local translation service](#local-translation-service-libretranslate) above.
+- `LIBRETRANSLATE_URL` also accepts the legacy env var name `LIBRETRANSLATE_ENDPOINT` for backward compatibility, but `LIBRETRANSLATE_URL` takes priority if both are set.
 - Redis is optional but recommended for rate-limit consistency and translation cache.
 - Redis connection priority is `REDIS_URL` first, then Upstash REST (`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`).
 - For self-hosted Redis in the future, set `REDIS_URL` and leave Upstash REST values empty.

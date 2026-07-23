@@ -213,6 +213,7 @@ async function getProductRecordById(organizationId: string, productId: string) {
       deletedAt: null,
     },
     include: productInclude,
+    relationLoadStrategy: "join",
   });
 
   if (!product) {
@@ -535,6 +536,7 @@ export async function listProducts(
     prisma.product.findMany({
       where,
       include: productInclude,
+      relationLoadStrategy: "join",
       orderBy: {
         createdAt: "desc",
       },

@@ -102,10 +102,15 @@ export function parseAcceptLanguageHeader(headerValue: string | null | undefined
 
 function buildFallbackLanguages(
   resolvedLanguage: LanguageCode,
+  userPreferredLanguage: LanguageCode | null,
   orgDefaultLanguage: LanguageCode | null,
 ) {
   return Array.from(
-    new Set([resolvedLanguage, orgDefaultLanguage ?? null, LanguageCode.EN].filter(Boolean)),
+    new Set(
+      [resolvedLanguage, userPreferredLanguage ?? null, orgDefaultLanguage ?? null, LanguageCode.EN].filter(
+        Boolean,
+      ),
+    ),
   ) as LanguageCode[];
 }
 
@@ -124,7 +129,7 @@ export function createLocaleContext(options?: {
     resolvedLanguage,
     orgDefaultLanguage,
     userPreferredLanguage,
-    fallbackLanguages: buildFallbackLanguages(resolvedLanguage, orgDefaultLanguage),
+    fallbackLanguages: buildFallbackLanguages(resolvedLanguage, userPreferredLanguage, orgDefaultLanguage),
   };
 }
 

@@ -2,7 +2,6 @@ import { AuditAction } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
 import type { DbClient } from "../../types/prisma";
-import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { toNullableJsonValue } from "../../utils/json";
 
@@ -35,21 +34,13 @@ export async function createAuditLog(db: DbClient, input: AuditLogInput) {
     },
   });
 
-  try {
-    await syncEntityFieldTranslations(db, {
-      organizationId: input.organizationId ?? undefined,
-      entityType: "AuditLog",
-      entityId: auditLog.id,
-      fields: [{ fieldKey: "entityType", value: input.entityType }],
-    });
-  } catch (error) {
-    // Audit-log creation is primary; translation sync must never block auth or writes.
-    console.warn("Audit translation sync failed", {
-      auditLogId: auditLog.id,
-      entityType: input.entityType,
-      error,
-    });
-  }
+  // Note: this used to call syncEntityFieldTranslations() to "translate" input.entityType
+  // (e.g. the literal string "Brand"/"Product") into HI/GU on every single audit log write -
+  // an internal type discriminator, never read back anywhere (grep confirms no
+  // listEntityFieldTranslations/resolveEntityFieldValue call for entityType "AuditLog") and
+  // never shown to a user. Since createAuditLog runs on essentially every create/update/delete
+  // across the app, that made LibreTranslate a silent hard dependency of nearly all writes for
+  // zero benefit. Removed - see git history if this needs to come back for a real reason.
 
   return auditLog;
 }

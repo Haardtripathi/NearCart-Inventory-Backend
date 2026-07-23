@@ -24,7 +24,7 @@ import type { LocaleContext } from "../../utils/localization";
 import { serializeLocalizedEntity } from "../../utils/localization";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { slugify } from "../../utils/slug";
-import { upsertTranslations } from "../../utils/translations";
+import { mergeTranslationsForUpdate, upsertTranslations } from "../../utils/translations";
 import { toNullableJsonValue } from "../../utils/json";
 import type { DbClient } from "../../types/prisma";
 import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
@@ -717,13 +717,14 @@ export async function updateProduct(
     organizationId,
     baseName: input.name ?? existing.name,
     baseDescription: input.description ?? existing.description ?? undefined,
-    existingTranslations:
-      input.translations ??
+    existingTranslations: mergeTranslationsForUpdate(
       existing.translations.map((translation) => ({
         language: translation.language,
         name: translation.name,
         description: translation.description ?? undefined,
       })),
+      input.translations,
+    ),
   });
   await validateProductReferences(organizationId, input);
 
@@ -947,12 +948,13 @@ export async function updateVariant(
   const translations = await enrichWithAutoTranslations<VariantTranslationInput>({
     organizationId,
     baseName: input.name ?? existingVariant.name,
-    existingTranslations:
-      input.translations ??
+    existingTranslations: mergeTranslationsForUpdate(
       existingVariant.translations.map((translation) => ({
         language: translation.language,
         name: translation.name,
       })),
+      input.translations,
+    ),
   });
 
   const shouldBeDefault = input.isDefault === true;

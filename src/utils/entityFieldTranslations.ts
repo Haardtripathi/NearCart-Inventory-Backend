@@ -1,6 +1,7 @@
 import { LanguageCode } from "@prisma/client";
 
 import { prisma } from "../config/prisma";
+import { env } from "../config/env";
 import type { DbClient } from "../types/prisma";
 import type { LocaleContext } from "./localization";
 import { SUPPORTED_LANGUAGE_CODES } from "./localization";
@@ -57,6 +58,18 @@ async function buildFieldTranslations(
   languages: LanguageCode[],
   sourceLanguage: LanguageCode | "AUTO",
 ) {
+  // Machine translation on write is opt-in via AUTO_TRANSLATE_ON_WRITE (see enrichWithAutoTranslations,
+  // which already gates the entity `translations` array the same way). Without this check, every write
+  // that touches syncEntityFieldTranslations - user registration, org/branch creation, sales-order
+  // notes/rejection reasons, purchase-receipt notes, stock-transfer notes, inventory adjustment notes,
+  // etc. - made a blocking call to LibreTranslate on every request regardless of the flag, turning the
+  // self-hosted Python service into a silent hard dependency for almost every write endpoint in the app.
+  if (!env.AUTO_TRANSLATE_ON_WRITE) {
+    return languages
+      .map((language) => ({ language, value }))
+      .filter((entry) => normalizeText(entry.value)) as Array<{ language: LanguageCode; value: string }>;
+  }
+
   const translations = await Promise.all(
     languages.map(async (language) => ({
       language,

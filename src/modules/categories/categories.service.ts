@@ -8,7 +8,7 @@ import { buildPagination, getPagination } from "../../utils/pagination";
 import { slugify } from "../../utils/slug";
 import { assertCategoryInOrg } from "../../utils/guards";
 import { toNullableJsonValue } from "../../utils/json";
-import { upsertTranslations } from "../../utils/translations";
+import { mergeTranslationsForUpdate, upsertTranslations } from "../../utils/translations";
 import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
 import { createAuditLog } from "../audit/audit.service";
 
@@ -314,13 +314,14 @@ export async function updateCategory(
     organizationId,
     baseName: input.name ?? existing.name,
     baseDescription: input.description ?? existing.description ?? undefined,
-    existingTranslations:
-      input.translations ??
+    existingTranslations: mergeTranslationsForUpdate(
       existing.translations.map((translation) => ({
         language: translation.language,
         name: translation.name,
         description: translation.description ?? undefined,
       })),
+      input.translations,
+    ),
   });
 
   if (input.parentId !== undefined) {

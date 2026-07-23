@@ -5,7 +5,7 @@ import { ApiError } from "../../utils/ApiError";
 import type { LocaleContext } from "../../utils/localization";
 import { serializeLocalizedEntity } from "../../utils/localization";
 import { buildPagination, getPagination } from "../../utils/pagination";
-import { upsertTranslations } from "../../utils/translations";
+import { mergeTranslationsForUpdate, upsertTranslations } from "../../utils/translations";
 import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
 import { createAuditLog } from "../audit/audit.service";
 
@@ -202,12 +202,13 @@ export async function updateUnit(
   const translations = await enrichWithAutoTranslations<UnitTranslationInput>({
     organizationId: existing.organizationId ?? organizationId,
     baseName: input.name ?? existing.name,
-    existingTranslations:
-      input.translations ??
+    existingTranslations: mergeTranslationsForUpdate(
       existing.translations.map((translation) => ({
         language: translation.language,
         name: translation.name,
       })),
+      input.translations,
+    ),
   });
 
   await prisma.$transaction(async (tx) => {

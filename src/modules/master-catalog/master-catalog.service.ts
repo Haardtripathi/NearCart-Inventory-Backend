@@ -14,7 +14,7 @@ import { serializeLocalizedEntity } from "../../utils/localization";
 import { buildMasterItemSearchText, normalizeMasterCatalogAliasValues } from "../../utils/masterCatalog";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { slugify } from "../../utils/slug";
-import { upsertTranslations } from "../../utils/translations";
+import { mergeTranslationsForUpdate, upsertTranslations } from "../../utils/translations";
 import { toNullableJsonValue } from "../../utils/json";
 import type { DbClient } from "../../types/prisma";
 import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
@@ -1014,14 +1014,15 @@ export async function updateMasterCatalogItem(
   const translations = await enrichWithAutoTranslations<MasterItemTranslationInput>({
     baseName: input.canonicalName ?? existing.canonicalName,
     baseDescription: input.canonicalDescription ?? existing.canonicalDescription ?? undefined,
-    existingTranslations:
-      input.translations ??
+    existingTranslations: mergeTranslationsForUpdate(
       existing.translations.map((translation) => ({
         language: translation.language,
         name: translation.name,
         shortName: translation.shortName ?? undefined,
         description: translation.description ?? undefined,
       })),
+      input.translations,
+    ),
   });
 
   await prisma.$transaction(async (tx) => {

@@ -3,7 +3,7 @@ import { LanguageCode } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import type { LocaleContext } from "../../utils/localization";
 import { serializeLocalizedEntity } from "../../utils/localization";
-import { upsertTranslations } from "../../utils/translations";
+import { mergeTranslationsForUpdate, upsertTranslations } from "../../utils/translations";
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 import { slugify } from "../../utils/slug";
 import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
@@ -117,13 +117,14 @@ export async function updateIndustry(
   const translations = await enrichWithAutoTranslations<IndustryTranslationInput>({
     baseName: input.name ?? existing.name,
     baseDescription: input.description ?? existing.description ?? undefined,
-    existingTranslations:
-      input.translations ??
+    existingTranslations: mergeTranslationsForUpdate(
       existing.translations.map((translation) => ({
         language: translation.language,
         name: translation.name,
         description: translation.description ?? undefined,
       })),
+      input.translations,
+    ),
   });
 
   await prisma.$transaction(async (tx) => {

@@ -1,4 +1,5 @@
 import {
+  AuditAction,
   LanguageCode,
   MembershipStatus,
   OrganizationStatus,
@@ -16,6 +17,8 @@ import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 import { generateUniqueBranchCode } from "../../utils/branchCode";
 import { createLocaleContext, type LocaleContext, serializeLocalizedEntity } from "../../utils/localization";
+import { DEFAULT_ENABLED_PAGES, SIDEBAR_MODULE_CATALOG } from "../../constants/pageVisibility";
+import { createAuditLog } from "../audit/audit.service";
 
 export interface CreateOrganizationInput {
   name: string;
@@ -1047,5 +1050,85 @@ export async function backfillOrganizationIndustryCatalogDefaults() {
 
   return {
     processed: configs.length,
+  };
+}
+
+/**
+ * Merge the organization's stored `enabledPages` JSON over the hardcoded
+ * catalog defaults so newly added modules (added to
+ * `SIDEBAR_MODULE_CATALOG` after an org last saved its preferences)
+ * automatically fall back to a sensible default instead of disappearing or
+ * throwing on `undefined`.
+ */
+function mergeEnabledPages(stored: unknown): Record<string, boolean> {
+  const storedRecord =
+    stored && typeof stored === "object" && !Array.isArray(stored) ? (stored as Record<string, unknown>) : {};
+
+  const merged: Record<string, boolean> = { ...DEFAULT_ENABLED_PAGES };
+  for (const moduleKey of Object.keys(DEFAULT_ENABLED_PAGES)) {
+    if (typeof storedRecord[moduleKey] === "boolean") {
+      merged[moduleKey] = storedRecord[moduleKey] as boolean;
+    }
+  }
+
+  return merged;
+}
+
+export async function getEnabledPages(organizationId: string) {
+  const organization = await prisma.organization.findFirst({
+    where: { id: organizationId, deletedAt: null },
+    select: { enabledPages: true },
+  });
+
+  if (!organization) {
+    throw ApiError.notFound("Organization not found");
+  }
+
+  return {
+    enabledPages: mergeEnabledPages(organization.enabledPages),
+    modules: SIDEBAR_MODULE_CATALOG,
+  };
+}
+
+export async function updateEnabledPages(
+  organizationId: string,
+  actorUserId: string,
+  patch: Record<string, boolean>,
+) {
+  const organization = await prisma.organization.findFirst({
+    where: { id: organizationId, deletedAt: null },
+    select: { enabledPages: true },
+  });
+
+  if (!organization) {
+    throw ApiError.notFound("Organization not found");
+  }
+
+  const before = mergeEnabledPages(organization.enabledPages);
+  const after = { ...before, ...patch };
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.organization.update({
+      where: { id: organizationId },
+      data: { enabledPages: toJsonValue(after) },
+      select: { enabledPages: true },
+    });
+
+    await createAuditLog(tx, {
+      organizationId,
+      actorUserId,
+      action: AuditAction.UPDATE,
+      entityType: "OrganizationEnabledPages",
+      entityId: organizationId,
+      before,
+      after,
+    });
+
+    return result;
+  });
+
+  return {
+    enabledPages: mergeEnabledPages(updated.enabledPages),
+    modules: SIDEBAR_MODULE_CATALOG,
   };
 }

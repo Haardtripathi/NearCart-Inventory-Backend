@@ -205,6 +205,10 @@ model Organization {
   defaultLanguage  LanguageCode                 @default(EN)
   enabledLanguages Json?                        @default("[\"EN\", \"HI\", \"GU\"]")
   settings         Json?
+  // Per-organization sidebar module visibility toggles (key -> boolean). Missing keys fall back
+  // to the hardcoded defaults in `src/constants/pageVisibility.ts`. Additive, nullable, no
+  // migration risk to existing rows.
+  enabledPages     Json?
   createdAt        DateTime                     @default(now())
   updatedAt        DateTime                     @updatedAt
   deletedAt        DateTime?

@@ -5,6 +5,15 @@ import { prisma } from "../config/prisma";
 
 export const SUPPORTED_LANGUAGE_CODES = [LanguageCode.EN, LanguageCode.HI, LanguageCode.GU] as const;
 
+// Languages the self-hosted LibreTranslate instance actually has models loaded for
+// (see python/libretranslate/start-local.sh and start-render.sh: `--load-only en,hi`).
+// GU is a supported *display/manual-entry* language but is deliberately excluded here —
+// without a loaded model, LibreTranslate silently echoes the source text back unchanged,
+// which would get stored as a fake "GU" translation that's actually still English.
+// Auto-translate should skip GU entirely and leave it for manual entry until a GU model
+// is loaded (or GU support is dropped) — a product decision made 2026-07-23.
+export const MACHINE_TRANSLATABLE_LANGUAGE_CODES = [LanguageCode.EN, LanguageCode.HI] as const;
+
 function sanitizeSupportedLanguageCode(value: LanguageCode | null | undefined): LanguageCode | null {
   return value && SUPPORTED_LANGUAGE_CODES.includes(value as (typeof SUPPORTED_LANGUAGE_CODES)[number]) ? value : null;
 }

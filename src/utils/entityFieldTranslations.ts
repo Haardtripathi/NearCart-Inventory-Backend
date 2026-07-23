@@ -4,7 +4,7 @@ import { prisma } from "../config/prisma";
 import { env } from "../config/env";
 import type { DbClient } from "../types/prisma";
 import type { LocaleContext } from "./localization";
-import { SUPPORTED_LANGUAGE_CODES } from "./localization";
+import { MACHINE_TRANSLATABLE_LANGUAGE_CODES, SUPPORTED_LANGUAGE_CODES } from "./localization";
 import { translateLanguageCodeText } from "./libreTranslate";
 
 interface EntityFieldInput {
@@ -70,8 +70,14 @@ async function buildFieldTranslations(
       .filter((entry) => normalizeText(entry.value)) as Array<{ language: LanguageCode; value: string }>;
   }
 
+  // Skip languages LibreTranslate has no model loaded for (see MACHINE_TRANSLATABLE_LANGUAGE_CODES) —
+  // leave them absent rather than storing an untranslated echo mislabeled as that language.
+  const translatableLanguages = languages.filter((language) =>
+    MACHINE_TRANSLATABLE_LANGUAGE_CODES.includes(language as (typeof MACHINE_TRANSLATABLE_LANGUAGE_CODES)[number]),
+  );
+
   const translations = await Promise.all(
-    languages.map(async (language) => ({
+    translatableLanguages.map(async (language) => ({
       language,
       value: (await translateLanguageCodeText(value, sourceLanguage, language)) ?? value,
     })),

@@ -3,7 +3,7 @@ import { LanguageCode } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { env } from "../config/env";
 import { translateLanguageCodeText } from "./libreTranslate";
-import { SUPPORTED_LANGUAGE_CODES } from "./localization";
+import { MACHINE_TRANSLATABLE_LANGUAGE_CODES, SUPPORTED_LANGUAGE_CODES } from "./localization";
 
 interface TranslationLike {
   language: LanguageCode;
@@ -82,8 +82,15 @@ export async function enrichWithAutoTranslations<T extends TranslationLike>(args
     return Array.from(translationByLanguage.values());
   }
 
+  // Skip languages LibreTranslate has no model loaded for (see MACHINE_TRANSLATABLE_LANGUAGE_CODES) —
+  // leave them absent rather than storing an untranslated echo mislabeled as that language. Locale
+  // resolution already falls back to org default / base name for languages with no translation row.
+  const translatableLanguages = missingLanguages.filter((language) =>
+    MACHINE_TRANSLATABLE_LANGUAGE_CODES.includes(language as (typeof MACHINE_TRANSLATABLE_LANGUAGE_CODES)[number]),
+  );
+
   const generatedResults = await Promise.all(
-    missingLanguages.map(async (language) => {
+    translatableLanguages.map(async (language) => {
       try {
         const [translatedName, translatedDescription] = await Promise.all([
           translateLanguageCodeText(args.baseName, sourceLanguage, language),
@@ -122,7 +129,7 @@ export async function enrichWithAutoTranslations<T extends TranslationLike>(args
     }
   }
 
-  for (const language of missingLanguages) {
+  for (const language of translatableLanguages) {
     if (!translationByLanguage.has(language)) {
       translationByLanguage.set(language, {
         language,

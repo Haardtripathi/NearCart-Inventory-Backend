@@ -39,7 +39,7 @@ function assertManageableRole(actorRole: UserRole, targetRole: UserRole) {
   }
 
   if (actorRole === UserRole.ORG_ADMIN) {
-    if ([UserRole.ORG_ADMIN, UserRole.MANAGER, UserRole.STAFF, UserRole.DRIVER].includes(targetRole)) {
+    if ([UserRole.ORG_ADMIN, UserRole.MANAGER, UserRole.STAFF].includes(targetRole)) {
       return;
     }
   }

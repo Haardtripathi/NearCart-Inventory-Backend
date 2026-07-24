@@ -212,6 +212,9 @@ async function getSalesOrderById(organizationId, orderId) {
                     variant: true,
                 },
             },
+            assignedDriver: {
+                select: { id: true, fullName: true, phone: true, vehicleType: true },
+            },
         },
     });
     if (!order) {
@@ -511,6 +514,9 @@ async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, dr
                 items: true,
                 branch: true,
                 customer: true,
+                assignedDriver: {
+                    select: { id: true, fullName: true, phone: true, vehicleType: true },
+                },
             },
         });
         await (0, audit_service_1.createAuditLog)(tx, {

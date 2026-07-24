@@ -270,6 +270,9 @@ export async function getSalesOrderById(organizationId: string, orderId: string)
           variant: true,
         },
       },
+      assignedDriver: {
+        select: { id: true, fullName: true, phone: true, vehicleType: true },
+      },
     },
   });
 
@@ -647,6 +650,9 @@ export async function assignDriverToSalesOrder(
         items: true,
         branch: true,
         customer: true,
+        assignedDriver: {
+          select: { id: true, fullName: true, phone: true, vehicleType: true },
+        },
       },
     });
 

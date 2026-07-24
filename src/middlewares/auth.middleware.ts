@@ -57,3 +57,31 @@ export function requireRoles(...roles: UserRole[]) {
     next();
   };
 }
+
+/**
+ * Gates a "key action" behind email verification (see auth.service.ts login()/sendEmailVerificationOtp).
+ * SUPER_ADMIN is always exempt (bootstrap account, never goes through OTP). Apply to specific
+ * sensitive write routes rather than globally — most invited users are already verified by the
+ * time they can log in at all (see completeCredentialFlow), so this mainly targets self-registered
+ * org owners who skipped OTP verification.
+ */
+export async function requireEmailVerified(req: Request, _res: Response, next: NextFunction) {
+  if (!req.auth) {
+    return next(ApiError.unauthorized());
+  }
+
+  if (req.auth.role === UserRole.SUPER_ADMIN) {
+    return next();
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.auth.userId },
+    select: { emailVerified: true },
+  });
+
+  if (!user?.emailVerified) {
+    return next(ApiError.forbidden("Please verify your email before performing this action"));
+  }
+
+  next();
+}

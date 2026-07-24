@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import { authenticate } from "../../middlewares/auth.middleware";
+import { authenticate, requireEmailVerified } from "../../middlewares/auth.middleware";
 import { validateRequest } from "../../middlewares/validate.middleware";
 import { asyncHandler } from "../../utils/asyncHandler";
 import {
@@ -15,7 +15,12 @@ export const organizationsRouter = Router();
 
 organizationsRouter.use(authenticate);
 
-organizationsRouter.post("/", validateRequest({ body: createOrganizationSchema }), asyncHandler(createOrganizationController));
+organizationsRouter.post(
+  "/",
+  requireEmailVerified,
+  validateRequest({ body: createOrganizationSchema }),
+  asyncHandler(createOrganizationController),
+);
 organizationsRouter.get("/my", asyncHandler(getMyOrganizationsController));
 organizationsRouter.post(
   "/:id/industries",

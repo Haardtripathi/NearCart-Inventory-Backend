@@ -72,3 +72,12 @@ export const changePasswordSchema = z.object({
 export const updateMyPreferencesSchema = z.object({
   preferredLanguage: z.nativeEnum(LanguageCode),
 });
+
+export const sendEmailOtpSchema = z.object({
+  email: z.string().trim().email(),
+});
+
+export const verifyEmailOtpSchema = z.object({
+  email: z.string().trim().email(),
+  code: z.string().trim().length(6),
+});

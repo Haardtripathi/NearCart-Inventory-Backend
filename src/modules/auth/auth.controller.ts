@@ -12,7 +12,9 @@ import {
   login,
   registerOrganizationOwner,
   resetPasswordWithToken,
+  sendEmailVerificationOtp,
   updateMyPreferences,
+  verifyEmailVerificationOtp,
 } from "./auth.service";
 
 export async function bootstrapSuperAdminController(req: Request, res: Response) {
@@ -52,6 +54,16 @@ export async function changePasswordController(req: Request, res: Response) {
 export async function updateMyPreferencesController(req: Request, res: Response) {
   const data = await updateMyPreferences(req.auth!.userId, req.body);
   return sendSuccess(res, 200, "Preferences updated successfully", data);
+}
+
+export async function sendEmailOtpController(req: Request, res: Response) {
+  const data = await sendEmailVerificationOtp(req.body);
+  return sendSuccess(res, 200, "If this email exists, a verification code has been sent", data);
+}
+
+export async function verifyEmailOtpController(req: Request, res: Response) {
+  const data = await verifyEmailVerificationOtp(req.body);
+  return sendSuccess(res, 200, "Email verified successfully", data);
 }
 
 export async function meController(req: Request, res: Response) {

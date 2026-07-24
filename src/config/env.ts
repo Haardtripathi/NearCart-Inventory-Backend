@@ -43,6 +43,15 @@ const envSchema = z
     CLOUDINARY_UPLOAD_FOLDER: z.string().trim().min(1).default("nearcart-inventory"),
     IMAGE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
     MARKETPLACE_INTERNAL_TOKEN: z.string().trim().min(1).optional(),
+    SMTP_HOST: z.string().trim().min(1).optional(),
+    SMTP_PORT: z.coerce.number().int().positive().default(587),
+    SMTP_SECURE: booleanFromEnv.default(false),
+    SMTP_USER: z.string().trim().min(1).optional(),
+    SMTP_PASS: z.string().trim().min(1).optional(),
+    SMTP_FROM: z.string().trim().min(1).default("NearCart Inventory <no-reply@nearcart.app>"),
+    OTP_TTL_MINUTES: z.coerce.number().int().positive().default(10),
+    OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
+    OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   })
   .refine(
     (values) =>
@@ -62,6 +71,13 @@ const envSchema = z
       message:
         "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET must be set together when enabling uploads",
       path: ["CLOUDINARY_CLOUD_NAME"],
+    },
+  )
+  .refine(
+    (values) => (!!values.SMTP_HOST && !!values.SMTP_USER && !!values.SMTP_PASS) || !values.SMTP_HOST,
+    {
+      message: "SMTP_USER and SMTP_PASS must be set together with SMTP_HOST when enabling email delivery",
+      path: ["SMTP_HOST"],
     },
   );
 

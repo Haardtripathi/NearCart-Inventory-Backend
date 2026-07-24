@@ -9,6 +9,7 @@ import {
   deliverSalesOrder,
   getSalesOrderById,
   listSalesOrders,
+  markSalesOrderReady,
   rejectSalesOrder,
   updateSalesOrder,
 } from "./sales-orders.service";
@@ -56,6 +57,11 @@ export async function cancelSalesOrderController(req: Request, res: Response) {
 export async function deliverSalesOrderController(req: Request, res: Response) {
   const data = await deliverSalesOrder(req.auth!.activeOrganizationId!, req.params.id!, req.auth!.userId);
   return sendSuccess(res, 200, "Sales order delivered successfully", data);
+}
+
+export async function markSalesOrderReadyController(req: Request, res: Response) {
+  const data = await markSalesOrderReady(req.auth!.activeOrganizationId!, req.params.id!, req.auth!.userId);
+  return sendSuccess(res, 200, "Sales order marked ready successfully", data);
 }
 
 export async function assignDriverToSalesOrderController(req: Request, res: Response) {

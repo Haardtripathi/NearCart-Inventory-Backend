@@ -13,6 +13,7 @@ import {
   deliverSalesOrderController,
   getSalesOrderController,
   listSalesOrdersController,
+  markSalesOrderReadyController,
   rejectSalesOrderController,
   updateSalesOrderController,
 } from "./sales-orders.controller";
@@ -36,6 +37,7 @@ salesOrdersRouter.post("/:id/confirm", requireRoles(...MANAGER_ROLES), asyncHand
 salesOrdersRouter.post("/:id/reject", requireRoles(...MANAGER_ROLES), validateRequest({ body: rejectSalesOrderSchema }), asyncHandler(rejectSalesOrderController));
 salesOrdersRouter.post("/:id/cancel", requireRoles(...MANAGER_ROLES), asyncHandler(cancelSalesOrderController));
 salesOrdersRouter.post("/:id/deliver", requireRoles(...MANAGER_ROLES), asyncHandler(deliverSalesOrderController));
+salesOrdersRouter.patch("/:id/mark-ready", requireRoles(...MANAGER_ROLES), asyncHandler(markSalesOrderReadyController));
 salesOrdersRouter.post(
   "/:id/assign-driver",
   requireRoles(...MANAGER_ROLES),

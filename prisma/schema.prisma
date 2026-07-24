@@ -12,7 +12,6 @@ enum UserRole {
   ORG_ADMIN
   MANAGER
   STAFF
-  DRIVER
 }
 
 enum MembershipStatus {
@@ -149,8 +148,18 @@ enum AuditAction {
   ORDER_REJECT
   ORDER_DELIVER
   TRANSFER_APPROVE
+  ORDER_READY
   ORDER_ASSIGN_DRIVER
   ORDER_PICKUP
+  DRIVER_REGISTER
+  DRIVER_VERIFY
+  DRIVER_SUSPEND
+}
+
+enum DriverStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  SUSPENDED
 }
 
 enum UserActionTokenPurpose {
@@ -189,7 +198,8 @@ model User {
   createdSalesOrders      SalesOrder[]             @relation("SalesOrderCreatedBy")
   confirmedSalesOrders    SalesOrder[]             @relation("SalesOrderConfirmedBy")
   deliveredSalesOrders    SalesOrder[]             @relation("SalesOrderDeliveredBy")
-  assignedSalesOrders     SalesOrder[]             @relation("SalesOrderAssignedDriver")
+  readySalesOrders        SalesOrder[]             @relation("SalesOrderReadyBy")
+  assignedSalesOrders     SalesOrder[]             @relation("SalesOrderAssignedBy")
   createdStockTransfers   StockTransfer[]          @relation("StockTransferCreatedBy")
   approvedStockTransfers  StockTransfer[]          @relation("StockTransferApprovedBy")
   auditLogs               AuditLog[]               @relation("AuditActor")
@@ -988,7 +998,10 @@ model SalesOrder {
   createdById         String?
   confirmedById       String?
   deliveredById       String?
+  readyById           String?
+  readyAt             DateTime?
   assignedDriverId    String?
+  assignedById        String?
   confirmedAt         DateTime?
   deliveredAt         DateTime?
   assignedAt          DateTime?
@@ -1001,12 +1014,36 @@ model SalesOrder {
   createdBy           User?            @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
   confirmedBy         User?            @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id])
   deliveredBy         User?            @relation("SalesOrderDeliveredBy", fields: [deliveredById], references: [id])
-  assignedDriver      User?            @relation("SalesOrderAssignedDriver", fields: [assignedDriverId], references: [id])
+  readyBy             User?            @relation("SalesOrderReadyBy", fields: [readyById], references: [id])
+  assignedBy          User?            @relation("SalesOrderAssignedBy", fields: [assignedById], references: [id])
+  assignedDriver      Driver?          @relation("SalesOrderAssignedDriver", fields: [assignedDriverId], references: [id])
   items               SalesOrderItem[]
 
   @@unique([organizationId, orderNumber])
   @@index([organizationId, status])
   @@index([assignedDriverId, status])
+}
+
+// Drivers are a platform-wide pool, independent of User/OrganizationMembership (not tied to any
+// one Organization) — self-serve registration starts PENDING_VERIFICATION, a platform
+// SUPER_ADMIN verifies before login/assignment is allowed, and any org's staff can then assign
+// any VERIFIED driver to a READY SalesOrder. See PHASE1_REQUIREMENTS.md's "Driver API contract"
+// (locked 2026-07-24) and modules/driver-auth, modules/driver-orders, modules/drivers,
+// modules/platform (verify/suspend endpoints).
+model Driver {
+  id             String       @id @default(cuid())
+  fullName       String
+  phone          String       @unique
+  email          String?      @unique
+  passwordHash   String
+  vehicleType    String
+  vehicleNumber  String
+  status         DriverStatus @default(PENDING_VERIFICATION)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  assignedOrders SalesOrder[] @relation("SalesOrderAssignedDriver")
+
+  @@index([status])
 }
 
 model SalesOrderItem {

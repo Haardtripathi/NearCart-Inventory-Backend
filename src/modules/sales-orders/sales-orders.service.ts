@@ -1,12 +1,11 @@
 import {
   AuditAction,
-  MembershipStatus,
+  DriverStatus,
   OrderSource,
   PaymentStatus,
   ReferenceType,
   SalesOrderStatus,
   StockMovementType,
-  UserRole,
 } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
@@ -570,9 +569,46 @@ export async function deliverSalesOrder(organizationId: string, orderId: string,
 }
 
 /**
- * Assigns a driver to a confirmed order and transitions it CONFIRMED -> READY. This is the first
- * of the two previously-dead SalesOrderStatus transitions (READY, OUT_FOR_DELIVERY) to get wired
- * up — see modules/driver for the driver-side pickup/deliver transitions.
+ * Transitions CONFIRMED -> READY, the first of the two previously-dead SalesOrderStatus
+ * transitions to get wired up. Separate step from assign-driver (below) since the shop may mark
+ * an order ready for pickup before a driver has been assigned — matching the locked
+ * PHASE1_REQUIREMENTS.md contract (`PATCH /:id/mark-ready` is distinct from
+ * `POST /:id/assign-driver`).
+ */
+export async function markSalesOrderReady(organizationId: string, orderId: string, actorUserId: string) {
+  const order = await getSalesOrderById(organizationId, orderId);
+
+  if (order.status !== SalesOrderStatus.CONFIRMED) {
+    throw ApiError.badRequest("Only confirmed orders can be marked ready");
+  }
+
+  const updated = await prisma.salesOrder.update({
+    where: { id: orderId },
+    data: {
+      status: SalesOrderStatus.READY,
+      readyAt: new Date(),
+      readyById: actorUserId,
+    },
+  });
+
+  await createAuditLog(prisma, {
+    organizationId,
+    actorUserId,
+    action: AuditAction.ORDER_READY,
+    entityType: "SalesOrder",
+    entityId: updated.id,
+    before: order,
+    after: updated,
+  });
+
+  return updated;
+}
+
+/**
+ * Assigns a driver to a READY order. Drivers are a platform-wide pool (a standalone `Driver`
+ * model, not an OrganizationMembership) — see PHASE1_REQUIREMENTS.md's locked 2026-07-24 decision
+ * — so any org's staff may assign any VERIFIED driver, without an organization-membership check
+ * on the driver itself. See modules/driver-orders for the driver-side pickup/deliver transitions.
  */
 export async function assignDriverToSalesOrder(
   organizationId: string,
@@ -582,32 +618,29 @@ export async function assignDriverToSalesOrder(
 ) {
   const order = await getSalesOrderById(organizationId, orderId);
 
-  if (order.status !== SalesOrderStatus.CONFIRMED) {
-    throw ApiError.badRequest("Only confirmed orders can be assigned to a driver");
+  if (order.status !== SalesOrderStatus.READY) {
+    throw ApiError.badRequest("Only orders that are READY can be assigned to a driver");
   }
 
-  const driverMembership = await prisma.organizationMembership.findFirst({
-    where: {
-      organizationId,
-      userId: driverId,
-      role: UserRole.DRIVER,
-      status: MembershipStatus.ACTIVE,
-      user: {
-        isActive: true,
-      },
-    },
+  const driver = await prisma.driver.findUnique({
+    where: { id: driverId },
+    select: { id: true, status: true },
   });
 
-  if (!driverMembership) {
-    throw ApiError.badRequest("Driver not found in this organization");
+  if (!driver) {
+    throw ApiError.notFound("Driver not found");
+  }
+
+  if (driver.status !== DriverStatus.VERIFIED) {
+    throw ApiError.badRequest("Only verified drivers can be assigned to orders");
   }
 
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.salesOrder.update({
       where: { id: orderId },
       data: {
-        status: SalesOrderStatus.READY,
         assignedDriverId: driverId,
+        assignedById: actorUserId,
         assignedAt: new Date(),
       },
       include: {
@@ -623,8 +656,8 @@ export async function assignDriverToSalesOrder(
       action: AuditAction.ORDER_ASSIGN_DRIVER,
       entityType: "SalesOrder",
       entityId: order.id,
-      before: order,
-      after: result,
+      before: { assignedDriverId: order.assignedDriverId },
+      after: { assignedDriverId: result.assignedDriverId },
       meta: { driverId },
     });
 

@@ -8,6 +8,8 @@ exports.confirmSalesOrderController = confirmSalesOrderController;
 exports.rejectSalesOrderController = rejectSalesOrderController;
 exports.cancelSalesOrderController = cancelSalesOrderController;
 exports.deliverSalesOrderController = deliverSalesOrderController;
+exports.markSalesOrderReadyController = markSalesOrderReadyController;
+exports.assignDriverToSalesOrderController = assignDriverToSalesOrderController;
 const ApiResponse_1 = require("../../utils/ApiResponse");
 const sales_orders_service_1 = require("./sales-orders.service");
 async function listSalesOrdersController(req, res) {
@@ -41,4 +43,12 @@ async function cancelSalesOrderController(req, res) {
 async function deliverSalesOrderController(req, res) {
     const data = await (0, sales_orders_service_1.deliverSalesOrder)(req.auth.activeOrganizationId, req.params.id, req.auth.userId);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Sales order delivered successfully", data);
+}
+async function markSalesOrderReadyController(req, res) {
+    const data = await (0, sales_orders_service_1.markSalesOrderReady)(req.auth.activeOrganizationId, req.params.id, req.auth.userId);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Sales order marked ready successfully", data);
+}
+async function assignDriverToSalesOrderController(req, res) {
+    const data = await (0, sales_orders_service_1.assignDriverToSalesOrder)(req.auth.activeOrganizationId, req.params.id, req.auth.userId, req.body.driverId);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Driver assigned successfully", data);
 }

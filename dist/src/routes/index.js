@@ -25,6 +25,9 @@ const users_route_1 = require("../modules/users/users.route");
 const translation_route_1 = require("../modules/translation/translation.route");
 const uploads_route_1 = require("../modules/uploads/uploads.route");
 const marketplace_route_1 = require("../modules/marketplace/marketplace.route");
+const driver_auth_route_1 = require("../modules/driver-auth/driver-auth.route");
+const driver_orders_route_1 = require("../modules/driver-orders/driver-orders.route");
+const drivers_route_1 = require("../modules/drivers/drivers.route");
 exports.apiRouter = (0, express_1.Router)();
 exports.apiRouter.get("/health", (_req, res) => {
     return (0, ApiResponse_1.sendSuccess)(res, 200, "NearCart Inventory backend is healthy", {
@@ -54,3 +57,6 @@ exports.apiRouter.use("/users", users_route_1.usersRouter);
 exports.apiRouter.use("/translate-item", translation_route_1.translationRouter);
 exports.apiRouter.use("/uploads", uploads_route_1.uploadsRouter);
 exports.apiRouter.use("/internal/marketplace", marketplace_route_1.marketplaceRouter);
+exports.apiRouter.use("/driver-auth", driver_auth_route_1.driverAuthRouter);
+exports.apiRouter.use("/driver", driver_orders_route_1.driverOrdersRouter);
+exports.apiRouter.use("/drivers", drivers_route_1.driversRouter);

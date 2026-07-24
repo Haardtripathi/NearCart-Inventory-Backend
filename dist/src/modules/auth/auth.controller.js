@@ -7,6 +7,8 @@ exports.completeAccountSetupController = completeAccountSetupController;
 exports.resetPasswordController = resetPasswordController;
 exports.changePasswordController = changePasswordController;
 exports.updateMyPreferencesController = updateMyPreferencesController;
+exports.sendEmailOtpController = sendEmailOtpController;
+exports.verifyEmailOtpController = verifyEmailOtpController;
 exports.meController = meController;
 const client_1 = require("@prisma/client");
 const ApiResponse_1 = require("../../utils/ApiResponse");
@@ -44,6 +46,14 @@ async function changePasswordController(req, res) {
 async function updateMyPreferencesController(req, res) {
     const data = await (0, auth_service_1.updateMyPreferences)(req.auth.userId, req.body);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Preferences updated successfully", data);
+}
+async function sendEmailOtpController(req, res) {
+    const data = await (0, auth_service_1.sendEmailVerificationOtp)(req.body);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "If this email exists, a verification code has been sent", data);
+}
+async function verifyEmailOtpController(req, res) {
+    const data = await (0, auth_service_1.verifyEmailVerificationOtp)(req.body);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Email verified successfully", data);
 }
 async function meController(req, res) {
     const localeContext = await (0, localization_1.resolveLocaleContext)(req);

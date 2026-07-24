@@ -6,6 +6,8 @@ exports.getMarketplaceCatalogProductController = getMarketplaceCatalogProductCon
 exports.checkMarketplaceAvailabilityController = checkMarketplaceAvailabilityController;
 exports.listMarketplaceCategoriesController = listMarketplaceCategoriesController;
 exports.listMarketplaceBrandsController = listMarketplaceBrandsController;
+exports.createBridgedSalesOrderController = createBridgedSalesOrderController;
+exports.getSalesOrderByExternalIdController = getSalesOrderByExternalIdController;
 const ApiResponse_1 = require("../../utils/ApiResponse");
 const localization_1 = require("../../utils/localization");
 const marketplace_service_1 = require("./marketplace.service");
@@ -46,4 +48,12 @@ async function listMarketplaceBrandsController(req, res) {
         requestedLanguage,
     });
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Marketplace brands fetched successfully", { items: data });
+}
+async function createBridgedSalesOrderController(req, res) {
+    const { created, ...data } = await (0, marketplace_service_1.createBridgedSalesOrder)(req.params.organizationId, req.body);
+    return (0, ApiResponse_1.sendSuccess)(res, created ? 201 : 200, created ? "Sales order created successfully" : "Sales order already exists for this externalOrderId", data);
+}
+async function getSalesOrderByExternalIdController(req, res) {
+    const data = await (0, marketplace_service_1.getSalesOrderByExternalId)(req.params.externalOrderId);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Sales order fetched successfully", data);
 }

@@ -41,6 +41,15 @@ const envSchema = zod_1.z
     CLOUDINARY_UPLOAD_FOLDER: zod_1.z.string().trim().min(1).default("nearcart-inventory"),
     IMAGE_UPLOAD_MAX_BYTES: zod_1.z.coerce.number().int().positive().default(5 * 1024 * 1024),
     MARKETPLACE_INTERNAL_TOKEN: zod_1.z.string().trim().min(1).optional(),
+    SMTP_HOST: zod_1.z.string().trim().min(1).optional(),
+    SMTP_PORT: zod_1.z.coerce.number().int().positive().default(587),
+    SMTP_SECURE: booleanFromEnv.default(false),
+    SMTP_USER: zod_1.z.string().trim().min(1).optional(),
+    SMTP_PASS: zod_1.z.string().trim().min(1).optional(),
+    SMTP_FROM: zod_1.z.string().trim().min(1).default("NearCart Inventory <no-reply@nearcart.app>"),
+    OTP_TTL_MINUTES: zod_1.z.coerce.number().int().positive().default(10),
+    OTP_RESEND_COOLDOWN_SECONDS: zod_1.z.coerce.number().int().positive().default(60),
+    OTP_MAX_ATTEMPTS: zod_1.z.coerce.number().int().positive().default(5),
 })
     .refine((values) => (!!values.UPSTASH_REDIS_REST_URL && !!values.UPSTASH_REDIS_REST_TOKEN) ||
     (!values.UPSTASH_REDIS_REST_URL && !values.UPSTASH_REDIS_REST_TOKEN), {
@@ -51,6 +60,10 @@ const envSchema = zod_1.z
     (!values.CLOUDINARY_CLOUD_NAME && !values.CLOUDINARY_API_KEY && !values.CLOUDINARY_API_SECRET), {
     message: "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET must be set together when enabling uploads",
     path: ["CLOUDINARY_CLOUD_NAME"],
+})
+    .refine((values) => (!!values.SMTP_HOST && !!values.SMTP_USER && !!values.SMTP_PASS) || !values.SMTP_HOST, {
+    message: "SMTP_USER and SMTP_PASS must be set together with SMTP_HOST when enabling email delivery",
+    path: ["SMTP_HOST"],
 });
 const parsed = envSchema.safeParse({
     ...process.env,

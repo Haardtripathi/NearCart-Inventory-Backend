@@ -11,6 +11,8 @@ exports.resetPasswordWithToken = resetPasswordWithToken;
 exports.changePassword = changePassword;
 exports.updateMyPreferences = updateMyPreferences;
 exports.getMe = getMe;
+exports.sendEmailVerificationOtp = sendEmailVerificationOtp;
+exports.verifyEmailVerificationOtp = verifyEmailVerificationOtp;
 const client_1 = require("@prisma/client");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const env_1 = require("../../config/env");
@@ -20,6 +22,8 @@ const branchAccess_1 = require("../../utils/branchAccess");
 const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
 const jwt_1 = require("../../utils/jwt");
 const localization_1 = require("../../utils/localization");
+const mailer_1 = require("../../utils/mailer");
+const otp_1 = require("../../utils/otp");
 const userActionTokens_1 = require("../../utils/userActionTokens");
 const guards_1 = require("../../utils/guards");
 const organizations_service_1 = require("../organizations/organizations.service");
@@ -134,6 +138,7 @@ async function buildAuthenticatedSession(userId, requestedOrganizationId, locale
             platformRole: user.platformRole,
             preferredLanguage: user.preferredLanguage,
             isActive: user.isActive,
+            emailVerified: user.emailVerified,
             lastLoginAt: user.lastLoginAt,
         },
         activeOrganizationId,
@@ -162,6 +167,10 @@ async function bootstrapSuperAdmin(input, meta) {
             passwordHash,
             platformRole: client_1.UserRole.SUPER_ADMIN,
             passwordSetupRequired: false,
+            // The bootstrap super-admin is created directly from a trusted server-side secret, not a
+            // self-serve signup, so there is no untrusted inbox to prove ownership of here — never gate
+            // this operator flow behind OTP verification.
+            emailVerified: true,
             passwordChangedAt: new Date(),
         },
         select: {
@@ -199,6 +208,8 @@ async function login(input, meta, localeContext) {
             isActive: true,
             passwordHash: true,
             passwordSetupRequired: true,
+            emailVerified: true,
+            platformRole: true,
         },
     });
     if (!user || !user.isActive || !user.passwordHash) {
@@ -207,6 +218,13 @@ async function login(input, meta, localeContext) {
     const passwordMatches = await bcrypt_1.default.compare(input.password, user.passwordHash);
     if (!passwordMatches) {
         throw ApiError_1.ApiError.unauthorized("Invalid email or password");
+    }
+    // The bootstrap super-admin is exempt (see bootstrapSuperAdmin). Invited users (ACCOUNT_SETUP)
+    // are marked verified as soon as they complete setup via their emailed link — see
+    // completeCredentialFlow — so in practice this only blocks self-registered org owners
+    // (registerOrganizationOwner) who haven't completed OTP verification yet.
+    if (!user.emailVerified && user.platformRole !== client_1.UserRole.SUPER_ADMIN) {
+        throw ApiError_1.ApiError.forbidden("Please verify your email before logging in. Request a new code via /auth/send-otp.");
     }
     await prisma_1.prisma.user.update({
         where: { id: user.id },
@@ -252,6 +270,10 @@ async function registerOrganizationOwner(input, meta, localeContext) {
                 preferredLanguage: input.preferredLanguage ?? input.defaultLanguage ?? client_1.LanguageCode.EN,
                 isActive: true,
                 passwordSetupRequired: false,
+                // Self-serve registration — unlike an admin-invited user (whose ACCOUNT_SETUP link proves
+                // inbox ownership) or the bootstrap super-admin, this email has not been verified yet.
+                // Blocks future /auth/login calls until they complete OTP verification (see login()).
+                emailVerified: false,
                 passwordChangedAt: new Date(),
             },
             select: {
@@ -350,6 +372,10 @@ async function completeCredentialFlow(token, purpose, password, meta, localeCont
                 passwordSetupRequired: false,
                 passwordChangedAt: now,
                 lastLoginAt: now,
+                // Completing ACCOUNT_SETUP means clicking the link we emailed to this user's address
+                // (see sendUserActionEmail), which is itself proof of inbox ownership — so treat the
+                // email as verified without making them go through OTP again.
+                ...(purpose === client_1.UserActionTokenPurpose.ACCOUNT_SETUP ? { emailVerified: true } : {}),
             },
         });
         if (purpose === client_1.UserActionTokenPurpose.ACCOUNT_SETUP) {
@@ -495,9 +521,53 @@ async function getMe(userId, activeOrganizationId, role, localeContext) {
         isActive: user.isActive,
         platformRole: user.platformRole,
         preferredLanguage: user.preferredLanguage,
+        emailVerified: user.emailVerified,
         activeOrganizationId,
         role,
         memberships: serializeMemberships(user.memberships, resolvedLocaleContext),
         lastLoginAt: user.lastLoginAt,
     };
+}
+const EMAIL_VERIFY_OTP_PURPOSE = "email-verify";
+/**
+ * Sends a 6-digit OTP to the given email to prove inbox ownership. Responds identically whether
+ * or not the email exists / is already verified, to avoid leaking account existence.
+ */
+async function sendEmailVerificationOtp(input) {
+    const email = normalizeEmail(input.email);
+    const user = await prisma_1.prisma.user.findUnique({
+        where: { email },
+        select: { id: true, fullName: true, emailVerified: true, isActive: true },
+    });
+    if (!user || !user.isActive || user.emailVerified) {
+        return { sent: true };
+    }
+    const code = await (0, otp_1.issueOtp)(EMAIL_VERIFY_OTP_PURPOSE, user.id);
+    const { html, text } = (0, mailer_1.renderOtpEmail)({ code, ttlMinutes: env_1.env.OTP_TTL_MINUTES });
+    await (0, mailer_1.sendMail)({
+        to: email,
+        subject: "Verify your NearCart Inventory email",
+        html,
+        text,
+    });
+    return { sent: true };
+}
+async function verifyEmailVerificationOtp(input) {
+    const email = normalizeEmail(input.email);
+    const user = await prisma_1.prisma.user.findUnique({
+        where: { email },
+        select: { id: true, isActive: true, emailVerified: true },
+    });
+    if (!user || !user.isActive) {
+        throw ApiError_1.ApiError.badRequest("This code has expired or was not requested. Please request a new one.");
+    }
+    if (user.emailVerified) {
+        return { emailVerified: true };
+    }
+    await (0, otp_1.verifyOtp)(EMAIL_VERIFY_OTP_PURPOSE, user.id, input.code);
+    await prisma_1.prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerified: true },
+    });
+    return { emailVerified: true };
 }

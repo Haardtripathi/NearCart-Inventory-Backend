@@ -8,6 +8,8 @@ exports.confirmSalesOrder = confirmSalesOrder;
 exports.rejectSalesOrder = rejectSalesOrder;
 exports.cancelSalesOrder = cancelSalesOrder;
 exports.deliverSalesOrder = deliverSalesOrder;
+exports.markSalesOrderReady = markSalesOrderReady;
+exports.assignDriverToSalesOrder = assignDriverToSalesOrder;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const decimal_1 = require("../../utils/decimal");
@@ -443,5 +445,85 @@ async function deliverSalesOrder(organizationId, orderId, actorUserId) {
         before: order,
         after: updated,
     });
+    return updated;
+}
+/**
+ * Transitions CONFIRMED -> READY, the first of the two previously-dead SalesOrderStatus
+ * transitions to get wired up. Separate step from assign-driver (below) since the shop may mark
+ * an order ready for pickup before a driver has been assigned — matching the locked
+ * PHASE1_REQUIREMENTS.md contract (`PATCH /:id/mark-ready` is distinct from
+ * `POST /:id/assign-driver`).
+ */
+async function markSalesOrderReady(organizationId, orderId, actorUserId) {
+    const order = await getSalesOrderById(organizationId, orderId);
+    if (order.status !== client_1.SalesOrderStatus.CONFIRMED) {
+        throw ApiError_1.ApiError.badRequest("Only confirmed orders can be marked ready");
+    }
+    const updated = await prisma_1.prisma.salesOrder.update({
+        where: { id: orderId },
+        data: {
+            status: client_1.SalesOrderStatus.READY,
+            readyAt: new Date(),
+            readyById: actorUserId,
+        },
+    });
+    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+        organizationId,
+        actorUserId,
+        action: client_1.AuditAction.ORDER_READY,
+        entityType: "SalesOrder",
+        entityId: updated.id,
+        before: order,
+        after: updated,
+    });
+    return updated;
+}
+/**
+ * Assigns a driver to a READY order. Drivers are a platform-wide pool (a standalone `Driver`
+ * model, not an OrganizationMembership) — see PHASE1_REQUIREMENTS.md's locked 2026-07-24 decision
+ * — so any org's staff may assign any VERIFIED driver, without an organization-membership check
+ * on the driver itself. See modules/driver-orders for the driver-side pickup/deliver transitions.
+ */
+async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, driverId) {
+    const order = await getSalesOrderById(organizationId, orderId);
+    if (order.status !== client_1.SalesOrderStatus.READY) {
+        throw ApiError_1.ApiError.badRequest("Only orders that are READY can be assigned to a driver");
+    }
+    const driver = await prisma_1.prisma.driver.findUnique({
+        where: { id: driverId },
+        select: { id: true, status: true },
+    });
+    if (!driver) {
+        throw ApiError_1.ApiError.notFound("Driver not found");
+    }
+    if (driver.status !== client_1.DriverStatus.VERIFIED) {
+        throw ApiError_1.ApiError.badRequest("Only verified drivers can be assigned to orders");
+    }
+    const updated = await prisma_1.prisma.$transaction(async (tx) => {
+        const result = await tx.salesOrder.update({
+            where: { id: orderId },
+            data: {
+                assignedDriverId: driverId,
+                assignedById: actorUserId,
+                assignedAt: new Date(),
+            },
+            include: {
+                items: true,
+                branch: true,
+                customer: true,
+            },
+        });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId,
+            actorUserId,
+            action: client_1.AuditAction.ORDER_ASSIGN_DRIVER,
+            entityType: "SalesOrder",
+            entityId: order.id,
+            before: { assignedDriverId: order.assignedDriverId },
+            after: { assignedDriverId: result.assignedDriverId },
+            meta: { driverId },
+        });
+        return result;
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return updated;
 }

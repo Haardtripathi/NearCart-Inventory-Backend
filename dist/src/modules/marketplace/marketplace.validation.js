@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.marketplaceAvailabilitySchema = exports.marketplaceScopedQuerySchema = exports.marketplaceCatalogQuerySchema = exports.marketplaceOrganizationsQuerySchema = void 0;
+exports.externalOrderIdParamSchema = exports.createBridgedSalesOrderSchema = exports.marketplaceAvailabilitySchema = exports.marketplaceScopedQuerySchema = exports.marketplaceCatalogQuerySchema = exports.marketplaceOrganizationsQuerySchema = void 0;
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
 exports.marketplaceOrganizationsQuerySchema = zod_1.z.object({
@@ -29,4 +29,28 @@ exports.marketplaceAvailabilitySchema = zod_1.z.object({
     }))
         .min(1),
     lang: validation_1.optionalTrimmedString,
+});
+const bridgedSalesOrderCustomerSchema = zod_1.z.object({
+    name: validation_1.trimmedString,
+    phone: validation_1.trimmedString,
+    addressLine: validation_1.optionalTrimmedString,
+    latitude: zod_1.z.coerce.number().min(-90).max(90).optional(),
+    longitude: zod_1.z.coerce.number().min(-180).max(180).optional(),
+});
+const bridgedSalesOrderItemSchema = zod_1.z.object({
+    inventoryProductId: validation_1.trimmedString,
+    inventoryVariantId: validation_1.trimmedString,
+    quantity: validation_1.decimalInputSchema,
+    unitPrice: validation_1.decimalInputSchema,
+});
+exports.createBridgedSalesOrderSchema = zod_1.z.object({
+    branchId: validation_1.trimmedString,
+    externalOrderId: validation_1.trimmedString,
+    externalOrderNumber: validation_1.optionalTrimmedString,
+    customer: bridgedSalesOrderCustomerSchema,
+    items: zod_1.z.array(bridgedSalesOrderItemSchema).min(1),
+    notes: validation_1.optionalTrimmedString,
+});
+exports.externalOrderIdParamSchema = zod_1.z.object({
+    externalOrderId: validation_1.trimmedString,
 });

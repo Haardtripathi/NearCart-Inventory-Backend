@@ -7,7 +7,9 @@ import {
 } from "../../utils/localization";
 import {
   checkMarketplaceAvailability,
+  createBridgedSalesOrder,
   getMarketplaceCatalogProduct,
+  getSalesOrderByExternalId,
   listMarketplaceBrands,
   listMarketplaceCatalog,
   listMarketplaceCategories,
@@ -82,4 +84,20 @@ export async function listMarketplaceBrandsController(req: Request, res: Respons
   });
 
   return sendSuccess(res, 200, "Marketplace brands fetched successfully", { items: data });
+}
+
+export async function createBridgedSalesOrderController(req: Request, res: Response) {
+  const { created, ...data } = await createBridgedSalesOrder(req.params.organizationId!, req.body);
+
+  return sendSuccess(
+    res,
+    created ? 201 : 200,
+    created ? "Sales order created successfully" : "Sales order already exists for this externalOrderId",
+    data,
+  );
+}
+
+export async function getSalesOrderByExternalIdController(req: Request, res: Response) {
+  const data = await getSalesOrderByExternalId(req.params.externalOrderId!);
+  return sendSuccess(res, 200, "Sales order fetched successfully", data);
 }

@@ -210,6 +210,15 @@ model Organization {
   defaultLanguage  LanguageCode                 @default(EN)
   enabledLanguages Json?                        @default("[\"EN\", \"HI\", \"GU\"]")
   settings         Json?
+  // Per-organization sidebar module visibility toggles (key -> boolean). Missing keys fall back
+  // to the hardcoded defaults in `src/constants/pageVisibility.ts`. Additive, nullable, no
+  // migration risk to existing rows.
+  // NOTE: this column/migration was reconciled in from a sibling agent's branch
+  // (agent/page-visibility-settings, commit 7fa5ba2) which had already applied it to the shared
+  // dev DB — brought in here only so `prisma migrate dev` doesn't see drift; the rest of that
+  // feature (routes/controllers/pageVisibility.ts) is intentionally NOT included, out of scope
+  // for this track.
+  enabledPages     Json?
   createdAt        DateTime                     @default(now())
   updatedAt        DateTime                     @updatedAt
   deletedAt        DateTime?

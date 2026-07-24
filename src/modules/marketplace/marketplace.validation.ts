@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  decimalInputSchema,
   optionalTrimmedString,
   paginationQuerySchema,
   trimmedString,
@@ -37,4 +38,32 @@ export const marketplaceAvailabilitySchema = z.object({
     )
     .min(1),
   lang: optionalTrimmedString,
+});
+
+const bridgedSalesOrderCustomerSchema = z.object({
+  name: trimmedString,
+  phone: trimmedString,
+  addressLine: optionalTrimmedString,
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
+});
+
+const bridgedSalesOrderItemSchema = z.object({
+  inventoryProductId: trimmedString,
+  inventoryVariantId: trimmedString,
+  quantity: decimalInputSchema,
+  unitPrice: decimalInputSchema,
+});
+
+export const createBridgedSalesOrderSchema = z.object({
+  branchId: trimmedString,
+  externalOrderId: trimmedString,
+  externalOrderNumber: optionalTrimmedString,
+  customer: bridgedSalesOrderCustomerSchema,
+  items: z.array(bridgedSalesOrderItemSchema).min(1),
+  notes: optionalTrimmedString,
+});
+
+export const externalOrderIdParamSchema = z.object({
+  externalOrderId: trimmedString,
 });

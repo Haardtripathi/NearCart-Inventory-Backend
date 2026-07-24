@@ -1,10 +1,12 @@
 import {
   AuditAction,
+  MembershipStatus,
   OrderSource,
   PaymentStatus,
   ReferenceType,
   SalesOrderStatus,
   StockMovementType,
+  UserRole,
 } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
@@ -563,6 +565,71 @@ export async function deliverSalesOrder(organizationId: string, orderId: string,
     before: order,
     after: updated,
   });
+
+  return updated;
+}
+
+/**
+ * Assigns a driver to a confirmed order and transitions it CONFIRMED -> READY. This is the first
+ * of the two previously-dead SalesOrderStatus transitions (READY, OUT_FOR_DELIVERY) to get wired
+ * up — see modules/driver for the driver-side pickup/deliver transitions.
+ */
+export async function assignDriverToSalesOrder(
+  organizationId: string,
+  orderId: string,
+  actorUserId: string,
+  driverId: string,
+) {
+  const order = await getSalesOrderById(organizationId, orderId);
+
+  if (order.status !== SalesOrderStatus.CONFIRMED) {
+    throw ApiError.badRequest("Only confirmed orders can be assigned to a driver");
+  }
+
+  const driverMembership = await prisma.organizationMembership.findFirst({
+    where: {
+      organizationId,
+      userId: driverId,
+      role: UserRole.DRIVER,
+      status: MembershipStatus.ACTIVE,
+      user: {
+        isActive: true,
+      },
+    },
+  });
+
+  if (!driverMembership) {
+    throw ApiError.badRequest("Driver not found in this organization");
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.salesOrder.update({
+      where: { id: orderId },
+      data: {
+        status: SalesOrderStatus.READY,
+        assignedDriverId: driverId,
+        assignedAt: new Date(),
+      },
+      include: {
+        items: true,
+        branch: true,
+        customer: true,
+      },
+    });
+
+    await createAuditLog(tx, {
+      organizationId,
+      actorUserId,
+      action: AuditAction.ORDER_ASSIGN_DRIVER,
+      entityType: "SalesOrder",
+      entityId: order.id,
+      before: order,
+      after: result,
+      meta: { driverId },
+    });
+
+    return result;
+  }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   return updated;
 }

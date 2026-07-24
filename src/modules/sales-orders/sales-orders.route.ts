@@ -6,6 +6,7 @@ import { requireOrganizationContext } from "../../middlewares/org.middleware";
 import { validateRequest } from "../../middlewares/validate.middleware";
 import { asyncHandler } from "../../utils/asyncHandler";
 import {
+  assignDriverToSalesOrderController,
   cancelSalesOrderController,
   confirmSalesOrderController,
   createSalesOrderController,
@@ -16,6 +17,7 @@ import {
   updateSalesOrderController,
 } from "./sales-orders.controller";
 import {
+  assignDriverSchema,
   createSalesOrderSchema,
   rejectSalesOrderSchema,
   salesOrderQuerySchema,
@@ -34,3 +36,9 @@ salesOrdersRouter.post("/:id/confirm", requireRoles(...MANAGER_ROLES), asyncHand
 salesOrdersRouter.post("/:id/reject", requireRoles(...MANAGER_ROLES), validateRequest({ body: rejectSalesOrderSchema }), asyncHandler(rejectSalesOrderController));
 salesOrdersRouter.post("/:id/cancel", requireRoles(...MANAGER_ROLES), asyncHandler(cancelSalesOrderController));
 salesOrdersRouter.post("/:id/deliver", requireRoles(...MANAGER_ROLES), asyncHandler(deliverSalesOrderController));
+salesOrdersRouter.post(
+  "/:id/assign-driver",
+  requireRoles(...MANAGER_ROLES),
+  validateRequest({ body: assignDriverSchema }),
+  asyncHandler(assignDriverToSalesOrderController),
+);

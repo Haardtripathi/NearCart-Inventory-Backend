@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/ApiResponse";
 import {
+  assignDriverToSalesOrder,
   cancelSalesOrder,
   confirmSalesOrder,
   createSalesOrder,
@@ -55,4 +56,14 @@ export async function cancelSalesOrderController(req: Request, res: Response) {
 export async function deliverSalesOrderController(req: Request, res: Response) {
   const data = await deliverSalesOrder(req.auth!.activeOrganizationId!, req.params.id!, req.auth!.userId);
   return sendSuccess(res, 200, "Sales order delivered successfully", data);
+}
+
+export async function assignDriverToSalesOrderController(req: Request, res: Response) {
+  const data = await assignDriverToSalesOrder(
+    req.auth!.activeOrganizationId!,
+    req.params.id!,
+    req.auth!.userId,
+    req.body.driverId,
+  );
+  return sendSuccess(res, 200, "Driver assigned successfully", data);
 }

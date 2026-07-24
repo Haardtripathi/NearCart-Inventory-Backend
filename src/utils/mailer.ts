@@ -55,13 +55,23 @@ export async function sendMail(input: SendMailInput) {
     return { delivered: false as const };
   }
 
-  await transporter.sendMail({
+  const info = await transporter.sendMail({
     from: env.SMTP_FROM,
     to: input.to,
     subject: input.subject,
     html: input.html,
     text: input.text,
   });
+
+  // nodemailer.getTestMessageUrl() only returns a URL for Ethereal-style test accounts (used for
+  // local testing) — it's a no-op (returns false) against a real provider, so this is safe to
+  // always log and gives you a clickable preview link in dev instead of guessing whether the
+  // send actually worked.
+  const previewUrl = nodemailer.getTestMessageUrl(info);
+
+  if (previewUrl) {
+    console.log(`[mailer] preview: ${previewUrl}`);
+  }
 
   return { delivered: true as const };
 }

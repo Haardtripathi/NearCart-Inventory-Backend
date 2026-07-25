@@ -21,6 +21,25 @@ export const nullableTrimmedString = z.preprocess((value) => {
   return trimmed.length === 0 ? null : trimmed;
 }, z.string().trim().min(1).nullable().optional());
 
+// `z.coerce.boolean()` is a common Zod footgun for query params: it does `Boolean(value)`, so the
+// literal string "false" (any non-empty string) coerces to `true` instead of `false`. Use this for
+// any boolean query/body field where a caller might legitimately send an explicit `false`.
+export const strictBooleanQueryParam = z.preprocess((value) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  return value;
+}, z.boolean().optional());
+
 export const optionalEmailSchema = z.preprocess((value) => {
   if (typeof value !== "string") {
     return value;

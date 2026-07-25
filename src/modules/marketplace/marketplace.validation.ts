@@ -5,6 +5,7 @@ import {
   nullableTrimmedString,
   optionalTrimmedString,
   paginationQuerySchema,
+  strictBooleanQueryParam,
   trimmedString,
 } from "../../utils/validation";
 
@@ -17,7 +18,10 @@ export const marketplaceCatalogQuerySchema = paginationQuerySchema.extend({
   branchId: trimmedString,
   category: optionalTrimmedString,
   brand: optionalTrimmedString,
-  inStockOnly: z.coerce.boolean().optional(),
+  // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+  // "false" as truthy (Boolean("false") === true), which would silently invert an explicit
+  // `inStockOnly=false` from a caller instead of respecting it.
+  inStockOnly: strictBooleanQueryParam,
   sort: z.enum(["featured", "name-asc", "price-asc", "price-desc", "newest"]).default("featured"),
   lang: optionalTrimmedString,
 });
@@ -33,7 +37,12 @@ export const marketplaceAvailabilitySchema = z.object({
     .array(
       z.object({
         productId: trimmedString,
-        variantId: optionalTrimmedString,
+        // Nullable: NearCart sends `variantId: item.variantId || null` for cart items that
+        // weren't validated against a specific variant (public-storefront.service.ts) — the same
+        // pattern as `inventoryVariantId` in the bridged sales-order schema below.
+        // optionalTrimmedString would reject a literal `null` (only string | undefined pass
+        // z.string().optional()), rejecting this exact real request shape with a 400.
+        variantId: nullableTrimmedString,
         quantity: z.coerce.number().positive(),
       }),
     )
@@ -69,7 +78,9 @@ export const createBridgedSalesOrderSchema = z.object({
   externalOrderNumber: optionalTrimmedString,
   customer: bridgedSalesOrderCustomerSchema,
   items: z.array(bridgedSalesOrderItemSchema).min(1),
-  notes: optionalTrimmedString,
+  // Nullable: NearCart's Order.notes column is `String?` — a caller forwarding it verbatim would
+  // send a literal `null` when no notes were given, which optionalTrimmedString would reject.
+  notes: nullableTrimmedString,
 });
 
 export const externalOrderIdParamSchema = z.object({

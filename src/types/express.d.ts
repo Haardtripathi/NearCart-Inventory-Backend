@@ -16,6 +16,9 @@ declare global {
         defaultLanguage: LanguageCode;
         enabledLanguages: unknown;
       };
+      driverAuth?: {
+        driverId: string;
+      };
     }
   }
 }

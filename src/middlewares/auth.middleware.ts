@@ -16,6 +16,14 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     const token = authorization.replace("Bearer ", "").trim();
     const payload = verifyAuthToken(token);
 
+    // Driver tokens are signed with this same JWT_SECRET (see utils/driverJwt.ts) but carry a
+    // `driverId`/`type: "driver"` payload instead of `userId` — reject explicitly rather than
+    // relying on Prisma's implicit rejection of an `undefined` unique-where value, so a driver
+    // token can never be mistaken for a user token even if that incidental behavior changes.
+    if (!payload || typeof payload.userId !== "string" || !payload.userId) {
+      throw ApiError.unauthorized("Invalid or expired token");
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
       select: {
@@ -56,4 +64,32 @@ export function requireRoles(...roles: UserRole[]) {
 
     next();
   };
+}
+
+/**
+ * Gates a "key action" behind email verification (see auth.service.ts login()/sendEmailVerificationOtp).
+ * SUPER_ADMIN is always exempt (bootstrap account, never goes through OTP). Apply to specific
+ * sensitive write routes rather than globally — most invited users are already verified by the
+ * time they can log in at all (see completeCredentialFlow), so this mainly targets self-registered
+ * org owners who skipped OTP verification.
+ */
+export async function requireEmailVerified(req: Request, _res: Response, next: NextFunction) {
+  if (!req.auth) {
+    return next(ApiError.unauthorized());
+  }
+
+  if (req.auth.role === UserRole.SUPER_ADMIN) {
+    return next();
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.auth.userId },
+    select: { emailVerified: true },
+  });
+
+  if (!user?.emailVerified) {
+    return next(ApiError.forbidden("Please verify your email before performing this action"));
+  }
+
+  next();
 }

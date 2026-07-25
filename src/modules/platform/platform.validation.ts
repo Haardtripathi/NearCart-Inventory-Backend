@@ -1,8 +1,10 @@
+import { DriverStatus } from "@prisma/client";
 import { z } from "zod";
 
 import {
   languageCodeSchema,
   optionalTrimmedString,
+  paginationQuerySchema,
   trimmedString,
   uniqueLanguageArraySchema,
 } from "../../utils/validation";
@@ -29,3 +31,7 @@ export const createIndustrySchema = z.object({
 });
 
 export const updateIndustrySchema = createIndustrySchema.partial();
+
+export const platformDriversQuerySchema = paginationQuerySchema.extend({
+  status: z.nativeEnum(DriverStatus).optional(),
+});

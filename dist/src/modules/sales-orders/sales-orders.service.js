@@ -8,6 +8,8 @@ exports.confirmSalesOrder = confirmSalesOrder;
 exports.rejectSalesOrder = rejectSalesOrder;
 exports.cancelSalesOrder = cancelSalesOrder;
 exports.deliverSalesOrder = deliverSalesOrder;
+exports.markSalesOrderReady = markSalesOrderReady;
+exports.assignDriverToSalesOrder = assignDriverToSalesOrder;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const decimal_1 = require("../../utils/decimal");
@@ -121,6 +123,9 @@ async function listSalesOrders(organizationId, query) {
             include: {
                 branch: true,
                 customer: true,
+                assignedDriver: {
+                    select: { id: true, fullName: true, phone: true, vehicleType: true },
+                },
             },
             orderBy: {
                 createdAt: "desc",
@@ -209,6 +214,9 @@ async function getSalesOrderById(organizationId, orderId) {
                     product: true,
                     variant: true,
                 },
+            },
+            assignedDriver: {
+                select: { id: true, fullName: true, phone: true, vehicleType: true },
             },
         },
     });
@@ -302,6 +310,22 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
         throw ApiError_1.ApiError.badRequest("Only draft or pending orders can be confirmed");
     }
     const confirmed = await prisma_1.prisma.$transaction(async (tx) => {
+        // Guard against a concurrent confirm racing this same transition (e.g. a double-click or a
+        // duplicated webhook retry): claim the row atomically before touching stock — Postgres locks
+        // the row on this UPDATE, so a second concurrent transaction's updateMany blocks until this
+        // one commits, then re-evaluates the status predicate against 0 matching rows and safely
+        // no-ops instead of also decrementing stock for the same order.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
+            data: {
+                status: client_1.SalesOrderStatus.CONFIRMED,
+                confirmedAt: new Date(),
+                confirmedById: actorUserId,
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer draft/pending — it may have already been confirmed");
+        }
         for (const item of order.items) {
             await (0, inventory_service_1.applyStockMovement)(tx, {
                 organizationId,
@@ -316,13 +340,8 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
                 createdById: actorUserId,
             });
         }
-        const updated = await tx.salesOrder.update({
+        const updated = await tx.salesOrder.findUniqueOrThrow({
             where: { id: orderId },
-            data: {
-                status: client_1.SalesOrderStatus.CONFIRMED,
-                confirmedAt: new Date(),
-                confirmedById: actorUserId,
-            },
             include: {
                 items: true,
                 branch: true,
@@ -443,5 +462,108 @@ async function deliverSalesOrder(organizationId, orderId, actorUserId) {
         before: order,
         after: updated,
     });
+    return updated;
+}
+/**
+ * Transitions CONFIRMED -> READY, the first of the two previously-dead SalesOrderStatus
+ * transitions to get wired up. Separate step from assign-driver (below) since the shop may mark
+ * an order ready for pickup before a driver has been assigned — matching the locked
+ * PHASE1_REQUIREMENTS.md contract (`PATCH /:id/mark-ready` is distinct from
+ * `POST /:id/assign-driver`).
+ */
+async function markSalesOrderReady(organizationId, orderId, actorUserId) {
+    const order = await getSalesOrderById(organizationId, orderId);
+    if (order.status !== client_1.SalesOrderStatus.CONFIRMED) {
+        throw ApiError_1.ApiError.badRequest("Only confirmed orders can be marked ready");
+    }
+    const updated = await prisma_1.prisma.$transaction(async (tx) => {
+        // Guard against a concurrent request racing this same transition: the WHERE clause's
+        // status check is evaluated atomically by Postgres as part of the UPDATE, so only one
+        // concurrent caller can ever flip CONFIRMED -> READY for this row.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, organizationId, status: client_1.SalesOrderStatus.CONFIRMED },
+            data: {
+                status: client_1.SalesOrderStatus.READY,
+                readyAt: new Date(),
+                readyById: actorUserId,
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer confirmed — it may have already been marked ready");
+        }
+        const result = await tx.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId,
+            actorUserId,
+            action: client_1.AuditAction.ORDER_READY,
+            entityType: "SalesOrder",
+            entityId: result.id,
+            before: order,
+            after: result,
+        });
+        return result;
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
+    return updated;
+}
+/**
+ * Assigns a driver to a READY order. Drivers are a platform-wide pool (a standalone `Driver`
+ * model, not an OrganizationMembership) — see PHASE1_REQUIREMENTS.md's locked 2026-07-24 decision
+ * — so any org's staff may assign any VERIFIED driver, without an organization-membership check
+ * on the driver itself. See modules/driver-orders for the driver-side pickup/deliver transitions.
+ */
+async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, driverId) {
+    const order = await getSalesOrderById(organizationId, orderId);
+    if (order.status !== client_1.SalesOrderStatus.READY) {
+        throw ApiError_1.ApiError.badRequest("Only orders that are READY can be assigned to a driver");
+    }
+    const driver = await prisma_1.prisma.driver.findUnique({
+        where: { id: driverId },
+        select: { id: true, status: true },
+    });
+    if (!driver) {
+        throw ApiError_1.ApiError.notFound("Driver not found");
+    }
+    if (driver.status !== client_1.DriverStatus.VERIFIED) {
+        throw ApiError_1.ApiError.badRequest("Only verified drivers can be assigned to orders");
+    }
+    const updated = await prisma_1.prisma.$transaction(async (tx) => {
+        // Guard against a concurrent request racing this same transition (e.g. two staff members
+        // assigning different drivers at once): the WHERE clause's status check is evaluated
+        // atomically by Postgres as part of the UPDATE, so only one concurrent caller can ever win
+        // the READY -> assigned transition for this row.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, organizationId, status: client_1.SalesOrderStatus.READY },
+            data: {
+                assignedDriverId: driverId,
+                assignedById: actorUserId,
+                assignedAt: new Date(),
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer READY — it may have already been assigned or its state changed");
+        }
+        const result = await tx.salesOrder.findUniqueOrThrow({
+            where: { id: orderId },
+            include: {
+                items: true,
+                branch: true,
+                customer: true,
+                assignedDriver: {
+                    select: { id: true, fullName: true, phone: true, vehicleType: true },
+                },
+            },
+        });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId,
+            actorUserId,
+            action: client_1.AuditAction.ORDER_ASSIGN_DRIVER,
+            entityType: "SalesOrder",
+            entityId: order.id,
+            before: { assignedDriverId: order.assignedDriverId },
+            after: { assignedDriverId: result.assignedDriverId },
+            meta: { driverId },
+        });
+        return result;
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return updated;
 }

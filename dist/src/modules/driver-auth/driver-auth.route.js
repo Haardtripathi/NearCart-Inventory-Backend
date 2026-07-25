@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.driverAuthRouter = void 0;
+const express_1 = require("express");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const driver_auth_controller_1 = require("./driver-auth.controller");
+const driver_auth_validation_1 = require("./driver-auth.validation");
+exports.driverAuthRouter = (0, express_1.Router)();
+exports.driverAuthRouter.post("/register", (0, validate_middleware_1.validateRequest)({ body: driver_auth_validation_1.registerDriverSchema }), (0, asyncHandler_1.asyncHandler)(driver_auth_controller_1.registerDriverController));
+exports.driverAuthRouter.post("/login", (0, validate_middleware_1.validateRequest)({ body: driver_auth_validation_1.loginDriverSchema }), (0, asyncHandler_1.asyncHandler)(driver_auth_controller_1.loginDriverController));

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateIndustrySchema = exports.createIndustrySchema = exports.industriesQuerySchema = void 0;
+exports.platformDriversQuerySchema = exports.updateIndustrySchema = exports.createIndustrySchema = exports.industriesQuerySchema = void 0;
+const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
 const industryTranslationSchema = zod_1.z.object({
@@ -22,3 +23,6 @@ exports.createIndustrySchema = zod_1.z.object({
     translations: (0, validation_1.uniqueLanguageArraySchema)(industryTranslationSchema).optional(),
 });
 exports.updateIndustrySchema = exports.createIndustrySchema.partial();
+exports.platformDriversQuerySchema = validation_1.paginationQuerySchema.extend({
+    status: zod_1.z.nativeEnum(client_1.DriverStatus).optional(),
+});

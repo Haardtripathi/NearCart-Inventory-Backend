@@ -1,4 +1,4 @@
-import { LanguageCode } from "@prisma/client";
+import { AuditAction, DriverStatus, LanguageCode } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
 import type { LocaleContext } from "../../utils/localization";
@@ -7,6 +7,9 @@ import { mergeTranslationsForUpdate, upsertTranslations } from "../../utils/tran
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 import { slugify } from "../../utils/slug";
 import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
+import { ApiError } from "../../utils/ApiError";
+import { buildPagination, getPagination } from "../../utils/pagination";
+import { createAuditLog } from "../audit/audit.service";
 
 interface IndustryTranslationInput {
   language: LanguageCode;
@@ -178,4 +181,98 @@ export async function updateIndustry(
   });
 
   return serializeIndustry(await getIndustryWithTranslations(industryId), localeContext);
+}
+
+function serializeDriver(driver: {
+  id: string;
+  fullName: string;
+  phone: string;
+  email: string | null;
+  vehicleType: string;
+  vehicleNumber: string;
+  status: DriverStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: driver.id,
+    fullName: driver.fullName,
+    phone: driver.phone,
+    email: driver.email,
+    vehicleType: driver.vehicleType,
+    vehicleNumber: driver.vehicleNumber,
+    status: driver.status,
+    createdAt: driver.createdAt,
+    updatedAt: driver.updatedAt,
+  };
+}
+
+export async function listPlatformDrivers(query: { page: number; limit: number; status?: DriverStatus }) {
+  const { page, limit, skip } = getPagination(query.page, query.limit);
+  const where = query.status ? { status: query.status } : {};
+
+  const [items, totalItems] = await prisma.$transaction([
+    prisma.driver.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
+    }),
+    prisma.driver.count({ where }),
+  ]);
+
+  return {
+    items: items.map(serializeDriver),
+    pagination: buildPagination(page, limit, totalItems),
+  };
+}
+
+async function getDriverOrThrow(driverId: string) {
+  const driver = await prisma.driver.findUnique({ where: { id: driverId } });
+
+  if (!driver) {
+    throw ApiError.notFound("Driver not found");
+  }
+
+  return driver;
+}
+
+export async function verifyPlatformDriver(actorUserId: string, driverId: string) {
+  const driver = await getDriverOrThrow(driverId);
+
+  const updated = await prisma.driver.update({
+    where: { id: driverId },
+    data: { status: DriverStatus.VERIFIED },
+  });
+
+  await createAuditLog(prisma, {
+    actorUserId,
+    action: AuditAction.DRIVER_VERIFY,
+    entityType: "Driver",
+    entityId: driver.id,
+    before: { status: driver.status },
+    after: { status: updated.status },
+  });
+
+  return serializeDriver(updated);
+}
+
+export async function suspendPlatformDriver(actorUserId: string, driverId: string) {
+  const driver = await getDriverOrThrow(driverId);
+
+  const updated = await prisma.driver.update({
+    where: { id: driverId },
+    data: { status: DriverStatus.SUSPENDED },
+  });
+
+  await createAuditLog(prisma, {
+    actorUserId,
+    action: AuditAction.DRIVER_SUSPEND,
+    entityType: "Driver",
+    entityId: driver.id,
+    before: { status: driver.status },
+    after: { status: updated.status },
+  });
+
+  return serializeDriver(updated);
 }

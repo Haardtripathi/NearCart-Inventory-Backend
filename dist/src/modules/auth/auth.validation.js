@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateMyPreferencesSchema = exports.changePasswordSchema = exports.resetPasswordSchema = exports.completeAccountSetupSchema = exports.registerOrganizationOwnerSchema = exports.loginSchema = exports.bootstrapSuperAdminSchema = void 0;
+exports.verifyEmailOtpSchema = exports.sendEmailOtpSchema = exports.updateMyPreferencesSchema = exports.changePasswordSchema = exports.resetPasswordSchema = exports.completeAccountSetupSchema = exports.registerOrganizationOwnerSchema = exports.loginSchema = exports.bootstrapSuperAdminSchema = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
@@ -59,4 +59,11 @@ exports.changePasswordSchema = zod_1.z.object({
 });
 exports.updateMyPreferencesSchema = zod_1.z.object({
     preferredLanguage: zod_1.z.nativeEnum(client_1.LanguageCode),
+});
+exports.sendEmailOtpSchema = zod_1.z.object({
+    email: zod_1.z.string().trim().email(),
+});
+exports.verifyEmailOtpSchema = zod_1.z.object({
+    email: zod_1.z.string().trim().email(),
+    code: zod_1.z.string().trim().length(6),
 });

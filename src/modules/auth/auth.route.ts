@@ -11,7 +11,9 @@ import {
   meController,
   registerOrganizationOwnerController,
   resetPasswordController,
+  sendEmailOtpController,
   updateMyPreferencesController,
+  verifyEmailOtpController,
 } from "./auth.controller";
 import {
   bootstrapSuperAdminSchema,
@@ -20,7 +22,9 @@ import {
   loginSchema,
   registerOrganizationOwnerSchema,
   resetPasswordSchema,
+  sendEmailOtpSchema,
   updateMyPreferencesSchema,
+  verifyEmailOtpSchema,
 } from "./auth.validation";
 
 export const authRouter = Router();
@@ -42,6 +46,8 @@ authRouter.post(
   asyncHandler(completeAccountSetupController),
 );
 authRouter.post("/reset-password", validateRequest({ body: resetPasswordSchema }), asyncHandler(resetPasswordController));
+authRouter.post("/send-otp", validateRequest({ body: sendEmailOtpSchema }), asyncHandler(sendEmailOtpController));
+authRouter.post("/verify-otp", validateRequest({ body: verifyEmailOtpSchema }), asyncHandler(verifyEmailOtpController));
 authRouter.post(
   "/logout",
   authenticate,

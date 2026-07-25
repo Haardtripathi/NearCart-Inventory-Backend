@@ -1,14 +1,18 @@
-import { LanguageCode, ProductStatus, Prisma } from "@prisma/client";
+import { AuditAction, LanguageCode, OrderSource, ProductStatus, Prisma, SalesOrderStatus } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
+import { assertBranchInOrg, assertOrganizationExists } from "../../utils/guards";
+import { toDecimal } from "../../utils/decimal";
 import {
   createLocaleContext,
   type LocaleContext,
   serializeLocalizedEntity,
 } from "../../utils/localization";
+import { generateDocumentNumber } from "../../utils/numbering";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { getAvailableStock, isLowStock } from "../../utils/stock";
+import { createAuditLog } from "../audit/audit.service";
 
 type RequestedLocaleOptions = {
   requestedLanguage?: LanguageCode | null;
@@ -537,7 +541,7 @@ export async function checkMarketplaceAvailability(
     branchId: string;
     items: Array<{
       productId: string;
-      variantId?: string;
+      variantId?: string | null;
       quantity: number;
     }>;
   },
@@ -713,4 +717,274 @@ export async function listMarketplaceBrands(
       translations: buildTranslationMap(brand.translations),
     };
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Bridge write-back: NearCart pushes a customer order in as a SalesOrder (source=APP) here, and
+// reads its status back. This is the only part of the marketplace bridge that writes — everything
+// above this point is read-only. See marketplace.route.ts header comment for contract notes.
+// ---------------------------------------------------------------------------------------------
+
+interface CreateBridgedSalesOrderInput {
+  branchId: string;
+  externalOrderId: string;
+  externalOrderNumber?: string;
+  customer: {
+    name: string;
+    phone: string;
+    addressLine?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+  };
+  items: Array<{
+    inventoryProductId: string;
+    inventoryVariantId: string | null;
+    quantity: string | number;
+    unitPrice: string | number;
+  }>;
+  notes?: string | null;
+}
+
+function summarizeSalesOrder(order: {
+  id: string;
+  orderNumber: string;
+  status: SalesOrderStatus;
+  rejectionReason: string | null;
+  confirmedAt: Date | null;
+  deliveredAt: Date | null;
+}) {
+  return {
+    salesOrderId: order.id,
+    orderNumber: order.orderNumber,
+    status: order.status,
+    rejectionReason: order.rejectionReason ?? undefined,
+    confirmedAt: order.confirmedAt?.toISOString(),
+    deliveredAt: order.deliveredAt?.toISOString(),
+  };
+}
+
+async function findOrCreateBridgeCustomer(
+  organizationId: string,
+  customerInput: CreateBridgedSalesOrderInput["customer"],
+) {
+  const existing = await prisma.customer.findFirst({
+    where: {
+      organizationId,
+      phone: customerInput.phone,
+      deletedAt: null,
+    },
+  });
+
+  if (existing) {
+    return existing;
+  }
+
+  return prisma.customer.create({
+    data: {
+      organizationId,
+      name: customerInput.name,
+      phone: customerInput.phone,
+      address:
+        customerInput.addressLine || customerInput.latitude || customerInput.longitude
+          ? {
+              addressLine: customerInput.addressLine ?? null,
+              latitude: customerInput.latitude ?? null,
+              longitude: customerInput.longitude ?? null,
+            }
+          : undefined,
+    },
+  });
+}
+
+/**
+ * Creates a SalesOrder (source=APP) from a NearCart customer order, or — if externalOrderId has
+ * already been bridged before — returns the existing SalesOrder untouched. Callers should return
+ * HTTP 201 on `created: true` and 200 otherwise, per the documented bridge contract.
+ */
+export async function createBridgedSalesOrder(
+  organizationId: string,
+  input: CreateBridgedSalesOrderInput,
+) {
+  await assertOrganizationExists(prisma, organizationId);
+  const branch = await assertBranchInOrg(prisma, organizationId, input.branchId);
+
+  // assertBranchInOrg only checks org membership + not-deleted (it's shared with
+  // purchases/stock-transfers/sales-orders, where staff may deliberately write against a
+  // temporarily-inactive branch). Every *read* endpoint in this file requires isActive, so the
+  // write path should too — otherwise a deactivated branch could still receive bridged orders.
+  if (!branch.isActive) {
+    throw ApiError.badRequest("This branch is not currently accepting orders");
+  }
+
+  const existing = await prisma.salesOrder.findUnique({
+    where: { externalOrderId: input.externalOrderId },
+  });
+
+  if (existing) {
+    if (existing.organizationId !== organizationId) {
+      throw ApiError.conflict("This externalOrderId has already been bridged to a different organization");
+    }
+
+    return { ...summarizeSalesOrder(existing), created: false as const };
+  }
+
+  const customer = await findOrCreateBridgeCustomer(organizationId, input.customer);
+
+  let subtotal = toDecimal(0);
+  const preparedItems: Array<{
+    productId: string;
+    variantId: string;
+    productNameSnapshot: string;
+    variantNameSnapshot: string;
+    skuSnapshot: string;
+    quantity: Prisma.Decimal;
+    unitPrice: Prisma.Decimal;
+    taxRate: Prisma.Decimal;
+    taxAmount: Prisma.Decimal;
+    discountAmount: Prisma.Decimal;
+    lineTotal: Prisma.Decimal;
+  }> = [];
+
+  for (const item of input.items) {
+    // `inventoryVariantId` is nullable: NearCart sends null for cart items that were validated
+    // without pinning a specific variant. Fall back to the product's default (or first active)
+    // variant rather than requiring an exact id match in that case.
+    const variant = item.inventoryVariantId
+      ? await prisma.productVariant.findFirst({
+          where: {
+            id: item.inventoryVariantId,
+            organizationId,
+            deletedAt: null,
+            product: { deletedAt: null },
+          },
+          include: { product: true },
+        })
+      : await prisma.productVariant.findFirst({
+          where: {
+            productId: item.inventoryProductId,
+            organizationId,
+            deletedAt: null,
+            product: { deletedAt: null },
+          },
+          include: { product: true },
+          orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+        });
+
+    if (
+      !variant ||
+      variant.productId !== item.inventoryProductId ||
+      (item.inventoryVariantId && variant.id !== item.inventoryVariantId)
+    ) {
+      throw ApiError.badRequest(
+        `Product/variant ${item.inventoryProductId}/${item.inventoryVariantId ?? "(default)"} was not found in this organization's catalog`,
+      );
+    }
+
+    const quantity = toDecimal(item.quantity);
+    const unitPrice = toDecimal(item.unitPrice);
+
+    if (quantity.lessThanOrEqualTo(0)) {
+      throw ApiError.badRequest("Sales quantities must be positive");
+    }
+
+    if (unitPrice.isNegative()) {
+      throw ApiError.badRequest("Unit price cannot be negative");
+    }
+
+    const lineTotal = quantity.mul(unitPrice);
+    subtotal = subtotal.plus(lineTotal);
+
+    preparedItems.push({
+      productId: variant.productId,
+      variantId: variant.id,
+      productNameSnapshot: variant.product.name,
+      variantNameSnapshot: variant.name,
+      skuSnapshot: variant.sku,
+      quantity,
+      unitPrice,
+      taxRate: toDecimal(0),
+      taxAmount: toDecimal(0),
+      discountAmount: toDecimal(0),
+      lineTotal,
+    });
+  }
+
+  // The delivery address for this specific order is stored on the order's notes rather than
+  // overwriting the customer's CRM address (a returning customer may order to a different address
+  // each time) — this is an implementation detail, not part of the documented wire contract.
+  const deliveryAddressNote = input.customer.addressLine
+    ? `Delivery address: ${input.customer.addressLine}${
+        input.customer.latitude != null && input.customer.longitude != null
+          ? ` (${input.customer.latitude}, ${input.customer.longitude})`
+          : ""
+      }`
+    : null;
+  const notes = [input.notes, deliveryAddressNote].filter(Boolean).join("\n") || null;
+
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const order = await tx.salesOrder.create({
+        data: {
+          organizationId,
+          branchId: input.branchId,
+          customerId: customer.id,
+          orderNumber: generateDocumentNumber("SO"),
+          source: OrderSource.APP,
+          status: SalesOrderStatus.PENDING,
+          externalOrderId: input.externalOrderId,
+          externalOrderNumber: input.externalOrderNumber ?? null,
+          notes,
+          subtotal,
+          taxTotal: toDecimal(0),
+          discountTotal: toDecimal(0),
+          total: subtotal,
+          items: {
+            createMany: {
+              data: preparedItems,
+            },
+          },
+        },
+      });
+
+      await createAuditLog(tx, {
+        organizationId,
+        action: AuditAction.CREATE,
+        entityType: "SalesOrder",
+        entityId: order.id,
+        after: order,
+        meta: { source: "marketplace-bridge", externalOrderId: input.externalOrderId },
+      });
+
+      return order;
+    });
+
+    return { ...summarizeSalesOrder(created), created: true as const };
+  } catch (error) {
+    // Idempotency race: two concurrent replays of the same externalOrderId. The unique
+    // constraint on externalOrderId is the source of truth — re-fetch and return it instead of
+    // surfacing a 500/409 for what is, from NearCart's point of view, a successful retry.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const raceWinner = await prisma.salesOrder.findUnique({
+        where: { externalOrderId: input.externalOrderId },
+      });
+
+      if (raceWinner) {
+        return { ...summarizeSalesOrder(raceWinner), created: false as const };
+      }
+    }
+
+    throw error;
+  }
+}
+
+export async function getSalesOrderByExternalId(externalOrderId: string) {
+  const order = await prisma.salesOrder.findUnique({
+    where: { externalOrderId },
+  });
+
+  if (!order) {
+    throw ApiError.notFound("No sales order found for this externalOrderId");
+  }
+
+  return summarizeSalesOrder(order);
 }

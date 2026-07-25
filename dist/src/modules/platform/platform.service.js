@@ -3,12 +3,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listIndustries = listIndustries;
 exports.createIndustry = createIndustry;
 exports.updateIndustry = updateIndustry;
+exports.listPlatformDrivers = listPlatformDrivers;
+exports.verifyPlatformDriver = verifyPlatformDriver;
+exports.suspendPlatformDriver = suspendPlatformDriver;
+const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const localization_1 = require("../../utils/localization");
 const translations_1 = require("../../utils/translations");
 const json_1 = require("../../utils/json");
 const slug_1 = require("../../utils/slug");
 const autoTranslate_1 = require("../../utils/autoTranslate");
+const ApiError_1 = require("../../utils/ApiError");
+const pagination_1 = require("../../utils/pagination");
+const audit_service_1 = require("../audit/audit.service");
 function serializeIndustry(industry, localeContext) {
     return (0, localization_1.serializeLocalizedEntity)(industry, localeContext);
 }
@@ -131,4 +138,73 @@ async function updateIndustry(industryId, input, localeContext) {
         });
     });
     return serializeIndustry(await getIndustryWithTranslations(industryId), localeContext);
+}
+function serializeDriver(driver) {
+    return {
+        id: driver.id,
+        fullName: driver.fullName,
+        phone: driver.phone,
+        email: driver.email,
+        vehicleType: driver.vehicleType,
+        vehicleNumber: driver.vehicleNumber,
+        status: driver.status,
+        createdAt: driver.createdAt,
+        updatedAt: driver.updatedAt,
+    };
+}
+async function listPlatformDrivers(query) {
+    const { page, limit, skip } = (0, pagination_1.getPagination)(query.page, query.limit);
+    const where = query.status ? { status: query.status } : {};
+    const [items, totalItems] = await prisma_1.prisma.$transaction([
+        prisma_1.prisma.driver.findMany({
+            where,
+            orderBy: { createdAt: "desc" },
+            skip,
+            take: limit,
+        }),
+        prisma_1.prisma.driver.count({ where }),
+    ]);
+    return {
+        items: items.map(serializeDriver),
+        pagination: (0, pagination_1.buildPagination)(page, limit, totalItems),
+    };
+}
+async function getDriverOrThrow(driverId) {
+    const driver = await prisma_1.prisma.driver.findUnique({ where: { id: driverId } });
+    if (!driver) {
+        throw ApiError_1.ApiError.notFound("Driver not found");
+    }
+    return driver;
+}
+async function verifyPlatformDriver(actorUserId, driverId) {
+    const driver = await getDriverOrThrow(driverId);
+    const updated = await prisma_1.prisma.driver.update({
+        where: { id: driverId },
+        data: { status: client_1.DriverStatus.VERIFIED },
+    });
+    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+        actorUserId,
+        action: client_1.AuditAction.DRIVER_VERIFY,
+        entityType: "Driver",
+        entityId: driver.id,
+        before: { status: driver.status },
+        after: { status: updated.status },
+    });
+    return serializeDriver(updated);
+}
+async function suspendPlatformDriver(actorUserId, driverId) {
+    const driver = await getDriverOrThrow(driverId);
+    const updated = await prisma_1.prisma.driver.update({
+        where: { id: driverId },
+        data: { status: client_1.DriverStatus.SUSPENDED },
+    });
+    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+        actorUserId,
+        action: client_1.AuditAction.DRIVER_SUSPEND,
+        entityType: "Driver",
+        entityId: driver.id,
+        before: { status: driver.status },
+        after: { status: updated.status },
+    });
+    return serializeDriver(updated);
 }

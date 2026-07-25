@@ -563,11 +563,13 @@ async function createOrganizationWithResolvedOwner(tx, input, options) {
             preferredLanguage: options.owner.preferredLanguage,
             requiresAccountSetup: options.ownerRequiresAccountSetup,
         },
+        // NOTE: `rawToken` here is only ever meant to travel to `sendUserActionEmail` (called by this
+        // function's callers after their transaction commits) — it must never be forwarded verbatim
+        // into an API response. See `sendUserActionEmail` in utils/userActionTokens.ts for why.
         ownerAccessLink: ownerAccessLink
             ? {
                 purpose: client_1.UserActionTokenPurpose.ACCOUNT_SETUP,
-                token: ownerAccessLink.rawToken,
-                url: (0, userActionTokens_1.buildUserActionLink)("/account-setup", ownerAccessLink.rawToken),
+                rawToken: ownerAccessLink.rawToken,
                 expiresAt: ownerAccessLink.record.expiresAt,
             }
             : null,
@@ -575,25 +577,42 @@ async function createOrganizationWithResolvedOwner(tx, input, options) {
 }
 async function createOrganization(currentUserId, currentRole, input) {
     const industry = await (0, guards_1.assertIndustryExists)(prisma_1.prisma, input.primaryIndustryId);
-    return prisma_1.prisma.$transaction(async (tx) => {
+    const created = await prisma_1.prisma.$transaction(async (tx) => {
         const ownerResolution = await resolveOrganizationOwner(tx, currentUserId, currentRole, input);
-        const created = await createOrganizationWithResolvedOwner(tx, input, {
+        return createOrganizationWithResolvedOwner(tx, input, {
             actorUserId: currentUserId,
             primaryIndustry: industry,
             owner: ownerResolution.owner,
             ownerRequiresAccountSetup: ownerResolution.requiresAccountSetup,
         });
-        return {
-            ...created.organization,
-            firstBranch: created.firstBranch,
-            primaryIndustry: created.primaryIndustry,
-            ownerUser: created.ownerUser,
-            ownerAccessLink: created.ownerAccessLink,
-        };
     }, {
         maxWait: 10_000,
         timeout: 30_000,
     });
+    let ownerAccessLinkSummary = null;
+    if (created.ownerAccessLink) {
+        // Email the setup link rather than returning the raw token in the API response — see
+        // sendUserActionEmail for context. Sent after the transaction commits so a slow/unavailable
+        // SMTP provider never holds a DB transaction open.
+        await (0, userActionTokens_1.sendUserActionEmail)({
+            to: created.ownerUser.email,
+            purpose: created.ownerAccessLink.purpose,
+            rawToken: created.ownerAccessLink.rawToken,
+            expiresAt: created.ownerAccessLink.expiresAt,
+        });
+        ownerAccessLinkSummary = {
+            purpose: created.ownerAccessLink.purpose,
+            expiresAt: created.ownerAccessLink.expiresAt,
+            sentTo: created.ownerUser.email,
+        };
+    }
+    return {
+        ...created.organization,
+        firstBranch: created.firstBranch,
+        primaryIndustry: created.primaryIndustry,
+        ownerUser: created.ownerUser,
+        ownerAccessLink: ownerAccessLinkSummary,
+    };
 }
 async function getMyOrganizations(userId, requesterRole, localeContext) {
     if (requesterRole === client_1.UserRole.SUPER_ADMIN) {

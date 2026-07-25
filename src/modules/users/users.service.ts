@@ -15,7 +15,7 @@ import {
 } from "../../utils/branchAccess";
 import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
 import { toNullableJsonValue } from "../../utils/json";
-import { buildUserActionLink, createUserActionToken } from "../../utils/userActionTokens";
+import { createUserActionToken, sendUserActionEmail } from "../../utils/userActionTokens";
 import { createAuditLog } from "../audit/audit.service";
 
 const ACCOUNT_SETUP_TOKEN_HOURS = 24 * 7;
@@ -47,18 +47,14 @@ function assertManageableRole(actorRole: UserRole, targetRole: UserRole) {
   throw ApiError.forbidden("You do not have permission to manage this role");
 }
 
-function serializeAccessLink(link: {
-  purpose: UserActionTokenPurpose;
-  rawToken: string;
-  expiresAt: Date;
-}) {
-  const pathname = link.purpose === UserActionTokenPurpose.ACCOUNT_SETUP ? "/account-setup" : "/reset-password";
-
+// NOTE: this intentionally does NOT include the raw token or a clickable URL — the link is
+// emailed directly to the user (see sendUserActionEmail) instead of being returned in the API
+// response, which used to let anyone who could see the response set that user's password.
+function serializeAccessLink(link: { purpose: UserActionTokenPurpose; expiresAt: Date; sentTo: string }) {
   return {
     purpose: link.purpose,
-    token: link.rawToken,
-    url: buildUserActionLink(pathname, link.rawToken),
     expiresAt: link.expiresAt,
+    sentTo: link.sentTo,
   };
 }
 
@@ -464,9 +460,28 @@ export async function createOrganizationUser(
 
   const branchMap = await resolveBranchMap(organizationId, [result.membership]);
 
+  let sentAccessLink: { purpose: UserActionTokenPurpose; expiresAt: Date; sentTo: string } | null = null;
+
+  if (result.accessLink) {
+    // Email the setup link after the transaction commits rather than returning the raw token in
+    // the API response — see sendUserActionEmail / serializeAccessLink for context.
+    await sendUserActionEmail({
+      to: result.membership.user.email,
+      purpose: result.accessLink.purpose,
+      rawToken: result.accessLink.rawToken,
+      expiresAt: result.accessLink.expiresAt,
+    });
+
+    sentAccessLink = {
+      purpose: result.accessLink.purpose,
+      expiresAt: result.accessLink.expiresAt,
+      sentTo: result.membership.user.email,
+    };
+  }
+
   return {
     user: serializeMembership(result.membership as never, branchMap),
-    accessLink: result.accessLink ? serializeAccessLink(result.accessLink) : null,
+    accessLink: sentAccessLink ? serializeAccessLink(sentAccessLink) : null,
   };
 }
 
@@ -620,9 +635,18 @@ export async function generateOrganizationUserAccessLink(
     return created;
   }, INTERACTIVE_TRANSACTION_OPTIONS);
 
-  return serializeAccessLink({
+  // Email the link after the transaction commits rather than returning the raw token in the API
+  // response — see sendUserActionEmail / serializeAccessLink for context.
+  await sendUserActionEmail({
+    to: membership.user.email,
     purpose,
     rawToken: token.rawToken,
     expiresAt: token.record.expiresAt,
+  });
+
+  return serializeAccessLink({
+    purpose,
+    expiresAt: token.record.expiresAt,
+    sentTo: membership.user.email,
   });
 }

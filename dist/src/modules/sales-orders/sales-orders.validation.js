@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rejectSalesOrderSchema = exports.updateSalesOrderSchema = exports.createSalesOrderSchema = exports.salesOrderQuerySchema = void 0;
+exports.assignDriverSchema = exports.rejectSalesOrderSchema = exports.updateSalesOrderSchema = exports.createSalesOrderSchema = exports.salesOrderQuerySchema = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
@@ -46,4 +46,7 @@ exports.updateSalesOrderSchema = zod_1.z.object({
 });
 exports.rejectSalesOrderSchema = zod_1.z.object({
     rejectionReason: validation_1.trimmedString,
+});
+exports.assignDriverSchema = zod_1.z.object({
+    driverId: validation_1.trimmedString,
 });

@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.driverOrdersRouter = void 0;
+const express_1 = require("express");
+const driverAuth_middleware_1 = require("../../middlewares/driverAuth.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const driver_orders_controller_1 = require("./driver-orders.controller");
+exports.driverOrdersRouter = (0, express_1.Router)();
+exports.driverOrdersRouter.use(driverAuth_middleware_1.authenticateDriver);
+exports.driverOrdersRouter.get("/orders", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.listDriverOrdersController));
+exports.driverOrdersRouter.post("/orders/:id/pickup", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.pickupDriverOrderController));
+exports.driverOrdersRouter.post("/orders/:id/deliver", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.deliverDriverOrderController));

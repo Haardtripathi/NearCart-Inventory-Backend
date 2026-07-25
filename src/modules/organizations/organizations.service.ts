@@ -10,7 +10,7 @@ import {
 import { prisma } from "../../config/prisma";
 import type { DbClient } from "../../types/prisma";
 import { ApiError } from "../../utils/ApiError";
-import { buildUserActionLink, createUserActionToken } from "../../utils/userActionTokens";
+import { createUserActionToken, sendUserActionEmail } from "../../utils/userActionTokens";
 import { slugify } from "../../utils/slug";
 import { assertIndustryExists, assertOrganizationExists } from "../../utils/guards";
 import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
@@ -754,11 +754,13 @@ export async function createOrganizationWithResolvedOwner(
       preferredLanguage: options.owner.preferredLanguage,
       requiresAccountSetup: options.ownerRequiresAccountSetup,
     },
+    // NOTE: `rawToken` here is only ever meant to travel to `sendUserActionEmail` (called by this
+    // function's callers after their transaction commits) — it must never be forwarded verbatim
+    // into an API response. See `sendUserActionEmail` in utils/userActionTokens.ts for why.
     ownerAccessLink: ownerAccessLink
       ? {
           purpose: UserActionTokenPurpose.ACCOUNT_SETUP,
-          token: ownerAccessLink.rawToken,
-          url: buildUserActionLink("/account-setup", ownerAccessLink.rawToken),
+          rawToken: ownerAccessLink.rawToken,
           expiresAt: ownerAccessLink.record.expiresAt,
         }
       : null,
@@ -772,26 +774,46 @@ export async function createOrganization(
 ) {
   const industry = await assertIndustryExists(prisma, input.primaryIndustryId);
 
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const ownerResolution = await resolveOrganizationOwner(tx, currentUserId, currentRole, input);
-    const created = await createOrganizationWithResolvedOwner(tx, input, {
+    return createOrganizationWithResolvedOwner(tx, input, {
       actorUserId: currentUserId,
       primaryIndustry: industry,
       owner: ownerResolution.owner,
       ownerRequiresAccountSetup: ownerResolution.requiresAccountSetup,
     });
-
-    return {
-      ...created.organization,
-      firstBranch: created.firstBranch,
-      primaryIndustry: created.primaryIndustry,
-      ownerUser: created.ownerUser,
-      ownerAccessLink: created.ownerAccessLink,
-    };
   }, {
     maxWait: 10_000,
     timeout: 30_000,
   });
+
+  let ownerAccessLinkSummary: { purpose: UserActionTokenPurpose; expiresAt: Date; sentTo: string } | null = null;
+
+  if (created.ownerAccessLink) {
+    // Email the setup link rather than returning the raw token in the API response — see
+    // sendUserActionEmail for context. Sent after the transaction commits so a slow/unavailable
+    // SMTP provider never holds a DB transaction open.
+    await sendUserActionEmail({
+      to: created.ownerUser.email,
+      purpose: created.ownerAccessLink.purpose,
+      rawToken: created.ownerAccessLink.rawToken,
+      expiresAt: created.ownerAccessLink.expiresAt,
+    });
+
+    ownerAccessLinkSummary = {
+      purpose: created.ownerAccessLink.purpose,
+      expiresAt: created.ownerAccessLink.expiresAt,
+      sentTo: created.ownerUser.email,
+    };
+  }
+
+  return {
+    ...created.organization,
+    firstBranch: created.firstBranch,
+    primaryIndustry: created.primaryIndustry,
+    ownerUser: created.ownerUser,
+    ownerAccessLink: ownerAccessLinkSummary,
+  };
 }
 
 export async function getMyOrganizations(

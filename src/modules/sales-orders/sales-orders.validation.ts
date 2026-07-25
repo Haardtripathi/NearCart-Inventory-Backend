@@ -55,3 +55,7 @@ export const updateSalesOrderSchema = z.object({
 export const rejectSalesOrderSchema = z.object({
   rejectionReason: trimmedString,
 });
+
+export const assignDriverSchema = z.object({
+  driverId: trimmedString,
+});

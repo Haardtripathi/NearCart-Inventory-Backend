@@ -15,6 +15,13 @@ async function authenticate(req, _res, next) {
     try {
         const token = authorization.replace("Bearer ", "").trim();
         const payload = (0, jwt_1.verifyAuthToken)(token);
+        // Driver tokens are signed with this same JWT_SECRET (see utils/driverJwt.ts) but carry a
+        // `driverId`/`type: "driver"` payload instead of `userId` — reject explicitly rather than
+        // relying on Prisma's implicit rejection of an `undefined` unique-where value, so a driver
+        // token can never be mistaken for a user token even if that incidental behavior changes.
+        if (!payload || typeof payload.userId !== "string" || !payload.userId) {
+            throw ApiError_1.ApiError.unauthorized("Invalid or expired token");
+        }
         const user = await prisma_1.prisma.user.findUnique({
             where: { id: payload.userId },
             select: {

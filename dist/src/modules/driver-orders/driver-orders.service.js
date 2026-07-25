@@ -93,27 +93,39 @@ async function pickupDriverOrder(driverId, orderId) {
     if (order.status !== client_1.SalesOrderStatus.READY) {
         throw ApiError_1.ApiError.badRequest("Only orders that are READY can be picked up");
     }
-    const updated = await prisma_1.prisma.salesOrder.update({
-        where: { id: orderId },
-        data: {
-            status: client_1.SalesOrderStatus.OUT_FOR_DELIVERY,
-            pickedUpAt: new Date(),
-        },
-        include: {
-            items: true,
-            branch: true,
-            customer: true,
-            organization: true,
-        },
-    });
-    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
-        organizationId: order.organizationId,
-        action: client_1.AuditAction.ORDER_PICKUP,
-        entityType: "SalesOrder",
-        entityId: order.id,
-        before: { status: order.status },
-        after: { status: updated.status, pickedUpAt: updated.pickedUpAt },
-        meta: { driverId },
+    const updated = await prisma_1.prisma.$transaction(async (tx) => {
+        // Guard against two concurrent pickup calls for the same order (e.g. a flaky mobile client
+        // retrying the request): the WHERE clause's status + assignedDriverId checks are evaluated
+        // atomically by Postgres as part of the UPDATE, so only the first caller can win.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, assignedDriverId: driverId, status: client_1.SalesOrderStatus.READY },
+            data: {
+                status: client_1.SalesOrderStatus.OUT_FOR_DELIVERY,
+                pickedUpAt: new Date(),
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer READY — it may have already been picked up");
+        }
+        const result = await tx.salesOrder.findUniqueOrThrow({
+            where: { id: orderId },
+            include: {
+                items: true,
+                branch: true,
+                customer: true,
+                organization: true,
+            },
+        });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId: order.organizationId,
+            action: client_1.AuditAction.ORDER_PICKUP,
+            entityType: "SalesOrder",
+            entityId: order.id,
+            before: { status: order.status },
+            after: { status: result.status, pickedUpAt: result.pickedUpAt },
+            meta: { driverId },
+        });
+        return result;
     });
     return serializeDriverOrder(updated);
 }
@@ -122,27 +134,38 @@ async function deliverDriverOrder(driverId, orderId) {
     if (order.status !== client_1.SalesOrderStatus.OUT_FOR_DELIVERY) {
         throw ApiError_1.ApiError.badRequest("Only orders that are OUT_FOR_DELIVERY can be marked delivered");
     }
-    const updated = await prisma_1.prisma.salesOrder.update({
-        where: { id: orderId },
-        data: {
-            status: client_1.SalesOrderStatus.DELIVERED,
-            deliveredAt: new Date(),
-        },
-        include: {
-            items: true,
-            branch: true,
-            customer: true,
-            organization: true,
-        },
-    });
-    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
-        organizationId: order.organizationId,
-        action: client_1.AuditAction.ORDER_DELIVER,
-        entityType: "SalesOrder",
-        entityId: order.id,
-        before: { status: order.status },
-        after: { status: updated.status, deliveredAt: updated.deliveredAt },
-        meta: { driverId },
+    const updated = await prisma_1.prisma.$transaction(async (tx) => {
+        // Guard against two concurrent deliver calls for the same order — see pickupDriverOrder
+        // above for the same pattern/rationale.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, assignedDriverId: driverId, status: client_1.SalesOrderStatus.OUT_FOR_DELIVERY },
+            data: {
+                status: client_1.SalesOrderStatus.DELIVERED,
+                deliveredAt: new Date(),
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer OUT_FOR_DELIVERY — it may have already been delivered");
+        }
+        const result = await tx.salesOrder.findUniqueOrThrow({
+            where: { id: orderId },
+            include: {
+                items: true,
+                branch: true,
+                customer: true,
+                organization: true,
+            },
+        });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId: order.organizationId,
+            action: client_1.AuditAction.ORDER_DELIVER,
+            entityType: "SalesOrder",
+            entityId: order.id,
+            before: { status: order.status },
+            after: { status: result.status, deliveredAt: result.deliveredAt },
+            meta: { driverId },
+        });
+        return result;
     });
     return serializeDriverOrder(updated);
 }

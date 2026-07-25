@@ -733,12 +733,12 @@ interface CreateBridgedSalesOrderInput {
     name: string;
     phone: string;
     addressLine?: string;
-    latitude?: number;
-    longitude?: number;
+    latitude?: number | null;
+    longitude?: number | null;
   };
   items: Array<{
     inventoryProductId: string;
-    inventoryVariantId: string;
+    inventoryVariantId: string | null;
     quantity: string | number;
     unitPrice: string | number;
   }>;
@@ -838,19 +838,37 @@ export async function createBridgedSalesOrder(
   }> = [];
 
   for (const item of input.items) {
-    const variant = await prisma.productVariant.findFirst({
-      where: {
-        id: item.inventoryVariantId,
-        organizationId,
-        deletedAt: null,
-        product: { deletedAt: null },
-      },
-      include: { product: true },
-    });
+    // `inventoryVariantId` is nullable: NearCart sends null for cart items that were validated
+    // without pinning a specific variant. Fall back to the product's default (or first active)
+    // variant rather than requiring an exact id match in that case.
+    const variant = item.inventoryVariantId
+      ? await prisma.productVariant.findFirst({
+          where: {
+            id: item.inventoryVariantId,
+            organizationId,
+            deletedAt: null,
+            product: { deletedAt: null },
+          },
+          include: { product: true },
+        })
+      : await prisma.productVariant.findFirst({
+          where: {
+            productId: item.inventoryProductId,
+            organizationId,
+            deletedAt: null,
+            product: { deletedAt: null },
+          },
+          include: { product: true },
+          orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+        });
 
-    if (!variant || variant.productId !== item.inventoryProductId) {
+    if (
+      !variant ||
+      variant.productId !== item.inventoryProductId ||
+      (item.inventoryVariantId && variant.id !== item.inventoryVariantId)
+    ) {
       throw ApiError.badRequest(
-        `Product/variant ${item.inventoryProductId}/${item.inventoryVariantId} was not found in this organization's catalog`,
+        `Product/variant ${item.inventoryProductId}/${item.inventoryVariantId ?? "(default)"} was not found in this organization's catalog`,
       );
     }
 

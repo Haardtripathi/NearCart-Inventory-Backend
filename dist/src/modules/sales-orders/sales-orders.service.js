@@ -123,6 +123,9 @@ async function listSalesOrders(organizationId, query) {
             include: {
                 branch: true,
                 customer: true,
+                assignedDriver: {
+                    select: { id: true, fullName: true, phone: true, vehicleType: true },
+                },
             },
             orderBy: {
                 createdAt: "desc",
@@ -462,23 +465,33 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
     if (order.status !== client_1.SalesOrderStatus.CONFIRMED) {
         throw ApiError_1.ApiError.badRequest("Only confirmed orders can be marked ready");
     }
-    const updated = await prisma_1.prisma.salesOrder.update({
-        where: { id: orderId },
-        data: {
-            status: client_1.SalesOrderStatus.READY,
-            readyAt: new Date(),
-            readyById: actorUserId,
-        },
-    });
-    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
-        organizationId,
-        actorUserId,
-        action: client_1.AuditAction.ORDER_READY,
-        entityType: "SalesOrder",
-        entityId: updated.id,
-        before: order,
-        after: updated,
-    });
+    const updated = await prisma_1.prisma.$transaction(async (tx) => {
+        // Guard against a concurrent request racing this same transition: the WHERE clause's
+        // status check is evaluated atomically by Postgres as part of the UPDATE, so only one
+        // concurrent caller can ever flip CONFIRMED -> READY for this row.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, organizationId, status: client_1.SalesOrderStatus.CONFIRMED },
+            data: {
+                status: client_1.SalesOrderStatus.READY,
+                readyAt: new Date(),
+                readyById: actorUserId,
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer confirmed — it may have already been marked ready");
+        }
+        const result = await tx.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId,
+            actorUserId,
+            action: client_1.AuditAction.ORDER_READY,
+            entityType: "SalesOrder",
+            entityId: result.id,
+            before: order,
+            after: result,
+        });
+        return result;
+    }, INTERACTIVE_TRANSACTION_OPTIONS);
     return updated;
 }
 /**
@@ -503,13 +516,23 @@ async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, dr
         throw ApiError_1.ApiError.badRequest("Only verified drivers can be assigned to orders");
     }
     const updated = await prisma_1.prisma.$transaction(async (tx) => {
-        const result = await tx.salesOrder.update({
-            where: { id: orderId },
+        // Guard against a concurrent request racing this same transition (e.g. two staff members
+        // assigning different drivers at once): the WHERE clause's status check is evaluated
+        // atomically by Postgres as part of the UPDATE, so only one concurrent caller can ever win
+        // the READY -> assigned transition for this row.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, organizationId, status: client_1.SalesOrderStatus.READY },
             data: {
                 assignedDriverId: driverId,
                 assignedById: actorUserId,
                 assignedAt: new Date(),
             },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer READY — it may have already been assigned or its state changed");
+        }
+        const result = await tx.salesOrder.findUniqueOrThrow({
+            where: { id: orderId },
             include: {
                 items: true,
                 branch: true,

@@ -643,17 +643,33 @@ async function createBridgedSalesOrder(organizationId, input) {
     let subtotal = (0, decimal_1.toDecimal)(0);
     const preparedItems = [];
     for (const item of input.items) {
-        const variant = await prisma_1.prisma.productVariant.findFirst({
-            where: {
-                id: item.inventoryVariantId,
-                organizationId,
-                deletedAt: null,
-                product: { deletedAt: null },
-            },
-            include: { product: true },
-        });
-        if (!variant || variant.productId !== item.inventoryProductId) {
-            throw ApiError_1.ApiError.badRequest(`Product/variant ${item.inventoryProductId}/${item.inventoryVariantId} was not found in this organization's catalog`);
+        // `inventoryVariantId` is nullable: NearCart sends null for cart items that were validated
+        // without pinning a specific variant. Fall back to the product's default (or first active)
+        // variant rather than requiring an exact id match in that case.
+        const variant = item.inventoryVariantId
+            ? await prisma_1.prisma.productVariant.findFirst({
+                where: {
+                    id: item.inventoryVariantId,
+                    organizationId,
+                    deletedAt: null,
+                    product: { deletedAt: null },
+                },
+                include: { product: true },
+            })
+            : await prisma_1.prisma.productVariant.findFirst({
+                where: {
+                    productId: item.inventoryProductId,
+                    organizationId,
+                    deletedAt: null,
+                    product: { deletedAt: null },
+                },
+                include: { product: true },
+                orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+            });
+        if (!variant ||
+            variant.productId !== item.inventoryProductId ||
+            (item.inventoryVariantId && variant.id !== item.inventoryVariantId)) {
+            throw ApiError_1.ApiError.badRequest(`Product/variant ${item.inventoryProductId}/${item.inventoryVariantId ?? "(default)"} was not found in this organization's catalog`);
         }
         const quantity = (0, decimal_1.toDecimal)(item.quantity);
         const unitPrice = (0, decimal_1.toDecimal)(item.unitPrice);

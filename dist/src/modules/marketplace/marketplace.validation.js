@@ -34,12 +34,19 @@ const bridgedSalesOrderCustomerSchema = zod_1.z.object({
     name: validation_1.trimmedString,
     phone: validation_1.trimmedString,
     addressLine: validation_1.optionalTrimmedString,
-    latitude: zod_1.z.coerce.number().min(-90).max(90).optional(),
-    longitude: zod_1.z.coerce.number().min(-180).max(180).optional(),
+    // .nullable() matters here: NearCart sends `latitude: order.latitude` verbatim, which is a
+    // nullable column (unknown location) — without .nullable(), z.coerce.number() would coerce a
+    // literal `null` to 0 (Number(null) === 0) instead of rejecting/preserving it as unknown.
+    latitude: zod_1.z.coerce.number().min(-90).max(90).nullable().optional(),
+    longitude: zod_1.z.coerce.number().min(-180).max(180).nullable().optional(),
 });
 const bridgedSalesOrderItemSchema = zod_1.z.object({
     inventoryProductId: validation_1.trimmedString,
-    inventoryVariantId: validation_1.trimmedString,
+    // Nullable: NearCart sends `inventoryVariantId: item.inventoryVariantId ?? null` for cart items
+    // that were validated without pinning a specific variant (see NearCart's
+    // public-storefront.service.ts: `variantId: item.variantId || null`). When absent, the service
+    // resolves the product's default/first variant instead of requiring an exact id match.
+    inventoryVariantId: validation_1.nullableTrimmedString,
     quantity: validation_1.decimalInputSchema,
     unitPrice: validation_1.decimalInputSchema,
 });

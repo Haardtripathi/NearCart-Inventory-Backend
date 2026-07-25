@@ -629,7 +629,14 @@ async function findOrCreateBridgeCustomer(organizationId, customerInput) {
  */
 async function createBridgedSalesOrder(organizationId, input) {
     await (0, guards_1.assertOrganizationExists)(prisma_1.prisma, organizationId);
-    await (0, guards_1.assertBranchInOrg)(prisma_1.prisma, organizationId, input.branchId);
+    const branch = await (0, guards_1.assertBranchInOrg)(prisma_1.prisma, organizationId, input.branchId);
+    // assertBranchInOrg only checks org membership + not-deleted (it's shared with
+    // purchases/stock-transfers/sales-orders, where staff may deliberately write against a
+    // temporarily-inactive branch). Every *read* endpoint in this file requires isActive, so the
+    // write path should too — otherwise a deactivated branch could still receive bridged orders.
+    if (!branch.isActive) {
+        throw ApiError_1.ApiError.badRequest("This branch is not currently accepting orders");
+    }
     const existing = await prisma_1.prisma.salesOrder.findUnique({
         where: { externalOrderId: input.externalOrderId },
     });

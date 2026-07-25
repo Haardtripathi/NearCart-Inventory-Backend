@@ -64,17 +64,30 @@ async function registerDriver(input) {
         }
     }
     const passwordHash = await bcrypt_1.default.hash(input.password, 12);
-    const driver = await prisma_1.prisma.driver.create({
-        data: {
-            fullName: input.fullName.trim(),
-            phone,
-            email: email ?? null,
-            passwordHash,
-            vehicleType: input.vehicleType.trim(),
-            vehicleNumber: input.vehicleNumber.trim(),
-            status: client_1.DriverStatus.PENDING_VERIFICATION,
-        },
-    });
+    let driver;
+    try {
+        driver = await prisma_1.prisma.driver.create({
+            data: {
+                fullName: input.fullName.trim(),
+                phone,
+                email: email ?? null,
+                passwordHash,
+                vehicleType: input.vehicleType.trim(),
+                vehicleNumber: input.vehicleNumber.trim(),
+                status: client_1.DriverStatus.PENDING_VERIFICATION,
+            },
+        });
+    }
+    catch (error) {
+        // Narrow race: two concurrent registrations for the same phone/email both pass the
+        // findUnique checks above before either commits. The @unique DB constraints already prevent
+        // duplicate rows either way — this just turns the resulting P2002 into the same friendly
+        // conflict response the pre-check above gives, instead of a raw 500.
+        if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+            throw ApiError_1.ApiError.conflict("A driver account with this phone number or email already exists");
+        }
+        throw error;
+    }
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         action: client_1.AuditAction.DRIVER_REGISTER,
         entityType: "Driver",

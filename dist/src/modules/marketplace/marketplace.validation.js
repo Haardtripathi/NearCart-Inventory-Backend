@@ -11,7 +11,10 @@ exports.marketplaceCatalogQuerySchema = validation_1.paginationQuerySchema.exten
     branchId: validation_1.trimmedString,
     category: validation_1.optionalTrimmedString,
     brand: validation_1.optionalTrimmedString,
-    inStockOnly: zod_1.z.coerce.boolean().optional(),
+    // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+    // "false" as truthy (Boolean("false") === true), which would silently invert an explicit
+    // `inStockOnly=false` from a caller instead of respecting it.
+    inStockOnly: validation_1.strictBooleanQueryParam,
     sort: zod_1.z.enum(["featured", "name-asc", "price-asc", "price-desc", "newest"]).default("featured"),
     lang: validation_1.optionalTrimmedString,
 });
@@ -24,7 +27,12 @@ exports.marketplaceAvailabilitySchema = zod_1.z.object({
     items: zod_1.z
         .array(zod_1.z.object({
         productId: validation_1.trimmedString,
-        variantId: validation_1.optionalTrimmedString,
+        // Nullable: NearCart sends `variantId: item.variantId || null` for cart items that
+        // weren't validated against a specific variant (public-storefront.service.ts) — the same
+        // pattern as `inventoryVariantId` in the bridged sales-order schema below.
+        // optionalTrimmedString would reject a literal `null` (only string | undefined pass
+        // z.string().optional()), rejecting this exact real request shape with a 400.
+        variantId: validation_1.nullableTrimmedString,
         quantity: zod_1.z.coerce.number().positive(),
     }))
         .min(1),
@@ -56,7 +64,9 @@ exports.createBridgedSalesOrderSchema = zod_1.z.object({
     externalOrderNumber: validation_1.optionalTrimmedString,
     customer: bridgedSalesOrderCustomerSchema,
     items: zod_1.z.array(bridgedSalesOrderItemSchema).min(1),
-    notes: validation_1.optionalTrimmedString,
+    // Nullable: NearCart's Order.notes column is `String?` — a caller forwarding it verbatim would
+    // send a literal `null` when no notes were given, which optionalTrimmedString would reject.
+    notes: validation_1.nullableTrimmedString,
 });
 exports.externalOrderIdParamSchema = zod_1.z.object({
     externalOrderId: validation_1.trimmedString,

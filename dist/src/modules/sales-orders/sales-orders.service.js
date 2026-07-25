@@ -310,6 +310,22 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
         throw ApiError_1.ApiError.badRequest("Only draft or pending orders can be confirmed");
     }
     const confirmed = await prisma_1.prisma.$transaction(async (tx) => {
+        // Guard against a concurrent confirm racing this same transition (e.g. a double-click or a
+        // duplicated webhook retry): claim the row atomically before touching stock — Postgres locks
+        // the row on this UPDATE, so a second concurrent transaction's updateMany blocks until this
+        // one commits, then re-evaluates the status predicate against 0 matching rows and safely
+        // no-ops instead of also decrementing stock for the same order.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
+            data: {
+                status: client_1.SalesOrderStatus.CONFIRMED,
+                confirmedAt: new Date(),
+                confirmedById: actorUserId,
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer draft/pending — it may have already been confirmed");
+        }
         for (const item of order.items) {
             await (0, inventory_service_1.applyStockMovement)(tx, {
                 organizationId,
@@ -324,13 +340,8 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
                 createdById: actorUserId,
             });
         }
-        const updated = await tx.salesOrder.update({
+        const updated = await tx.salesOrder.findUniqueOrThrow({
             where: { id: orderId },
-            data: {
-                status: client_1.SalesOrderStatus.CONFIRMED,
-                confirmedAt: new Date(),
-                confirmedById: actorUserId,
-            },
             include: {
                 items: true,
                 branch: true,

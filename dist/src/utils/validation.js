@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.languageCodeSchema = exports.idParamSchema = exports.optionalDateInputSchema = exports.dateInputSchema = exports.optionalDecimalInputSchema = exports.decimalInputSchema = exports.paginationQuerySchema = exports.optionalJsonSchema = exports.jsonValueSchema = exports.optionalEmailSchema = exports.nullableTrimmedString = exports.optionalTrimmedString = exports.trimmedString = void 0;
+exports.languageCodeSchema = exports.idParamSchema = exports.optionalDateInputSchema = exports.dateInputSchema = exports.optionalDecimalInputSchema = exports.decimalInputSchema = exports.paginationQuerySchema = exports.optionalJsonSchema = exports.jsonValueSchema = exports.optionalEmailSchema = exports.strictBooleanQueryParam = exports.nullableTrimmedString = exports.optionalTrimmedString = exports.trimmedString = void 0;
 exports.uniqueLanguageArraySchema = uniqueLanguageArraySchema;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
@@ -19,6 +19,21 @@ exports.nullableTrimmedString = zod_1.z.preprocess((value) => {
     const trimmed = value.trim();
     return trimmed.length === 0 ? null : trimmed;
 }, zod_1.z.string().trim().min(1).nullable().optional());
+// `z.coerce.boolean()` is a common Zod footgun for query params: it does `Boolean(value)`, so the
+// literal string "false" (any non-empty string) coerces to `true` instead of `false`. Use this for
+// any boolean query/body field where a caller might legitimately send an explicit `false`.
+exports.strictBooleanQueryParam = zod_1.z.preprocess((value) => {
+    if (typeof value === "boolean") {
+        return value;
+    }
+    if (value === "true") {
+        return true;
+    }
+    if (value === "false") {
+        return false;
+    }
+    return value;
+}, zod_1.z.boolean().optional());
 exports.optionalEmailSchema = zod_1.z.preprocess((value) => {
     if (typeof value !== "string") {
         return value;

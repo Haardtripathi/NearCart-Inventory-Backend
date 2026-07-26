@@ -17,7 +17,7 @@ import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations
 import { toJsonValue, toNullableJsonValue } from "../../utils/json";
 import { generateUniqueBranchCode } from "../../utils/branchCode";
 import { createLocaleContext, type LocaleContext, serializeLocalizedEntity } from "../../utils/localization";
-import { DEFAULT_ENABLED_PAGES, SIDEBAR_MODULE_CATALOG } from "../../constants/pageVisibility";
+import { DEFAULT_ENABLED_PAGES, REQUIRED_MODULE_KEYS, SIDEBAR_MODULE_CATALOG } from "../../constants/pageVisibility";
 import { createAuditLog } from "../audit/audit.service";
 
 export interface CreateOrganizationInput {
@@ -1093,6 +1093,10 @@ function mergeEnabledPages(stored: unknown): Record<string, boolean> {
     }
   }
 
+  for (const requiredKey of REQUIRED_MODULE_KEYS) {
+    merged[requiredKey] = true;
+  }
+
   return merged;
 }
 
@@ -1128,6 +1132,9 @@ export async function updateEnabledPages(
 
   const before = mergeEnabledPages(organization.enabledPages);
   const after = { ...before, ...patch };
+  for (const requiredKey of REQUIRED_MODULE_KEYS) {
+    after[requiredKey] = true;
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.organization.update({

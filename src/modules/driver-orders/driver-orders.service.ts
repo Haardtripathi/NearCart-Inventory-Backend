@@ -34,10 +34,12 @@ function serializeDriverOrder(order: Awaited<ReturnType<typeof findAssignedOrder
           phone: order.customer.phone,
         }
       : null,
-    // Delivery address / lat-long (when available) is whatever shape the order-creating flow
-    // stored on the customer record — this schema has no dedicated SalesOrder delivery-address
-    // field, so the customer's address JSON is forwarded as-is.
-    deliveryAddress: order.customer?.address ?? null,
+    // Structured `{ addressLine, latitude, longitude }` populated at bridge order-creation time
+    // (see marketplace.service.ts createBridgedSalesOrder). Falls back to the customer's generic
+    // address only for pre-migration rows where deliveryAddress is still null — the customer's
+    // address can be stale/wrong for a repeat customer ordering somewhere new, so this fallback
+    // is a courtesy for old data, not the primary source going forward.
+    deliveryAddress: order.deliveryAddress ?? order.customer?.address ?? null,
     items: order.items.map((item) => ({
       productName: item.productNameSnapshot,
       variantName: item.variantNameSnapshot,

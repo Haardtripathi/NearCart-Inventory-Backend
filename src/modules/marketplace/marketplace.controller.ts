@@ -6,8 +6,10 @@ import {
   parseAcceptLanguageHeader,
 } from "../../utils/localization";
 import {
+  cancelBridgedSalesOrder,
   checkMarketplaceAvailability,
   createBridgedSalesOrder,
+  getBranchActiveOrderCount,
   getMarketplaceCatalogProduct,
   getSalesOrderByExternalId,
   listMarketplaceBrands,
@@ -100,4 +102,14 @@ export async function createBridgedSalesOrderController(req: Request, res: Respo
 export async function getSalesOrderByExternalIdController(req: Request, res: Response) {
   const data = await getSalesOrderByExternalId(req.params.externalOrderId!);
   return sendSuccess(res, 200, "Sales order fetched successfully", data);
+}
+
+export async function cancelBridgedSalesOrderController(req: Request, res: Response) {
+  const data = await cancelBridgedSalesOrder(req.params.organizationId!, req.params.externalOrderId!);
+  return sendSuccess(res, 200, "Sales order cancelled successfully", data);
+}
+
+export async function getBranchActiveOrderCountController(req: Request, res: Response) {
+  const data = await getBranchActiveOrderCount(req.params.organizationId!, req.params.branchId!);
+  return sendSuccess(res, 200, "Branch active order count fetched successfully", data);
 }

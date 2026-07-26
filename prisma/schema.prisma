@@ -155,6 +155,15 @@ enum AuditAction {
   DRIVER_REGISTER
   DRIVER_VERIFY
   DRIVER_SUSPEND
+  // Neither of these existed before — cancelSalesOrder previously logged plain UPDATE for every
+  // cancel (staff and otherwise), unlike every other transition (CONFIRM/REJECT/DELIVER/READY),
+  // which all have dedicated actions. Splitting into a staff-initiated action and a
+  // bridge-initiated one both fixes that inconsistency and gives the marketplace bridge's new
+  // cancel endpoint (PATCH .../sales-orders/by-external/:externalOrderId/cancel) reporting
+  // granularity distinct from staff-initiated cancels, per PHASE1_REQUIREMENTS.md's bridge-cancel
+  // work.
+  ORDER_CANCEL
+  ORDER_CANCEL_BRIDGE
 }
 
 enum DriverStatus {
@@ -986,6 +995,13 @@ model SalesOrder {
   total               Decimal          @default(0) @db.Decimal(18, 4)
   notes               String?
   rejectionReason     String?
+  // Structured per-order delivery address, shape `{ addressLine, latitude, longitude }`
+  // (all nullable). Populated at bridge order-creation time from the marketplace bridge's
+  // customer payload (see marketplace.service.ts createBridgedSalesOrder) — kept separate from
+  // Customer.address since a returning customer may order to a different address each time.
+  // Rows created before this column existed have deliveryAddress: null; readers (e.g.
+  // driver-orders.serializeDriverOrder) should fall back to customer.address for those.
+  deliveryAddress     Json?
   // Bridge fields: set when this order originated from NearCart's customer-facing app via the
   // marketplace bridge (see modules/marketplace). externalOrderId is NearCart's Order.id and is
   // unique so a replayed push is idempotent (see marketplace.service.ts createBridgedSalesOrder).
@@ -1018,6 +1034,11 @@ model SalesOrder {
   @@unique([organizationId, orderNumber])
   @@index([organizationId, status])
   @@index([assignedDriverId, status])
+  // Branch-scoped status counting (e.g. the marketplace bridge's active-order-count endpoint)
+  // filters by branchId + status without organizationId in the WHERE — the existing
+  // [organizationId, status] index above doesn't help there since branchId isn't its leading
+  // column, so add a dedicated compound index.
+  @@index([branchId, status])
 }
 
 // Drivers are a platform-wide pool, independent of User/OrganizationMembership (not tied to any

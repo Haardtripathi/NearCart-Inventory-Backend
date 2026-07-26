@@ -4,6 +4,7 @@ import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { assertBranchInOrg, assertOrganizationExists } from "../../utils/guards";
 import { toDecimal } from "../../utils/decimal";
+import { toNullableJsonValue } from "../../utils/json";
 import {
   createLocaleContext,
   type LocaleContext,
@@ -13,6 +14,7 @@ import { generateDocumentNumber } from "../../utils/numbering";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { getAvailableStock, isLowStock } from "../../utils/stock";
 import { createAuditLog } from "../audit/audit.service";
+import { cancelSalesOrder } from "../sales-orders/sales-orders.service";
 
 type RequestedLocaleOptions = {
   requestedLanguage?: LanguageCode | null;
@@ -909,17 +911,19 @@ export async function createBridgedSalesOrder(
     });
   }
 
-  // The delivery address for this specific order is stored on the order's notes rather than
-  // overwriting the customer's CRM address (a returning customer may order to a different address
-  // each time) — this is an implementation detail, not part of the documented wire contract.
-  const deliveryAddressNote = input.customer.addressLine
-    ? `Delivery address: ${input.customer.addressLine}${
-        input.customer.latitude != null && input.customer.longitude != null
-          ? ` (${input.customer.latitude}, ${input.customer.longitude})`
-          : ""
-      }`
-    : null;
-  const notes = [input.notes, deliveryAddressNote].filter(Boolean).join("\n") || null;
+  // Structured per-order delivery address (SalesOrder.deliveryAddress, Json?) — kept separate
+  // from Customer.address since a returning customer may order to a different address each
+  // time. Previously this was appended as free text onto `notes` (see git history); notes is now
+  // reserved for actual free-text notes only, populated straight from input.notes.
+  const deliveryAddress =
+    input.customer.addressLine || input.customer.latitude != null || input.customer.longitude != null
+      ? {
+          addressLine: input.customer.addressLine ?? null,
+          latitude: input.customer.latitude ?? null,
+          longitude: input.customer.longitude ?? null,
+        }
+      : null;
+  const notes = input.notes ?? null;
 
   try {
     const created = await prisma.$transaction(async (tx) => {
@@ -934,6 +938,7 @@ export async function createBridgedSalesOrder(
           externalOrderId: input.externalOrderId,
           externalOrderNumber: input.externalOrderNumber ?? null,
           notes,
+          deliveryAddress: toNullableJsonValue(deliveryAddress),
           subtotal,
           taxTotal: toDecimal(0),
           discountTotal: toDecimal(0),
@@ -987,4 +992,76 @@ export async function getSalesOrderByExternalId(externalOrderId: string) {
   }
 
   return summarizeSalesOrder(order);
+}
+
+/**
+ * Cancels a bridged SalesOrder on behalf of a NearCart customer-app cancel, looked up by
+ * externalOrderId (same lookup pattern as getSalesOrderByExternalId above). Routes through the
+ * existing staff-facing cancelSalesOrder in sales-orders.service.ts rather than duplicating its
+ * stock-reversal/audit logic — passing `actorUserId: null` since this is a service-to-service
+ * call, not an authenticated staff user (see the doc comment on cancelSalesOrder itself for why
+ * null rather than a fabricated actor id).
+ */
+export async function cancelBridgedSalesOrder(organizationId: string, externalOrderId: string) {
+  const order = await prisma.salesOrder.findUnique({
+    where: { externalOrderId },
+  });
+
+  if (!order || order.organizationId !== organizationId) {
+    throw ApiError.notFound("No sales order found for this externalOrderId in this organization");
+  }
+
+  let cancelled;
+  try {
+    cancelled = await cancelSalesOrder(order.organizationId, order.id, null);
+  } catch (error) {
+    // cancelSalesOrder throws ApiError.badRequest (400) for its two "already closed" /
+    // "delivered or returned" guards — appropriate for a staff UI showing a form validation-style
+    // error, but not for this bridge endpoint, which the contract specifies should respond 409 on
+    // a blocked cancel (a state conflict, not a malformed request). Remap here rather than
+    // touching cancelSalesOrder's own status codes, since that would also change the
+    // staff-facing /:id/cancel endpoint's behavior.
+    if (error instanceof ApiError && error.statusCode === 400) {
+      throw ApiError.conflict(error.message);
+    }
+
+    throw error;
+  }
+
+  return {
+    salesOrderId: cancelled.id,
+    orderNumber: cancelled.orderNumber,
+    status: cancelled.status,
+    // SalesOrder has no dedicated cancelledAt column — updatedAt is set by Prisma's @updatedAt
+    // on the same update that flips status to CANCELLED, so it's an accurate stand-in here.
+    cancelledAt: cancelled.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * Count of "active" (not yet in a terminal state) SalesOrders for a branch — used by the
+ * marketplace bridge as a queue-depth signal (e.g. NearCart showing "busy" status for a shop).
+ * assertBranchInOrg both confirms the branch exists and belongs to this organization, and is the
+ * same helper the rest of this module already uses for that check (404s if either is false).
+ */
+const INACTIVE_ORDER_STATUSES: SalesOrderStatus[] = [
+  SalesOrderStatus.DELIVERED,
+  SalesOrderStatus.CANCELLED,
+  SalesOrderStatus.REJECTED,
+  SalesOrderStatus.RETURNED,
+];
+
+export async function getBranchActiveOrderCount(organizationId: string, branchId: string) {
+  await assertOrganizationExists(prisma, organizationId);
+  await assertBranchInOrg(prisma, organizationId, branchId);
+
+  const activeOrderCount = await prisma.salesOrder.count({
+    where: {
+      organizationId,
+      branchId,
+      status: { notIn: INACTIVE_ORDER_STATUSES },
+    },
+  });
+
+  return { activeOrderCount };
 }

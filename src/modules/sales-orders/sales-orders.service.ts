@@ -502,7 +502,18 @@ export async function rejectSalesOrder(
   return updated;
 }
 
-export async function cancelSalesOrder(organizationId: string, orderId: string, actorUserId: string) {
+/**
+ * `actorUserId` is nullable: this is the one sales-order transition that can also be triggered
+ * by the marketplace bridge (see marketplace.service.ts cancelBridgedSalesOrder) rather than an
+ * authenticated staff user, and there is no sentinel "system" User row in this schema to fall
+ * back to — fabricating one would require a schema change of its own and would misrepresent the
+ * action as having been taken by a real account. Passing `null` here is the deliberate choice:
+ * `AuditLog.actorUserId` and `InventoryLedger.createdById` are both already nullable FKs, so a
+ * null actor round-trips cleanly, and the audit action (ORDER_CANCEL vs ORDER_CANCEL_BRIDGE,
+ * chosen below) plus the `meta` note is what actually distinguishes "cancelled via the customer
+ * app" for reporting — not a fake user id.
+ */
+export async function cancelSalesOrder(organizationId: string, orderId: string, actorUserId: string | null) {
   const order = await getSalesOrderById(organizationId, orderId);
 
   if (CLOSED_ORDER_STATUSES.includes(order.status)) {
@@ -526,7 +537,7 @@ export async function cancelSalesOrder(organizationId: string, orderId: string, 
           quantityDelta: item.quantity,
           unitCost: item.variant.costPrice,
           note: "Sales order cancelled",
-          createdById: actorUserId,
+          createdById: actorUserId ?? undefined,
         });
       }
     }
@@ -541,11 +552,16 @@ export async function cancelSalesOrder(organizationId: string, orderId: string, 
     await createAuditLog(tx, {
       organizationId,
       actorUserId,
-      action: AuditAction.UPDATE,
+      // Was plain AuditAction.UPDATE regardless of caller before this change — every other
+      // transition (CONFIRM/REJECT/DELIVER/READY) already had a dedicated action, cancel was the
+      // one exception. Fixed alongside adding the bridge distinction since both changes touch
+      // this exact line.
+      action: actorUserId ? AuditAction.ORDER_CANCEL : AuditAction.ORDER_CANCEL_BRIDGE,
       entityType: "SalesOrder",
       entityId: order.id,
       before: order,
       after: updated,
+      meta: actorUserId ? undefined : { source: "marketplace_bridge", note: "Cancelled via NearCart customer app" },
     });
 
     return updated;

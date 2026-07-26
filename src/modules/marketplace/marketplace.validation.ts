@@ -86,3 +86,13 @@ export const createBridgedSalesOrderSchema = z.object({
 export const externalOrderIdParamSchema = z.object({
   externalOrderId: trimmedString,
 });
+
+export const organizationExternalOrderIdParamSchema = z.object({
+  organizationId: trimmedString,
+  externalOrderId: trimmedString,
+});
+
+export const organizationBranchParamSchema = z.object({
+  organizationId: trimmedString,
+  branchId: trimmedString,
+});

@@ -1,7 +1,9 @@
-import { getMessaging } from "firebase-admin/messaging";
-
 import { prisma } from "../config/prisma";
-import { getFirebaseApp } from "../config/firebase";
+
+const EXPO_PUSH_API_URL = "https://exp.host/--/api/v2/push/send";
+// Expo's documented max messages per request — see
+// https://docs.expo.dev/push-notifications/sending-notifications/#push-tickets-request
+const EXPO_PUSH_BATCH_SIZE = 100;
 
 interface SendPushInput {
   tokens: string[];
@@ -10,65 +12,96 @@ interface SendPushInput {
   data?: Record<string, string>;
   // 'order_alert' is the loud/high-importance channel used for events that shouldn't be missed
   // (new order for shop staff, new assignment for a driver) — see each app's notification-channel
-  // setup.
+  // setup. The actual loud/distinct sound comes from that Android notification channel's own
+  // config (set once at channel-creation time on the client) — Android doesn't let a push payload
+  // override a channel's sound per-message, so this only affects iOS/the message-level `sound` field.
   channelId?: "default" | "order_alert";
 }
 
+interface ExpoPushTicket {
+  status: "ok" | "error";
+  id?: string;
+  message?: string;
+  details?: { error?: string };
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 /**
- * Thin wrapper over admin.messaging().sendEachForMulticast(). No-ops with a logged warning (not
- * a thrown error) when Firebase isn't configured yet, or when there are no tokens to send to.
+ * Sends via Expo's push API (https://exp.host/--/api/v2/push/send), not Firebase Admin directly.
  *
- * Bug fixed 2026-07-27 (found via audit, same class as the order-confirmation-sweep crash): every
- * caller of sendPushToDriver/sendPushToOrgStaff invokes it as `void sendPushToDriver(...)` /
- * `void sendPushToOrgStaff(...)` — fire-and-forget, with a comment right at the call site claiming
- * "a push failure must never fail order creation/assignment". That guarantee didn't actually hold:
- * this function had no try/catch, so a Firebase error (bad credentials, network blip, malformed
- * multicast payload, a `messaging/*` API error) rejected the promise, and with no `.catch()` at
- * any `void`-fired call site that becomes an unhandled promise rejection — which crashes the whole
- * process, exactly like the cron bug. Wrapping the send (and the stale-token cleanup) in try/catch
- * here, once, makes every current and future fire-and-forget caller safe by construction instead
- * of relying on each call site to remember `.catch()`.
+ * Fixed 2026-07-27: this previously called `admin.messaging().sendEachForMulticast()` with the
+ * tokens stored in `DeviceToken.expoPushToken` — but those are Expo push tokens
+ * (`ExponentPushToken[...]`), a format only Expo's own push relay understands. Firebase Admin
+ * expects raw FCM/APNs device registration tokens, which are a different value obtained via
+ * `Notifications.getDevicePushTokenAsync()`, not `getExpoPushTokenAsync()`. Sending an Expo token
+ * to Firebase Admin would silently fail (invalid-registration-token) for every single push. Since
+ * every mobile client in this family is Expo-managed, using Expo's push API directly is simpler
+ * and correct: no native FCM/APNs wiring needed client-side, no Firebase Admin credentials needed
+ * for this feature at all.
  *
- * The try/catch deliberately wraps `getFirebaseApp()` too, not just the send call: confirmed live
- * (fake/malformed FIREBASE_PRIVATE_KEY) that `initializeApp()`/`cert()` inside getFirebaseApp can
- * itself throw synchronously (`FirebaseAppError: Failed to parse private key`) — an earlier version
- * of this fix left that call outside the try block, which still let a bad-credentials crash through
- * on the very first push attempt after misconfigured Firebase env vars were deployed.
+ * No-ops with a logged warning (not a thrown error) when there are no tokens to send to. Network/
+ * API failures are caught here (same resilience posture as before) so a best-effort push never
+ * turns into an unhandled rejection — every caller invokes this fire-and-forget (`void sendPush...`).
  */
 async function sendPushToTokens(input: SendPushInput): Promise<void> {
   if (input.tokens.length === 0) {
     return;
   }
 
+  const validTokens = input.tokens.filter((token) => token.startsWith("ExponentPushToken["));
+
+  if (validTokens.length === 0) {
+    console.warn(
+      `[push-notification] No valid Expo push tokens among ${input.tokens.length} token(s) for "${input.title}" — skipping.`,
+    );
+    return;
+  }
+
   try {
-    const app = getFirebaseApp();
+    const staleTokens: string[] = [];
 
-    if (!app) {
-      console.warn(
-        `[push-notification] Firebase not configured — skipping push "${input.title}" to ${input.tokens.length} token(s).`,
-      );
-      return;
-    }
+    for (const batch of chunk(validTokens, EXPO_PUSH_BATCH_SIZE)) {
+      const messages = batch.map((token) => ({
+        to: token,
+        title: input.title,
+        body: input.body,
+        data: input.data,
+        sound: "default",
+        channelId: input.channelId ?? "default",
+        priority: "high",
+      }));
 
-    const response = await getMessaging(app).sendEachForMulticast({
-      tokens: input.tokens,
-      notification: { title: input.title, body: input.body },
-      data: input.data,
-      android: {
-        notification: {
-          channelId: input.channelId ?? "default",
-          sound: input.channelId === "order_alert" ? "order_alert" : "default",
+      const response = await fetch(EXPO_PUSH_API_URL, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
         },
-      },
-    });
+        body: JSON.stringify(messages),
+        signal: AbortSignal.timeout(10_000),
+      });
 
-    const staleTokens = response.responses
-      .map((result, index: number) =>
-        !result.success && result.error?.code === "messaging/registration-token-not-registered"
-          ? input.tokens[index]
-          : null,
-      )
-      .filter((token): token is string => token !== null);
+      const payload = (await response.json().catch(() => null)) as { data?: ExpoPushTicket[] } | null;
+
+      if (!response.ok || !payload?.data) {
+        console.warn(`[push-notification] Expo push API request failed with status ${response.status}`);
+        continue;
+      }
+
+      payload.data.forEach((ticket, index) => {
+        const token = batch[index];
+        if (token && ticket.status === "error" && ticket.details?.error === "DeviceNotRegistered") {
+          staleTokens.push(token);
+        }
+      });
+    }
 
     if (staleTokens.length > 0) {
       await prisma.deviceToken.deleteMany({ where: { expoPushToken: { in: staleTokens } } });

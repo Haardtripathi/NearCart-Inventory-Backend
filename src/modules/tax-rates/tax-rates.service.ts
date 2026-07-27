@@ -41,8 +41,8 @@ export async function listTaxRates(
     ...(query.search
       ? {
           OR: [
-            { name: { contains: query.search, mode: "insensitive" as const } },
-            { code: { contains: query.search, mode: "insensitive" as const } },
+            { name: { contains: query.search } },
+            { code: { contains: query.search } },
           ],
         }
       : {}),

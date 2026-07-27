@@ -71,13 +71,13 @@ export async function listUnits(
           AND: [
             {
               OR: [
-                { name: { contains: query.search, mode: "insensitive" as const } },
-                { code: { contains: query.search, mode: "insensitive" as const } },
-                { symbol: { contains: query.search, mode: "insensitive" as const } },
+                { name: { contains: query.search } },
+                { code: { contains: query.search } },
+                { symbol: { contains: query.search } },
                 {
                   translations: {
                     some: {
-                      name: { contains: query.search, mode: "insensitive" as const },
+                      name: { contains: query.search },
                     },
                   },
                 },

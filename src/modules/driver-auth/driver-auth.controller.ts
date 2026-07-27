@@ -1,11 +1,14 @@
 import type { Request, Response } from "express";
 
+import { sendSuccess } from "../../utils/ApiResponse";
 import {
   DriverStatusError,
   loginDriver,
   logoutDriver,
   refreshDriverSession,
   registerDriver,
+  sendDriverEmailVerificationOtp,
+  verifyDriverEmailVerificationOtp,
 } from "./driver-auth.service";
 
 /**
@@ -49,4 +52,20 @@ export async function refreshDriverTokenController(req: Request, res: Response) 
 export async function logoutDriverController(req: Request, res: Response) {
   await logoutDriver(req.body.refreshToken);
   return res.status(200).json({ success: true });
+}
+
+/**
+ * These two OTP endpoints are NOT part of PHASE1_REQUIREMENTS.md's locked flat-shape driver
+ * contract (that only covers register/login/refresh/logout) — they're new, so they use this
+ * backend's normal `sendSuccess()` `{success,message,data}` envelope, same as the equivalent
+ * `User` endpoints (auth.controller.ts's sendEmailOtpController/verifyEmailOtpController).
+ */
+export async function sendDriverEmailOtpController(req: Request, res: Response) {
+  const data = await sendDriverEmailVerificationOtp(req.body);
+  return sendSuccess(res, 200, "If this email exists, a verification code has been sent", data);
+}
+
+export async function verifyDriverEmailOtpController(req: Request, res: Response) {
+  const data = await verifyDriverEmailVerificationOtp(req.body);
+  return sendSuccess(res, 200, "Email verified successfully", data);
 }

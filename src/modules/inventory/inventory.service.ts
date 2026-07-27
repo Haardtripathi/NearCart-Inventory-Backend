@@ -234,10 +234,10 @@ export async function listBalances(
     ...(query.search
       ? {
           OR: [
-            { product: { name: { contains: query.search, mode: "insensitive" as const } } },
-            { variant: { name: { contains: query.search, mode: "insensitive" as const } } },
-            { variant: { sku: { contains: query.search, mode: "insensitive" as const } } },
-            { variant: { barcode: { contains: query.search, mode: "insensitive" as const } } },
+            { product: { name: { contains: query.search } } },
+            { variant: { name: { contains: query.search } } },
+            { variant: { sku: { contains: query.search } } },
+            { variant: { barcode: { contains: query.search } } },
           ],
         }
       : {}),
@@ -320,12 +320,12 @@ export async function listLedger(
     ...(query.search
       ? {
           OR: [
-            { note: { contains: query.search, mode: "insensitive" as const } },
-            { referenceId: { contains: query.search, mode: "insensitive" as const } },
-            { product: { name: { contains: query.search, mode: "insensitive" as const } } },
-            { variant: { name: { contains: query.search, mode: "insensitive" as const } } },
-            { variant: { sku: { contains: query.search, mode: "insensitive" as const } } },
-            { variant: { barcode: { contains: query.search, mode: "insensitive" as const } } },
+            { note: { contains: query.search } },
+            { referenceId: { contains: query.search } },
+            { product: { name: { contains: query.search } } },
+            { variant: { name: { contains: query.search } } },
+            { variant: { sku: { contains: query.search } } },
+            { variant: { barcode: { contains: query.search } } },
           ],
         }
       : {}),

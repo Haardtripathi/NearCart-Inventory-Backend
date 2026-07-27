@@ -148,8 +148,8 @@ export async function listSalesOrders(
     ...(query.search
       ? {
           OR: [
-            { orderNumber: { contains: query.search, mode: "insensitive" as const } },
-            { customer: { name: { contains: query.search, mode: "insensitive" as const } } },
+            { orderNumber: { contains: query.search } },
+            { customer: { name: { contains: query.search } } },
           ],
         }
       : {}),

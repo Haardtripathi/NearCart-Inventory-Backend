@@ -2,6 +2,14 @@ node_modules
 # Keep environment variables out of version control
 .env
 
+# Local SQLite files used transiently to generate Prisma migrations for the Turso/libSQL
+# datasource (Prisma Migrate's CLI can't connect to remote libsql:// URLs directly — migrations
+# are generated against a local file db, then applied to Turso separately). Never commit these.
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
 /generated/prisma
 backend.zip
 # Local tooling

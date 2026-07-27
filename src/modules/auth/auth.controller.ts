@@ -31,7 +31,10 @@ export async function loginController(req: Request, res: Response) {
 export async function registerOrganizationOwnerController(req: Request, res: Response) {
   const localeContext = await resolveLocaleContext(req);
   const data = await registerOrganizationOwner(req.body, getRequestMeta(req), localeContext);
-  return sendSuccess(res, 201, "Organization owner registered successfully", data);
+  // No session token in `data` — see registerOrganizationOwner in auth.service.ts. The client
+  // must verify the email (POST /auth/send-otp + /auth/verify-otp, already sent one) and then
+  // call /auth/login to obtain a working session.
+  return sendSuccess(res, 201, "Account created. Verify your email to finish setting up your workspace.", data);
 }
 
 export async function completeAccountSetupController(req: Request, res: Response) {

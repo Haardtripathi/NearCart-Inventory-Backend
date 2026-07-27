@@ -31,7 +31,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Global system unit (organizationId null) already present in every environment — reused
 // across all seeded variants here rather than creating a new per-org unit for each product.
-const PCS_UNIT_ID = "cmn21f4xf0001hsd19wti285c";
+// NOTE: this was a hardcoded cuid captured from the old Neon Postgres database. cuids are
+// randomly generated per-row at seed time, so after the Postgres -> Turso/SQLite database swap
+// (2026-07-27) the previous value no longer exists in this database — updated to the "pcs" system
+// Unit's actual id in the fresh Turso DB (re-verify if this DB is ever reseeded from scratch again,
+// since a fresh `prisma db seed` run generates new ids each time).
+const PCS_UNIT_ID = "cms3b7i420000g0hse2b84g1x";
 
 interface ProductSeed {
   name: string;

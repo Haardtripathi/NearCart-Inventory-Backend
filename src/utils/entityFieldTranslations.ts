@@ -24,12 +24,12 @@ function normalizeText(value?: string | null) {
   return trimmed ? trimmed : null;
 }
 
-async function resolveEnabledLanguages(organizationId?: string) {
+async function resolveEnabledLanguages(db: DbClient, organizationId?: string) {
   if (!organizationId) {
     return [...SUPPORTED_LANGUAGE_CODES];
   }
 
-  const organization = await prisma.organization.findUnique({
+  const organization = await db.organization.findUnique({
     where: { id: organizationId },
     select: {
       defaultLanguage: true,
@@ -95,7 +95,7 @@ export async function syncEntityFieldTranslations(
     fields: EntityFieldInput[];
   },
 ) {
-  const enabledLanguages = await resolveEnabledLanguages(args.organizationId);
+  const enabledLanguages = await resolveEnabledLanguages(db, args.organizationId);
 
   for (const field of args.fields) {
     const normalizedValue = normalizeText(field.value);

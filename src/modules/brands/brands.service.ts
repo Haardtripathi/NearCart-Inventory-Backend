@@ -63,12 +63,12 @@ export async function listBrands(
     ...(query.search
       ? {
           OR: [
-            { name: { contains: query.search, mode: "insensitive" as const } },
-            { slug: { contains: query.search, mode: "insensitive" as const } },
+            { name: { contains: query.search } },
+            { slug: { contains: query.search } },
             {
               translations: {
                 some: {
-                  name: { contains: query.search, mode: "insensitive" as const },
+                  name: { contains: query.search },
                 },
               },
             },

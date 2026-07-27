@@ -653,14 +653,14 @@ export async function getMasterCatalogCategories(
     ...(query.search
       ? {
           OR: [
-            { code: { contains: query.search, mode: "insensitive" as const } },
-            { slug: { contains: query.search, mode: "insensitive" as const } },
+            { code: { contains: query.search } },
+            { slug: { contains: query.search } },
             {
               translations: {
                 some: {
                   OR: [
-                    { name: { contains: query.search, mode: "insensitive" as const } },
-                    { description: { contains: query.search, mode: "insensitive" as const } },
+                    { name: { contains: query.search } },
+                    { description: { contains: query.search } },
                   ],
                 },
               },
@@ -868,8 +868,8 @@ export async function getMasterCatalogItems(
       ? {
           OR: [
             { searchText: { contains: normalizedQuery } },
-            { code: { contains: normalizedQuery, mode: "insensitive" as const } },
-            { slug: { contains: normalizedQuery, mode: "insensitive" as const } },
+            { code: { contains: normalizedQuery } },
+            { slug: { contains: normalizedQuery } },
           ],
         }
       : {}),

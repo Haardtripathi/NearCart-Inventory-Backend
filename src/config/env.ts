@@ -23,6 +23,10 @@ const booleanFromEnv = z.preprocess((value) => {
 const envSchema = z
   .object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+    // Auth token for the hosted libSQL/Turso database referenced by DATABASE_URL. Optional since a
+    // local `file:` SQLite URL (e.g. for tests) needs no auth — passed separately from the URL to
+    // PrismaLibSql's Config object (see src/config/prisma.ts), mirroring NearCart/backend's setup.
+    DATABASE_AUTH_TOKEN: z.string().trim().optional(),
     PORT: z.coerce.number().int().positive().default(5001),
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     JWT_SECRET: z.string().min(1, "JWT_SECRET is required"),

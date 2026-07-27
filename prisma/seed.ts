@@ -1,7 +1,8 @@
 import "dotenv/config";
 import bcrypt from "bcrypt";
-import { AuditAction, BatchStatus, BranchType, LanguageCode, MembershipStatus, OrderSource, PaymentStatus, Prisma, PrismaClient, ProductSourceType, ProductStatus, ProductType, PurchaseReceiptStatus, ReferenceType, SalesOrderStatus, StockMovementType, StockTransferStatus, TrackMethod, UserRole } from "@prisma/client";
+import { AuditAction, BatchStatus, BranchType, LanguageCode, MembershipStatus, OrderSource, PaymentStatus, Prisma, ProductSourceType, ProductStatus, ProductType, PurchaseReceiptStatus, ReferenceType, SalesOrderStatus, StockMovementType, StockTransferStatus, TrackMethod, UserRole } from "@prisma/client";
 
+import { prisma } from "../src/config/prisma";
 import { buildMasterItemSearchText, normalizeMasterCatalogAliasValues } from "../src/utils/masterCatalog";
 import { slugify } from "../src/utils/slug";
 import {
@@ -10,8 +11,6 @@ import {
   groceryFmcgProductPatch,
   suggestedMasterCatalogRenames,
 } from "./nearcart_grocery_fmcg_seed_patch";
-
-const prisma = new PrismaClient();
 const seedScope = (process.env.SEED_SCOPE ?? "full").trim().toLowerCase();
 
 const seedSuperAdminConfig = {

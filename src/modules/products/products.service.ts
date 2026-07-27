@@ -213,7 +213,6 @@ async function getProductRecordById(organizationId: string, productId: string) {
       deletedAt: null,
     },
     include: productInclude,
-    relationLoadStrategy: "join",
   });
 
   if (!product) {
@@ -499,12 +498,12 @@ export async function listProducts(
     ...(query.search
       ? {
           OR: [
-            { name: { contains: query.search, mode: "insensitive" as const } },
-            { slug: { contains: query.search, mode: "insensitive" as const } },
+            { name: { contains: query.search } },
+            { slug: { contains: query.search } },
             {
               translations: {
                 some: {
-                  name: { contains: query.search, mode: "insensitive" as const },
+                  name: { contains: query.search },
                 },
               },
             },
@@ -513,13 +512,13 @@ export async function listProducts(
                 some: {
                   deletedAt: null,
                   OR: [
-                    { name: { contains: query.search, mode: "insensitive" as const } },
-                    { sku: { contains: query.search, mode: "insensitive" as const } },
-                    { barcode: { contains: query.search, mode: "insensitive" as const } },
+                    { name: { contains: query.search } },
+                    { sku: { contains: query.search } },
+                    { barcode: { contains: query.search } },
                     {
                       translations: {
                         some: {
-                          name: { contains: query.search, mode: "insensitive" as const },
+                          name: { contains: query.search },
                         },
                       },
                     },
@@ -536,7 +535,6 @@ export async function listProducts(
     prisma.product.findMany({
       where,
       include: productInclude,
-      relationLoadStrategy: "join",
       orderBy: {
         createdAt: "desc",
       },

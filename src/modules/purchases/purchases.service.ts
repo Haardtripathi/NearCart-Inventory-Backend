@@ -111,8 +111,8 @@ export async function listPurchases(
     ...(query.search
       ? {
           OR: [
-            { receiptNumber: { contains: query.search, mode: "insensitive" as const } },
-            { supplier: { name: { contains: query.search, mode: "insensitive" as const } } },
+            { receiptNumber: { contains: query.search } },
+            { supplier: { name: { contains: query.search } } },
           ],
         }
       : {}),

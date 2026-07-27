@@ -1,11 +1,9 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["relationJoins"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
 }
 
 enum UserRole {
@@ -155,6 +153,7 @@ enum AuditAction {
   DRIVER_REGISTER
   DRIVER_VERIFY
   DRIVER_SUSPEND
+  DRIVER_EMAIL_VERIFY
   // Neither of these existed before — cancelSalesOrder previously logged plain UPDATE for every
   // cancel (staff and otherwise), unlike every other transition (CONFIRM/REJECT/DELIVER/READY),
   // which all have dedicated actions. Splitting into a staff-initiated action and a
@@ -441,7 +440,7 @@ model TaxRate {
   organizationId String
   name           String
   code           String?
-  rate           Decimal      @db.Decimal(10, 4)
+  rate           Decimal
   isInclusive    Boolean      @default(false)
   isActive       Boolean      @default(true)
   createdAt      DateTime     @default(now())
@@ -551,13 +550,13 @@ model ProductVariant {
   sku                  String
   barcode              String?
   attributes           Json?
-  costPrice            Decimal                     @db.Decimal(18, 4)
-  sellingPrice         Decimal                     @db.Decimal(18, 4)
-  mrp                  Decimal?                    @db.Decimal(18, 4)
-  reorderLevel         Decimal                     @default(0) @db.Decimal(18, 6)
-  minStockLevel        Decimal                     @default(0) @db.Decimal(18, 6)
-  maxStockLevel        Decimal?                    @db.Decimal(18, 6)
-  weight               Decimal?                    @db.Decimal(18, 6)
+  costPrice            Decimal
+  sellingPrice         Decimal
+  mrp                  Decimal?
+  reorderLevel         Decimal                     @default(0)
+  minStockLevel        Decimal                     @default(0)
+  maxStockLevel        Decimal?
+  weight               Decimal?
   unitId               String?
   isDefault            Boolean                     @default(false)
   isActive             Boolean                     @default(true)
@@ -805,13 +804,13 @@ model MasterCatalogVariantTemplate {
   skuSuffix           String?
   barcode             String?
   attributes          Json?
-  defaultCostPrice    Decimal?                          @db.Decimal(18, 4)
-  defaultSellingPrice Decimal?                          @db.Decimal(18, 4)
-  defaultMrp          Decimal?                          @db.Decimal(18, 4)
-  reorderLevel        Decimal                           @default(0) @db.Decimal(18, 6)
-  minStockLevel       Decimal                           @default(0) @db.Decimal(18, 6)
-  maxStockLevel       Decimal?                          @db.Decimal(18, 6)
-  weight              Decimal?                          @db.Decimal(18, 6)
+  defaultCostPrice    Decimal?
+  defaultSellingPrice Decimal?
+  defaultMrp          Decimal?
+  reorderLevel        Decimal                           @default(0)
+  minStockLevel       Decimal                           @default(0)
+  maxStockLevel       Decimal?
+  weight              Decimal?
   unitCode            String?
   isDefault           Boolean                           @default(false)
   isActive            Boolean                           @default(true)
@@ -845,9 +844,9 @@ model InventoryBalance {
   branchId       String
   productId      String
   variantId      String
-  onHand         Decimal        @default(0) @db.Decimal(18, 6)
-  reserved       Decimal        @default(0) @db.Decimal(18, 6)
-  incoming       Decimal        @default(0) @db.Decimal(18, 6)
+  onHand         Decimal        @default(0)
+  reserved       Decimal        @default(0)
+  incoming       Decimal        @default(0)
   updatedAt      DateTime       @updatedAt
   organization   Organization   @relation(fields: [organizationId], references: [id])
   branch         Branch         @relation(fields: [branchId], references: [id])
@@ -869,12 +868,12 @@ model InventoryLedger {
   movementType   StockMovementType
   referenceType  ReferenceType
   referenceId    String?
-  quantityDelta  Decimal           @db.Decimal(18, 6)
-  unitCost       Decimal?          @db.Decimal(18, 4)
-  beforeOnHand   Decimal           @db.Decimal(18, 6)
-  afterOnHand    Decimal           @db.Decimal(18, 6)
-  beforeReserved Decimal           @db.Decimal(18, 6)
-  afterReserved  Decimal           @db.Decimal(18, 6)
+  quantityDelta  Decimal
+  unitCost       Decimal?
+  beforeOnHand   Decimal
+  afterOnHand    Decimal
+  beforeReserved Decimal
+  afterReserved  Decimal
   note           String?
   batchId        String?
   createdById    String?
@@ -900,9 +899,9 @@ model InventoryBatch {
   batchNumber     String
   manufactureDate DateTime?
   expiryDate      DateTime?
-  quantityOnHand  Decimal           @default(0) @db.Decimal(18, 6)
-  purchasePrice   Decimal?          @db.Decimal(18, 4)
-  sellingPrice    Decimal?          @db.Decimal(18, 4)
+  quantityOnHand  Decimal           @default(0)
+  purchasePrice   Decimal?
+  sellingPrice    Decimal?
   status          BatchStatus       @default(ACTIVE)
   metadata        Json?
   createdAt       DateTime          @default(now())
@@ -944,10 +943,10 @@ model PurchaseReceipt {
   status         PurchaseReceiptStatus @default(DRAFT)
   invoiceDate    DateTime?
   receivedAt     DateTime?
-  subtotal       Decimal               @default(0) @db.Decimal(18, 4)
-  taxTotal       Decimal               @default(0) @db.Decimal(18, 4)
-  discountTotal  Decimal               @default(0) @db.Decimal(18, 4)
-  total          Decimal               @default(0) @db.Decimal(18, 4)
+  subtotal       Decimal               @default(0)
+  taxTotal       Decimal               @default(0)
+  discountTotal  Decimal               @default(0)
+  total          Decimal               @default(0)
   notes          String?
   createdById    String?
   createdAt      DateTime              @default(now())
@@ -967,12 +966,12 @@ model PurchaseReceiptItem {
   purchaseReceiptId String
   productId         String
   variantId         String
-  quantity          Decimal         @db.Decimal(18, 6)
-  unitCost          Decimal         @db.Decimal(18, 4)
-  taxRate           Decimal         @default(0) @db.Decimal(10, 4)
-  taxAmount         Decimal         @default(0) @db.Decimal(18, 4)
-  discountAmount    Decimal         @default(0) @db.Decimal(18, 4)
-  lineTotal         Decimal         @db.Decimal(18, 4)
+  quantity          Decimal
+  unitCost          Decimal
+  taxRate           Decimal         @default(0)
+  taxAmount         Decimal         @default(0)
+  discountAmount    Decimal         @default(0)
+  lineTotal         Decimal
   batchNumber       String?
   expiryDate        DateTime?
   metadata          Json?
@@ -986,20 +985,20 @@ model PurchaseReceiptItem {
 }
 
 model SalesOrder {
-  id                  String           @id @default(cuid())
-  organizationId      String
-  branchId            String
-  customerId          String?
-  orderNumber         String
-  source              OrderSource
-  status              SalesOrderStatus @default(PENDING)
-  paymentStatus       PaymentStatus    @default(UNPAID)
-  subtotal            Decimal          @default(0) @db.Decimal(18, 4)
-  taxTotal            Decimal          @default(0) @db.Decimal(18, 4)
-  discountTotal       Decimal          @default(0) @db.Decimal(18, 4)
-  total               Decimal          @default(0) @db.Decimal(18, 4)
-  notes               String?
-  rejectionReason     String?
+  id                     String           @id @default(cuid())
+  organizationId         String
+  branchId               String
+  customerId             String?
+  orderNumber            String
+  source                 OrderSource
+  status                 SalesOrderStatus @default(PENDING)
+  paymentStatus          PaymentStatus    @default(UNPAID)
+  subtotal               Decimal          @default(0)
+  taxTotal               Decimal          @default(0)
+  discountTotal          Decimal          @default(0)
+  total                  Decimal          @default(0)
+  notes                  String?
+  rejectionReason        String?
   // Set at creation (createdAt + ORDER_CONFIRMATION_TIMEOUT_MINUTES). The order-confirmation
   // sweep cron auto-rejects PENDING orders past this deadline — null for orders created before
   // this column existed (never auto-cancelled, matching pre-existing behavior).
@@ -1010,35 +1009,35 @@ model SalesOrder {
   // Customer.address since a returning customer may order to a different address each time.
   // Rows created before this column existed have deliveryAddress: null; readers (e.g.
   // driver-orders.serializeDriverOrder) should fall back to customer.address for those.
-  deliveryAddress     Json?
+  deliveryAddress        Json?
   // Bridge fields: set when this order originated from NearCart's customer-facing app via the
   // marketplace bridge (see modules/marketplace). externalOrderId is NearCart's Order.id and is
   // unique so a replayed push is idempotent (see marketplace.service.ts createBridgedSalesOrder).
-  externalOrderId     String?          @unique
-  externalOrderNumber String?
-  createdById         String?
-  confirmedById       String?
-  deliveredById       String?
-  readyById           String?
-  readyAt             DateTime?
-  assignedDriverId    String?
-  assignedById        String?
-  confirmedAt         DateTime?
-  deliveredAt         DateTime?
-  assignedAt          DateTime?
-  pickedUpAt          DateTime?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
-  organization        Organization     @relation(fields: [organizationId], references: [id])
-  branch              Branch           @relation(fields: [branchId], references: [id])
-  customer            Customer?        @relation(fields: [customerId], references: [id])
-  createdBy           User?            @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
-  confirmedBy         User?            @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id])
-  deliveredBy         User?            @relation("SalesOrderDeliveredBy", fields: [deliveredById], references: [id])
-  readyBy             User?            @relation("SalesOrderReadyBy", fields: [readyById], references: [id])
-  assignedBy          User?            @relation("SalesOrderAssignedBy", fields: [assignedById], references: [id])
-  assignedDriver      Driver?          @relation("SalesOrderAssignedDriver", fields: [assignedDriverId], references: [id])
-  items               SalesOrderItem[]
+  externalOrderId        String?          @unique
+  externalOrderNumber    String?
+  createdById            String?
+  confirmedById          String?
+  deliveredById          String?
+  readyById              String?
+  readyAt                DateTime?
+  assignedDriverId       String?
+  assignedById           String?
+  confirmedAt            DateTime?
+  deliveredAt            DateTime?
+  assignedAt             DateTime?
+  pickedUpAt             DateTime?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  organization           Organization     @relation(fields: [organizationId], references: [id])
+  branch                 Branch           @relation(fields: [branchId], references: [id])
+  customer               Customer?        @relation(fields: [customerId], references: [id])
+  createdBy              User?            @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
+  confirmedBy            User?            @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id])
+  deliveredBy            User?            @relation("SalesOrderDeliveredBy", fields: [deliveredById], references: [id])
+  readyBy                User?            @relation("SalesOrderReadyBy", fields: [readyById], references: [id])
+  assignedBy             User?            @relation("SalesOrderAssignedBy", fields: [assignedById], references: [id])
+  assignedDriver         Driver?          @relation("SalesOrderAssignedDriver", fields: [assignedDriverId], references: [id])
+  items                  SalesOrderItem[]
 
   @@unique([organizationId, orderNumber])
   @@index([organizationId, status])
@@ -1058,27 +1057,33 @@ model SalesOrder {
 // (locked 2026-07-24) and modules/driver-auth, modules/driver-orders, modules/drivers,
 // modules/platform (verify/suspend endpoints).
 model Driver {
-  id             String       @id @default(cuid())
-  fullName       String
-  phone          String       @unique
-  email          String?      @unique
-  passwordHash   String
-  vehicleType    String
-  vehicleNumber  String
-  status         DriverStatus @default(PENDING_VERIFICATION)
+  id                       String               @id @default(cuid())
+  fullName                 String
+  phone                    String               @unique
+  email                    String?              @unique
+  passwordHash             String
+  vehicleType              String
+  vehicleNumber            String
+  status                   DriverStatus         @default(PENDING_VERIFICATION)
+  // Separate trust signal from `status` (admin review) — proves the driver controls the inbox at
+  // `email`, added as an ADDITIONAL gate alongside admin verification, not a replacement for it.
+  // A driver can be emailVerified=true while status is still PENDING_VERIFICATION (email OTP is
+  // completable before admin review finishes), and login remains blocked until status=VERIFIED
+  // regardless of this flag. See modules/driver-auth/driver-auth.service.ts.
+  emailVerified            Boolean              @default(false)
   // Nearest-free-driver auto-assignment (see sales-orders driver-matching service): a driver is
   // "free" when isAvailableForAssignment is true AND they have no SalesOrder currently assigned
   // with status READY/OUT_FOR_DELIVERY. lastKnownLatitude/Longitude are updated by a periodic
   // (~60s) foreground location ping from the driver app while online — deliberately NOT
   // continuous background tracking (Phase 1 explicitly defers live tracking).
-  isAvailableForAssignment Boolean   @default(false)
+  isAvailableForAssignment Boolean              @default(false)
   lastKnownLatitude        Float?
   lastKnownLongitude       Float?
   lastLocationAt           DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  assignedOrders SalesOrder[] @relation("SalesOrderAssignedDriver")
-  refreshTokens  DriverRefreshToken[]
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+  assignedOrders           SalesOrder[]         @relation("SalesOrderAssignedDriver")
+  refreshTokens            DriverRefreshToken[]
 
   @@index([status])
   @@index([isAvailableForAssignment])
@@ -1103,13 +1108,13 @@ model DriverRefreshToken {
 // Shared by both shop-staff Users and Drivers since both live in this database — ownerType
 // discriminates which table ownerId points into (no FK, since it's polymorphic).
 model DeviceToken {
-  id             String   @id @default(cuid())
-  ownerType      String // 'USER' | 'DRIVER'
-  ownerId        String
-  expoPushToken  String
-  platform       String? // 'android' | 'ios'
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(cuid())
+  ownerType     String // 'USER' | 'DRIVER'
+  ownerId       String
+  expoPushToken String
+  platform      String? // 'android' | 'ios'
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([ownerType, ownerId, expoPushToken])
   @@index([ownerType, ownerId])
@@ -1123,12 +1128,12 @@ model SalesOrderItem {
   productNameSnapshot String
   variantNameSnapshot String
   skuSnapshot         String
-  quantity            Decimal        @db.Decimal(18, 6)
-  unitPrice           Decimal        @db.Decimal(18, 4)
-  taxRate             Decimal        @default(0) @db.Decimal(10, 4)
-  taxAmount           Decimal        @default(0) @db.Decimal(18, 4)
-  discountAmount      Decimal        @default(0) @db.Decimal(18, 4)
-  lineTotal           Decimal        @db.Decimal(18, 4)
+  quantity            Decimal
+  unitPrice           Decimal
+  taxRate             Decimal        @default(0)
+  taxAmount           Decimal        @default(0)
+  discountAmount      Decimal        @default(0)
+  lineTotal           Decimal
   metadata            Json?
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
@@ -1168,8 +1173,8 @@ model StockTransferItem {
   stockTransferId String
   productId       String
   variantId       String
-  quantity        Decimal        @db.Decimal(18, 6)
-  unitCost        Decimal?       @db.Decimal(18, 4)
+  quantity        Decimal
+  unitCost        Decimal?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   stockTransfer   StockTransfer  @relation(fields: [stockTransferId], references: [id])

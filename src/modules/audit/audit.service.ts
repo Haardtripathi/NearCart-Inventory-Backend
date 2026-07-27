@@ -66,14 +66,14 @@ export async function listAuditLogs(organizationId: string, query: {
             {
               actorUser: {
                 is: {
-                  fullName: { contains: query.actor, mode: "insensitive" as const },
+                  fullName: { contains: query.actor },
                 },
               },
             },
             {
               actorUser: {
                 is: {
-                  email: { contains: query.actor, mode: "insensitive" as const },
+                  email: { contains: query.actor },
                 },
               },
             },

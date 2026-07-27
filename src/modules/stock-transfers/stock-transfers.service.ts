@@ -73,7 +73,7 @@ export async function listStockTransfers(
     ...(query.status ? { status: query.status } : {}),
     ...(query.search
       ? {
-          transferNumber: { contains: query.search, mode: "insensitive" as const },
+          transferNumber: { contains: query.search },
         }
       : {}),
   };

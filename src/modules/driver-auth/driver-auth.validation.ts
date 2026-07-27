@@ -29,3 +29,12 @@ export const refreshDriverTokenSchema = z.object({
 export const logoutDriverSchema = z.object({
   refreshToken: trimmedString,
 });
+
+export const sendDriverEmailOtpSchema = z.object({
+  email: z.string().trim().email(),
+});
+
+export const verifyDriverEmailOtpSchema = z.object({
+  email: z.string().trim().email(),
+  code: z.string().trim().length(6),
+});

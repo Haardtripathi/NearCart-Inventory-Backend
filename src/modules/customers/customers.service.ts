@@ -42,9 +42,9 @@ export async function listCustomers(
     ...(query.search
       ? {
           OR: [
-            { name: { contains: query.search, mode: "insensitive" as const } },
-            { phone: { contains: query.search, mode: "insensitive" as const } },
-            { email: { contains: query.search, mode: "insensitive" as const } },
+            { name: { contains: query.search } },
+            { phone: { contains: query.search } },
+            { email: { contains: query.search } },
           ],
         }
       : {}),

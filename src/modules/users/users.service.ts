@@ -191,13 +191,11 @@ export async function searchUsersDirectory(search?: string) {
             {
               fullName: {
                 contains: query,
-                mode: "insensitive",
               },
             },
             {
               email: {
                 contains: query,
-                mode: "insensitive",
               },
             },
           ],

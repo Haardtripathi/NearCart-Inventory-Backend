@@ -19,7 +19,9 @@
     "translate:check": "curl -sS -m 5 http://127.0.0.1:5000/languages > /dev/null && echo 'LibreTranslate is reachable at http://127.0.0.1:5000' || (echo 'LibreTranslate is NOT reachable. Auto-translate/translate-item calls will fail-open (return source text unchanged) until you run: npm run translate:start' && exit 1)"
   },
   "dependencies": {
-    "@prisma/client": "^6.5.0",
+    "@libsql/client": "^0.15.15",
+    "@prisma/adapter-libsql": "7.6.0",
+    "@prisma/client": "^7.6.0",
     "@types/node-cron": "^3.0.11",
     "bcrypt": "^5.1.1",
     "cloudinary": "^2.9.0",
@@ -48,8 +50,16 @@
     "@types/node": "^22.13.10",
     "@types/nodemailer": "^8.0.1",
     "nodemon": "^3.1.14",
-    "prisma": "^6.5.0",
+    "prisma": "^7.6.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
+  },
+  "allowScripts": {
+    "@firebase/util@1.15.1": true,
+    "@prisma/engines@7.9.1": true,
+    "bcrypt@5.1.1": true,
+    "esbuild@0.27.4": true,
+    "prisma@7.9.1": true,
+    "protobufjs@7.6.5": true
   }
 }

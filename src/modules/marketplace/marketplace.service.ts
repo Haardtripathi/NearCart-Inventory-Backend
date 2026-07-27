@@ -366,8 +366,8 @@ export async function listMarketplaceOrganizations(query: { search?: string }) {
       ...(query.search
         ? {
             OR: [
-              { name: { contains: query.search, mode: "insensitive" as const } },
-              { slug: { contains: query.search, mode: "insensitive" as const } },
+              { name: { contains: query.search } },
+              { slug: { contains: query.search } },
             ],
           }
         : {}),
@@ -443,14 +443,13 @@ export async function listMarketplaceCatalog(
       ...(query.search
         ? {
             OR: [
-              { name: { contains: query.search, mode: "insensitive" as const } },
-              { slug: { contains: query.search, mode: "insensitive" as const } },
+              { name: { contains: query.search } },
+              { slug: { contains: query.search } },
               {
                 translations: {
                   some: {
                     name: {
                       contains: query.search,
-                      mode: "insensitive" as const,
                     },
                   },
                 },

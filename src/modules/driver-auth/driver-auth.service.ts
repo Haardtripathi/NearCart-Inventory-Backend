@@ -1,6 +1,7 @@
 import { AuditAction, DriverStatus, Prisma } from "@prisma/client";
 import bcrypt from "bcrypt";
 
+import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { signDriverAuthToken } from "../../utils/driverJwt";
@@ -9,6 +10,8 @@ import {
   revokeDriverRefreshSession,
   rotateDriverRefreshSession,
 } from "../../utils/driverRefreshToken";
+import { renderOtpEmail, sendMail } from "../../utils/mailer";
+import { issueOtp, verifyOtp } from "../../utils/otp";
 import { createAuditLog } from "../audit/audit.service";
 
 interface RegisterDriverInput {
@@ -58,6 +61,7 @@ function serializeDriver(driver: {
   vehicleType: string;
   vehicleNumber: string;
   status: DriverStatus;
+  emailVerified: boolean;
 }) {
   return {
     id: driver.id,
@@ -67,6 +71,7 @@ function serializeDriver(driver: {
     vehicleType: driver.vehicleType,
     vehicleNumber: driver.vehicleNumber,
     status: driver.status,
+    emailVerified: driver.emailVerified,
   };
 }
 
@@ -211,4 +216,97 @@ export async function refreshDriverSession(rawRefreshToken: string) {
  * separately blocklisted — same tradeoff NearCart's own refresh design already accepts. */
 export async function logoutDriver(rawRefreshToken: string) {
   await revokeDriverRefreshSession(rawRefreshToken);
+}
+
+const DRIVER_EMAIL_VERIFY_OTP_PURPOSE = "driver-email-verify";
+
+/**
+ * Email OTP verification for a `Driver` — an ADDITIONAL trust signal layered on top of (not a
+ * replacement for) the admin manual-review gate: a driver can complete this while `status` is
+ * still PENDING_VERIFICATION, and login stays blocked by `loginDriver`'s status check regardless
+ * of `emailVerified`. Mirrors modules/auth/auth.service.ts's sendEmailVerificationOtp /
+ * verifyEmailVerificationOtp for `User` almost exactly (same `issueOtp`/`verifyOtp` Redis-backed
+ * helpers, same renderOtpEmail template, same anti-enumeration "respond the same either way"
+ * behavior) — reusing that existing OTP infra rather than building a second one.
+ *
+ * DESIGN DECISION — no bearer token / driver-auth middleware guards these two endpoints. A
+ * PENDING_VERIFICATION driver has no way to authenticate at all today: registerDriver() issues no
+ * token (by design — see driver-auth.controller.ts), and authenticateDriver's middleware rejects
+ * anything but a VERIFIED driver's JWT even if one existed. Rather than inventing a new
+ * limited-scope "pre-verification" JWT type (extra token type to secure, extra surface on
+ * driverJwt.ts, extra thing for the mobile app to store safely) purely to gate two endpoints whose
+ * real security boundary is "does this person control the inbox at `email`" — which the mailed
+ * OTP code itself already proves — this instead mirrors the *existing, already-shipped* pattern
+ * for org-staff Users one module over (auth.route.ts's POST /auth/send-otp and /auth/verify-otp,
+ * also unauthenticated, also identify the subject by `email` in the body). Same tradeoff already
+ * accepted elsewhere in this codebase, applied consistently to Driver instead of introducing a
+ * second, different auth pattern for what is functionally the same problem.
+ */
+export async function sendDriverEmailVerificationOtp(input: { email: string }) {
+  const email = normalizeEmail(input.email);
+
+  if (!email) {
+    throw ApiError.badRequest("A valid email is required");
+  }
+
+  const driver = await prisma.driver.findUnique({
+    where: { email },
+    select: { id: true, fullName: true, emailVerified: true },
+  });
+
+  // Same anti-enumeration behavior as the User equivalent: respond identically whether or not
+  // this email is registered to a driver, or already verified, so this endpoint can't be used to
+  // probe which emails have driver accounts.
+  if (!driver || driver.emailVerified) {
+    return { sent: true };
+  }
+
+  const code = await issueOtp(DRIVER_EMAIL_VERIFY_OTP_PURPOSE, driver.id);
+  const { html, text } = renderOtpEmail({ code, ttlMinutes: env.OTP_TTL_MINUTES });
+
+  await sendMail({
+    to: email,
+    subject: "Verify your NearCart Driver email",
+    html,
+    text,
+  });
+
+  return { sent: true };
+}
+
+export async function verifyDriverEmailVerificationOtp(input: { email: string; code: string }) {
+  const email = normalizeEmail(input.email);
+
+  if (!email) {
+    throw ApiError.badRequest("A valid email is required");
+  }
+
+  const driver = await prisma.driver.findUnique({ where: { email } });
+
+  if (!driver) {
+    throw ApiError.badRequest("This code has expired or was not requested. Please request a new one.");
+  }
+
+  if (driver.emailVerified) {
+    return { emailVerified: true, driver: serializeDriver(driver) };
+  }
+
+  // verifyOtp throws ApiError.badRequest on a missing/expired/incorrect code (see utils/otp.ts) —
+  // propagates as-is, no Driver row is touched unless the code actually matched.
+  await verifyOtp(DRIVER_EMAIL_VERIFY_OTP_PURPOSE, driver.id, input.code);
+
+  const updated = await prisma.driver.update({
+    where: { id: driver.id },
+    data: { emailVerified: true },
+  });
+
+  await createAuditLog(prisma, {
+    action: AuditAction.DRIVER_EMAIL_VERIFY,
+    entityType: "Driver",
+    entityId: updated.id,
+    before: { emailVerified: false },
+    after: { emailVerified: true },
+  });
+
+  return { emailVerified: true, driver: serializeDriver(updated) };
 }

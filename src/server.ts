@@ -2,6 +2,7 @@ import { app } from "./app";
 import { env } from "./config/env";
 import { prisma } from "./config/prisma";
 import { connectRedis, disconnectRedis } from "./config/redis";
+import { registerOrderConfirmationSweep } from "./jobs/order-confirmation-sweep";
 
 void connectRedis().catch((error) => {
   console.error("Redis connection failed, running without Redis", error);
@@ -9,6 +10,7 @@ void connectRedis().catch((error) => {
 
 const server = app.listen(env.PORT, () => {
   console.log(`NearCart Inventory backend running on port ${env.PORT}`);
+  registerOrderConfirmationSweep();
 });
 
 server.on("error", (error: NodeJS.ErrnoException) => {

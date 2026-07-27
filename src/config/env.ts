@@ -45,6 +45,13 @@ const envSchema = z
     CLOUDINARY_UPLOAD_FOLDER: z.string().trim().min(1).default("nearcart-inventory"),
     IMAGE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
     MARKETPLACE_INTERNAL_TOKEN: z.string().trim().min(1).optional(),
+    // Outbound reverse notification webhook (this backend -> NearCart) — same shared secret as
+    // MARKETPLACE_INTERNAL_TOKEN authenticates NearCart's inbound calls to us, reused here for
+    // the reverse direction so no second secret is needed.
+    NEARCART_SERVICE_URL: z.string().trim().url().optional(),
+    FIREBASE_PROJECT_ID: z.string().trim().min(1).optional(),
+    FIREBASE_CLIENT_EMAIL: z.string().trim().min(1).optional(),
+    FIREBASE_PRIVATE_KEY: z.string().trim().min(1).optional(),
     SMTP_HOST: z.string().trim().min(1).optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(587),
     SMTP_SECURE: booleanFromEnv.default(false),
@@ -54,6 +61,20 @@ const envSchema = z
     OTP_TTL_MINUTES: z.coerce.number().int().positive().default(10),
     OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
     OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+    // How long a bridged/created PENDING SalesOrder waits for shop confirmation before the
+    // order-confirmation-sweep cron auto-rejects it (see jobs/order-confirmation-sweep.ts).
+    ORDER_CONFIRMATION_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(10),
+    // Max distance (km) a driver's last known location may be from a branch's pickup point to be
+    // considered for nearest-free-driver auto-assignment (see sales-orders driver-matching logic).
+    DRIVER_MATCH_RADIUS_KM: z.coerce.number().positive().default(15),
+    // Driver access-token lifetime is deliberately short (unlike JWT_EXPIRES_IN's 7d default for
+    // org staff) now that DriverRefreshToken (see utils/driverRefreshToken.ts) provides real
+    // months-long session longevity via rotation — the access token only needs to bridge the gap
+    // between refreshes.
+    DRIVER_JWT_EXPIRES_IN: z.string().min(1).default("1d"),
+    // "Months" tenor for a driver's rotating refresh session, mirroring NearCart/backend's
+    // AUTH_REFRESH_TTL_DAYS for the same reason (long-lived mobile sessions).
+    DRIVER_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(90),
   })
   .refine(
     (values) =>

@@ -9,6 +9,7 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
+import { env } from "../../config/env";
 import { toDecimal } from "../../utils/decimal";
 import { ApiError } from "../../utils/ApiError";
 import { syncEntityFieldTranslations } from "../../utils/entityFieldTranslations";
@@ -18,6 +19,8 @@ import { generateDocumentNumber } from "../../utils/numbering";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { createAuditLog } from "../audit/audit.service";
 import { applyStockMovement } from "../inventory/inventory.service";
+import { notifyOrderEvent } from "../../services/order-event-webhook.service";
+import { sendPushToDriver } from "../../services/push-notification.service";
 
 interface SalesOrderItemInput {
   productId: string;
@@ -209,6 +212,11 @@ export async function createSalesOrder(
       status: input.status ?? SalesOrderStatus.PENDING,
       paymentStatus: input.paymentStatus ?? PaymentStatus.UNPAID,
       notes: input.notes ?? null,
+      // Only PENDING orders are ever auto-cancelled by the confirmation sweep (see
+      // jobs/order-confirmation-sweep.ts) — a DRAFT/CONFIRMED/etc. created directly via this
+      // staff-facing endpoint with an explicit status still gets a deadline set for consistency,
+      // but the sweep's own WHERE clause only ever matches status = PENDING rows.
+      confirmationDeadlineAt: new Date(Date.now() + env.ORDER_CONFIRMATION_TIMEOUT_MINUTES * 60_000),
       createdById: actorUserId,
       subtotal: prepared.totals.subtotal,
       taxTotal: prepared.totals.taxTotal,
@@ -455,13 +463,28 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
     return updated;
   }, INTERACTIVE_TRANSACTION_OPTIONS);
 
+  if (confirmed.externalOrderId) {
+    void notifyOrderEvent({
+      externalOrderId: confirmed.externalOrderId,
+      status: confirmed.status,
+      eventType: "CONFIRMED",
+    });
+  }
+
   return confirmed;
 }
 
+/**
+ * `actorUserId` is nullable for the same reason as `cancelSalesOrder` above: the
+ * order-confirmation-sweep cron (jobs/order-confirmation-sweep.ts) auto-rejects PENDING orders
+ * past their `confirmationDeadlineAt` with no authenticated staff user behind the action. Passing
+ * `null` round-trips cleanly through `createAuditLog`'s already-nullable `actorUserId` — real
+ * staff-initiated rejects (the controller) continue to pass a real string.
+ */
 export async function rejectSalesOrder(
   organizationId: string,
   orderId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   rejectionReason: string,
 ) {
   const order = await getSalesOrderById(organizationId, orderId);
@@ -498,6 +521,14 @@ export async function rejectSalesOrder(
     before: order,
     after: updated,
   });
+
+  if (updated.externalOrderId) {
+    void notifyOrderEvent({
+      externalOrderId: updated.externalOrderId,
+      status: updated.status,
+      eventType: "REJECTED",
+    });
+  }
 
   return updated;
 }
@@ -600,7 +631,104 @@ export async function deliverSalesOrder(organizationId: string, orderId: string,
     after: updated,
   });
 
+  if (updated.externalOrderId) {
+    void notifyOrderEvent({
+      externalOrderId: updated.externalOrderId,
+      status: updated.status,
+      eventType: "DELIVERED",
+    });
+  }
+
   return updated;
+}
+
+const ACTIVE_DRIVER_ORDER_STATUSES: SalesOrderStatus[] = [
+  SalesOrderStatus.READY,
+  SalesOrderStatus.OUT_FOR_DELIVERY,
+];
+
+const EARTH_RADIUS_KM = 6371;
+
+function toRadians(degrees: number) {
+  return (degrees * Math.PI) / 180;
+}
+
+/** Standard haversine great-circle distance between two lat/long points, in kilometers. */
+function haversineDistanceKm(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number },
+) {
+  const dLat = toRadians(to.latitude - from.latitude);
+  const dLon = toRadians(to.longitude - from.longitude);
+  const lat1 = toRadians(from.latitude);
+  const lat2 = toRadians(to.latitude);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return EARTH_RADIUS_KM * c;
+}
+
+/**
+ * Ranks currently-free, VERIFIED drivers by distance from a branch's pickup-point coordinates and
+ * returns the closest one within `DRIVER_MATCH_RADIUS_KM`, or `null` if the branch has no
+ * coordinates set, no driver is free, or no free driver is within radius. "Free" = a driver has
+ * `isAvailableForAssignment: true` and no `SalesOrder` currently assigned to them with status
+ * READY/OUT_FOR_DELIVERY (see the `Driver.assignedOrders` relation). Called automatically from
+ * `markSalesOrderReady` below — the existing manual assign-driver dropdown in the Inventory
+ * frontend remains available as a fallback when this returns null.
+ */
+export async function findNearestFreeDriver(branchId: string): Promise<{ id: string } | null> {
+  const branch = await prisma.branch.findUnique({
+    where: { id: branchId },
+    select: { latitude: true, longitude: true },
+  });
+
+  if (!branch || branch.latitude == null || branch.longitude == null) {
+    return null;
+  }
+
+  const branchOrigin = { latitude: branch.latitude, longitude: branch.longitude };
+
+  const candidates = await prisma.driver.findMany({
+    where: {
+      isAvailableForAssignment: true,
+      status: DriverStatus.VERIFIED,
+      lastKnownLatitude: { not: null },
+      lastKnownLongitude: { not: null },
+      assignedOrders: {
+        none: {
+          status: { in: ACTIVE_DRIVER_ORDER_STATUSES },
+        },
+      },
+    },
+    select: { id: true, lastKnownLatitude: true, lastKnownLongitude: true },
+  });
+
+  let nearest: { id: string; distanceKm: number } | null = null;
+
+  for (const candidate of candidates) {
+    if (candidate.lastKnownLatitude == null || candidate.lastKnownLongitude == null) {
+      continue;
+    }
+
+    const distanceKm = haversineDistanceKm(branchOrigin, {
+      latitude: candidate.lastKnownLatitude,
+      longitude: candidate.lastKnownLongitude,
+    });
+
+    if (distanceKm > env.DRIVER_MATCH_RADIUS_KM) {
+      continue;
+    }
+
+    if (!nearest || distanceKm < nearest.distanceKm) {
+      nearest = { id: candidate.id, distanceKm };
+    }
+  }
+
+  return nearest ? { id: nearest.id } : null;
 }
 
 /**
@@ -649,6 +777,38 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
     return result;
   }, INTERACTIVE_TRANSACTION_OPTIONS);
 
+  if (updated.externalOrderId) {
+    void notifyOrderEvent({
+      externalOrderId: updated.externalOrderId,
+      status: updated.status,
+      eventType: "READY",
+    });
+  }
+
+  // Nearest-free-driver auto-assignment: fires right after the READY transition commits, on a
+  // best-effort basis. A failure here must never turn a successful mark-ready into an error
+  // response — the order simply stays READY and unassigned, same as if no driver had ever been
+  // free, and the existing manual assign-driver dropdown in the Inventory frontend remains the
+  // fallback path.
+  //
+  // Bug fixed 2026-07-27 (found via live end-to-end test): this used to unconditionally
+  // `return updated`, the pre-auto-assign snapshot — so a caller that got a driver auto-assigned
+  // would see `assignedDriverId: null` in THIS response, only seeing the real assignment on a
+  // subsequent GET. The driver was correctly assigned in the DB the whole time; only the
+  // response body was stale. Now returns the post-assignment row when assignment succeeds.
+  try {
+    const nearestDriver = await findNearestFreeDriver(updated.branchId);
+
+    if (nearestDriver) {
+      return await assignDriverToSalesOrder(organizationId, updated.id, null, nearestDriver.id);
+    }
+  } catch (error) {
+    console.warn(
+      `[sales-orders] Nearest-free-driver auto-assignment failed for order ${updated.id}`,
+      error,
+    );
+  }
+
   return updated;
 }
 
@@ -658,10 +818,18 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
  * — so any org's staff may assign any VERIFIED driver, without an organization-membership check
  * on the driver itself. See modules/driver-orders for the driver-side pickup/deliver transitions.
  */
+/**
+ * `actorUserId` is nullable: the nearest-free-driver auto-assign path (called from
+ * `markSalesOrderReady` below, right after a READY transition) has no authenticated staff user
+ * behind it — the system picked the driver, not a person. `assignedById` is a nullable FK
+ * (`SalesOrder.assignedById String?`) and `createAuditLog`'s `actorUserId` is already nullable, so
+ * this mirrors the same pattern already used for `cancelSalesOrder`/`rejectSalesOrder`. The
+ * manual assign-driver controller continues to pass a real string.
+ */
 export async function assignDriverToSalesOrder(
   organizationId: string,
   orderId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   driverId: string,
 ) {
   const order = await getSalesOrderById(organizationId, orderId);
@@ -684,6 +852,32 @@ export async function assignDriverToSalesOrder(
   }
 
   const updated = await prisma.$transaction(async (tx) => {
+    // Bug fixed 2026-07-27 (found via audit, not yet hit in the single-order manual E2E test):
+    // nothing here previously re-checked that `driverId` was still free at assignment time. The
+    // order-side status check below (READY -> assigned) is atomic, but that only protects against
+    // double-assigning the same ORDER — it does nothing to stop the same DRIVER being assigned to
+    // two different orders. That's a real race: findNearestFreeDriver (markSalesOrderReady's
+    // auto-assign path) runs as a separate query before this transaction even opens, so two
+    // orders going READY around the same time (or a manual dropdown assignment racing an
+    // auto-assign) can both see the same driver as "free" and both call this function for it. Lock
+    // the driver row for the duration of this transaction so concurrent callers targeting the same
+    // driver serialize here, then re-verify under that lock that the driver has no other active
+    // (READY/OUT_FOR_DELIVERY) assignment before proceeding — otherwise the second caller commits
+    // an assignment for a driver who's already out on a different delivery.
+    await tx.$queryRaw`SELECT id FROM "Driver" WHERE id = ${driverId} FOR UPDATE`;
+
+    const activeAssignmentCount = await tx.salesOrder.count({
+      where: {
+        assignedDriverId: driverId,
+        status: { in: ACTIVE_DRIVER_ORDER_STATUSES },
+        id: { not: orderId },
+      },
+    });
+
+    if (activeAssignmentCount > 0) {
+      throw ApiError.conflict("Driver already has another active delivery assigned");
+    }
+
     // Guard against a concurrent request racing this same transition (e.g. two staff members
     // assigning different drivers at once): the WHERE clause's status check is evaluated
     // atomically by Postgres as part of the UPDATE, so only one concurrent caller can ever win
@@ -726,6 +920,28 @@ export async function assignDriverToSalesOrder(
 
     return result;
   }, INTERACTIVE_TRANSACTION_OPTIONS);
+
+  if (updated.externalOrderId) {
+    void notifyOrderEvent({
+      externalOrderId: updated.externalOrderId,
+      status: updated.status,
+      eventType: "DRIVER_ASSIGNED",
+      assignedDriver: updated.assignedDriver
+        ? {
+            fullName: updated.assignedDriver.fullName,
+            phone: updated.assignedDriver.phone,
+            vehicleType: updated.assignedDriver.vehicleType,
+          }
+        : null,
+    });
+  }
+
+  void sendPushToDriver(driverId, {
+    title: "New delivery assigned",
+    body: `You've been assigned order #${updated.orderNumber}.`,
+    data: { salesOrderId: updated.id },
+    channelId: "order_alert",
+  });
 
   return updated;
 }

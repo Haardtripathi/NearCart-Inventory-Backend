@@ -76,6 +76,14 @@ export const idParamSchema = z.object({
 
 export const languageCodeSchema = z.nativeEnum(LanguageCode);
 
+// Shared by both the shop-staff (`/api/users/device-token`) and driver
+// (`/api/driver/device-token`) registration endpoints — same payload shape either side of the
+// polymorphic DeviceToken model (see prisma schema: ownerType discriminates 'USER' vs 'DRIVER').
+export const deviceTokenSchema = z.object({
+  expoPushToken: trimmedString,
+  platform: z.enum(["android", "ios"]).optional(),
+});
+
 export function uniqueLanguageArraySchema<TSchema extends z.ZodTypeAny>(itemSchema: TSchema) {
   return z.array(itemSchema).superRefine((entries, ctx) => {
     const seen = new Set<string>();

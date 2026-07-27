@@ -6,11 +6,12 @@ import { authenticate, requireRoles } from "../../middlewares/auth.middleware";
 import { requireOrganizationContext } from "../../middlewares/org.middleware";
 import { validateRequest } from "../../middlewares/validate.middleware";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { idParamSchema } from "../../utils/validation";
+import { deviceTokenSchema, idParamSchema } from "../../utils/validation";
 import {
   createOrganizationUserController,
   generateOrganizationUserAccessLinkController,
   listOrganizationUsersController,
+  registerUserDeviceTokenController,
   searchUsersDirectoryController,
   updateOrganizationUserController,
 } from "./users.controller";
@@ -23,6 +24,16 @@ import {
 export const usersRouter = Router();
 
 usersRouter.use(authenticate);
+
+// Not gated behind requireOrganizationContext — a device token belongs to the User account
+// itself (push targeting is done per-org via OrganizationMembership lookups at send time, see
+// services/push-notification.service.ts sendPushToOrgStaff), not to whichever org happens to be
+// active in the request when the app registers its token.
+usersRouter.post(
+  "/device-token",
+  validateRequest({ body: deviceTokenSchema }),
+  asyncHandler(registerUserDeviceTokenController),
+);
 
 usersRouter.get(
   "/directory",

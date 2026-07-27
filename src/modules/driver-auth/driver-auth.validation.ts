@@ -21,3 +21,11 @@ export const loginDriverSchema = z
     message: "Either phone or email is required",
     path: ["phone"],
   });
+
+export const refreshDriverTokenSchema = z.object({
+  refreshToken: trimmedString,
+});
+
+export const logoutDriverSchema = z.object({
+  refreshToken: trimmedString,
+});

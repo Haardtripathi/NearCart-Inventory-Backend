@@ -1,0 +1,175 @@
+{
+  "generatedAt": "2026-07-26T21:36:01.888Z",
+  "shops": [
+    {
+      "shopName": "Bandra Fresh Mart",
+      "shopSlug": "bandra-fresh-mart",
+      "shopCategory": "Grocery",
+      "city": "Mumbai",
+      "logoImageUrl": "https://images.unsplash.com/photo-1759197894183-ffffa3c7fcd4?w=800&auto=format&fit=crop&q=80",
+      "latitude": 19.0596,
+      "longitude": 72.8295,
+      "addressArea": "Bandra West",
+      "organizationId": "cms21pvl30000hspltccn8uof",
+      "branchId": "cms21pwdk0002hspl6lm0iauc",
+      "productCount": 4
+    },
+    {
+      "shopName": "Colaba Corner Pharmacy",
+      "shopSlug": "colaba-corner-pharmacy",
+      "shopCategory": "Pharmacy",
+      "city": "Mumbai",
+      "logoImageUrl": "https://images.unsplash.com/photo-1696861286643-341a8d7a79e9?w=800&auto=format&fit=crop&q=80",
+      "latitude": 18.9067,
+      "longitude": 72.8147,
+      "addressArea": "Colaba",
+      "organizationId": "cms2bgog4000chsqnrutwg09k",
+      "branchId": "cms2bgp12000ehsqnx24r1uvq",
+      "productCount": 4
+    },
+    {
+      "shopName": "Indiranagar Bake House",
+      "shopSlug": "indiranagar-bake-house",
+      "shopCategory": "Bakery",
+      "city": "Bengaluru",
+      "logoImageUrl": "https://images.unsplash.com/photo-1774669081553-4ef841520c05?w=800&auto=format&fit=crop&q=80",
+      "latitude": 12.9784,
+      "longitude": 77.6408,
+      "addressArea": "Indiranagar",
+      "organizationId": "cms2bgvd6001bhsqn3djrdzwc",
+      "branchId": "cms2bgvrr001dhsqn73asnyit",
+      "productCount": 4
+    },
+    {
+      "shopName": "Koramangala Tech Bazaar",
+      "shopSlug": "koramangala-tech-bazaar",
+      "shopCategory": "Electronics",
+      "city": "Bengaluru",
+      "logoImageUrl": "https://images.unsplash.com/photo-1571857089849-f6390447191a?w=800&auto=format&fit=crop&q=80",
+      "latitude": 12.9352,
+      "longitude": 77.6245,
+      "addressArea": "Koramangala",
+      "organizationId": "cms2bh1ni002ahsqn2vxfq8io",
+      "branchId": "cms2bh22v002chsqn2v8g6aun",
+      "productCount": 4
+    },
+    {
+      "shopName": "Banjara Hills Grocery",
+      "shopSlug": "banjara-hills-grocery",
+      "shopCategory": "Grocery",
+      "city": "Hyderabad",
+      "logoImageUrl": "https://images.unsplash.com/photo-1759197894183-ffffa3c7fcd4?w=800&auto=format&fit=crop&q=80",
+      "latitude": 17.4156,
+      "longitude": 78.4347,
+      "addressArea": "Banjara Hills",
+      "organizationId": "cms2bh7h60039hsqnfd83xra5",
+      "branchId": "cms2bh7ux003bhsqna6t1reti",
+      "productCount": 4
+    },
+    {
+      "shopName": "Hitech Diner",
+      "shopSlug": "hitech-diner",
+      "shopCategory": "Restaurant",
+      "city": "Hyderabad",
+      "logoImageUrl": "https://images.unsplash.com/photo-1753727471014-efe38840c7c7?w=800&auto=format&fit=crop&q=80",
+      "latitude": 17.4435,
+      "longitude": 78.3772,
+      "addressArea": "HITEC City",
+      "organizationId": "cms2bhd8a0048hsqn8q42gq1a",
+      "branchId": "cms2bhdl8004ahsqnsi69qwc1",
+      "productCount": 4
+    },
+    {
+      "shopName": "FC Road Stationery Hub",
+      "shopSlug": "fc-road-stationery-hub",
+      "shopCategory": "Stationery",
+      "city": "Pune",
+      "logoImageUrl": "https://images.unsplash.com/photo-1761322572550-967ea8c0bfd9?w=800&auto=format&fit=crop&q=80",
+      "latitude": 18.5246,
+      "longitude": 73.8412,
+      "addressArea": "FC Road",
+      "organizationId": "cms2bhim90055hsqner0108re",
+      "branchId": "cms2bhj890057hsqn5ntb4oa8",
+      "productCount": 4
+    },
+    {
+      "shopName": "Kothrud Family Pharmacy",
+      "shopSlug": "kothrud-family-pharmacy",
+      "shopCategory": "Pharmacy",
+      "city": "Pune",
+      "logoImageUrl": "https://images.unsplash.com/photo-1696861286643-341a8d7a79e9?w=800&auto=format&fit=crop&q=80",
+      "latitude": 18.5074,
+      "longitude": 73.8077,
+      "addressArea": "Kothrud",
+      "organizationId": "cms2bho4t0064hsqnhe08e4mh",
+      "branchId": "cms2bhogs0066hsqnefov3po8",
+      "productCount": 4
+    }
+  ],
+  "drivers": [
+    {
+      "id": "cms2bhu3k0073hsqnna3lhkud",
+      "fullName": "Rajesh Kadam",
+      "city": "Mumbai",
+      "phone": "+919821000101",
+      "latitude": 19.055,
+      "longitude": 72.84
+    },
+    {
+      "id": "cms2bhuzi0074hsqn5fdwe420",
+      "fullName": "Suresh Pawar",
+      "city": "Mumbai",
+      "phone": "+919821000102",
+      "latitude": 18.91,
+      "longitude": 72.82
+    },
+    {
+      "id": "cms2bhvl10075hsqn3jkhziun",
+      "fullName": "Manjunath Gowda",
+      "city": "Bengaluru",
+      "phone": "+919845000201",
+      "latitude": 12.975,
+      "longitude": 77.635
+    },
+    {
+      "id": "cms2bhw750076hsqnjkk8as0n",
+      "fullName": "Naveen Kumar",
+      "city": "Bengaluru",
+      "phone": "+919845000202",
+      "latitude": 12.93,
+      "longitude": 77.62
+    },
+    {
+      "id": "cms2bhws70077hsqne66bw2hy",
+      "fullName": "Srinivas Reddy",
+      "city": "Hyderabad",
+      "phone": "+919440000301",
+      "latitude": 17.41,
+      "longitude": 78.44
+    },
+    {
+      "id": "cms2bhxfc0078hsqnu8hm21l0",
+      "fullName": "Mahesh Rao",
+      "city": "Hyderabad",
+      "phone": "+919440000302",
+      "latitude": 17.448,
+      "longitude": 78.38
+    },
+    {
+      "id": "cms2bhxyv0079hsqn2gunxgkw",
+      "fullName": "Ganesh Jadhav",
+      "city": "Pune",
+      "phone": "+919922000401",
+      "latitude": 18.52,
+      "longitude": 73.845
+    },
+    {
+      "id": "cms2bhylo007ahsqn0g7bid8q",
+      "fullName": "Vikas Deshmukh",
+      "city": "Pune",
+      "phone": "+919922000402",
+      "latitude": 18.505,
+      "longitude": 73.81
+    }
+  ]
+}

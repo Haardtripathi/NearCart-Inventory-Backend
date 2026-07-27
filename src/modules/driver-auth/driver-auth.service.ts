@@ -4,6 +4,11 @@ import bcrypt from "bcrypt";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { signDriverAuthToken } from "../../utils/driverJwt";
+import {
+  createDriverRefreshSession,
+  revokeDriverRefreshSession,
+  rotateDriverRefreshSession,
+} from "../../utils/driverRefreshToken";
 import { createAuditLog } from "../audit/audit.service";
 
 interface RegisterDriverInput {
@@ -157,9 +162,53 @@ export async function loginDriver(input: LoginDriverInput) {
   }
 
   const token = signDriverAuthToken({ driverId: driver.id });
+  const refreshToken = await createDriverRefreshSession(driver.id);
 
   return {
     token,
+    refreshToken,
     driver: serializeDriver(driver),
   };
+}
+
+/**
+ * Exchanges a valid (unexpired, unrevoked) refresh token for a new access token, rotating the
+ * refresh token in the same call (old one revoked, new one issued) — same pattern as NearCart's
+ * mobile refresh flow. Re-checks the driver's current status on every refresh (not just at
+ * login), so a driver suspended after logging in loses access on their very next silent refresh,
+ * not just their next login.
+ */
+export async function refreshDriverSession(rawRefreshToken: string) {
+  const { driverId, refreshToken } = await rotateDriverRefreshSession(rawRefreshToken);
+
+  const driver = await prisma.driver.findUnique({ where: { id: driverId } });
+
+  if (!driver) {
+    throw ApiError.unauthorized("Driver account not found");
+  }
+
+  if (driver.status === DriverStatus.SUSPENDED) {
+    throw new DriverStatusError("DRIVER_SUSPENDED", "Your driver account has been suspended.");
+  }
+
+  if (driver.status !== DriverStatus.VERIFIED) {
+    throw new DriverStatusError(
+      "DRIVER_NOT_VERIFIED",
+      "Your driver account is still pending verification. We'll notify you once it's approved.",
+    );
+  }
+
+  const token = signDriverAuthToken({ driverId: driver.id });
+
+  return {
+    token,
+    refreshToken,
+    driver: serializeDriver(driver),
+  };
+}
+
+/** Revokes a single refresh session (logout). Access tokens are short-lived (1d default) and not
+ * separately blocklisted — same tradeoff NearCart's own refresh design already accepts. */
+export async function logoutDriver(rawRefreshToken: string) {
+  await revokeDriverRefreshSession(rawRefreshToken);
 }

@@ -1,6 +1,7 @@
 import { AuditAction, LanguageCode, OrderSource, ProductStatus, Prisma, SalesOrderStatus } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
+import { env } from "../../config/env";
 import { ApiError } from "../../utils/ApiError";
 import { assertBranchInOrg, assertOrganizationExists } from "../../utils/guards";
 import { toDecimal } from "../../utils/decimal";
@@ -15,6 +16,7 @@ import { buildPagination, getPagination } from "../../utils/pagination";
 import { getAvailableStock, isLowStock } from "../../utils/stock";
 import { createAuditLog } from "../audit/audit.service";
 import { cancelSalesOrder } from "../sales-orders/sales-orders.service";
+import { sendPushToOrgStaff } from "../../services/push-notification.service";
 
 type RequestedLocaleOptions = {
   requestedLanguage?: LanguageCode | null;
@@ -938,6 +940,12 @@ export async function createBridgedSalesOrder(
           externalOrderId: input.externalOrderId,
           externalOrderNumber: input.externalOrderNumber ?? null,
           notes,
+          // Bridged orders are the real-world path a customer order actually takes, so this is
+          // the deadline that matters for the order-confirmation-sweep cron in practice — the
+          // staff-facing createSalesOrder path sets the same field for consistency, but the
+          // sweep's WHERE clause only ever matches PENDING rows, which is what this always starts
+          // as (see status above).
+          confirmationDeadlineAt: new Date(Date.now() + env.ORDER_CONFIRMATION_TIMEOUT_MINUTES * 60_000),
           deliveryAddress: toNullableJsonValue(deliveryAddress),
           subtotal,
           taxTotal: toDecimal(0),
@@ -961,6 +969,17 @@ export async function createBridgedSalesOrder(
       });
 
       return order;
+    });
+
+    // New order placed -> notify every device belonging to a staff User with an active
+    // membership on this org (fire-and-forget: a push failure must never fail order creation,
+    // same resilience posture as notifyOrderEvent). Only on an actual new row — not on the
+    // idempotent-replay paths above/below, which didn't create anything new to be notified about.
+    void sendPushToOrgStaff(organizationId, {
+      title: "New order received",
+      body: `Order #${created.orderNumber} — ${preparedItems.length} item(s), ${created.total.toString()} total.`,
+      data: { salesOrderId: created.id },
+      channelId: "order_alert",
     });
 
     return { ...summarizeSalesOrder(created), created: true as const };

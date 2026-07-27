@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/ApiResponse";
+import { upsertDeviceToken } from "../../services/device-tokens.service";
 import {
   createOrganizationUser,
   generateOrganizationUserAccessLink,
@@ -50,4 +51,9 @@ export async function generateOrganizationUserAccessLinkController(req: Request,
   );
 
   return sendSuccess(res, 201, "User access link generated successfully", data);
+}
+
+export async function registerUserDeviceTokenController(req: Request, res: Response) {
+  const data = await upsertDeviceToken("USER", req.auth!.userId, req.body);
+  return sendSuccess(res, 200, "Device token registered successfully", data);
 }

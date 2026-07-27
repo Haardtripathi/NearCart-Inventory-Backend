@@ -3,6 +3,8 @@ import { AuditAction, SalesOrderStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { createAuditLog } from "../audit/audit.service";
+import { notifyOrderEvent } from "../../services/order-event-webhook.service";
+import { upsertDeviceToken } from "../../services/device-tokens.service";
 
 const DRIVER_VISIBLE_STATUSES: SalesOrderStatus[] = [SalesOrderStatus.READY, SalesOrderStatus.OUT_FOR_DELIVERY];
 
@@ -140,6 +142,14 @@ export async function pickupDriverOrder(driverId: string, orderId: string) {
     return result;
   });
 
+  if (updated.externalOrderId) {
+    void notifyOrderEvent({
+      externalOrderId: updated.externalOrderId,
+      status: updated.status,
+      eventType: "OUT_FOR_DELIVERY",
+    });
+  }
+
   return serializeDriverOrder(updated);
 }
 
@@ -188,5 +198,52 @@ export async function deliverDriverOrder(driverId: string, orderId: string) {
     return result;
   });
 
+  if (updated.externalOrderId) {
+    void notifyOrderEvent({
+      externalOrderId: updated.externalOrderId,
+      status: updated.status,
+      eventType: "DELIVERED",
+    });
+  }
+
   return serializeDriverOrder(updated);
+}
+
+/**
+ * Toggles a driver's own "online/offline" availability for nearest-free-driver auto-assignment
+ * (see sales-orders.service.ts's findNearestFreeDriver). Going offline does NOT unassign any
+ * order already in progress — it only takes the driver out of consideration for *future*
+ * auto-matches.
+ */
+export async function updateDriverAvailability(driverId: string, isAvailableForAssignment: boolean) {
+  return prisma.driver.update({
+    where: { id: driverId },
+    data: { isAvailableForAssignment },
+    select: { id: true, isAvailableForAssignment: true },
+  });
+}
+
+/**
+ * Records a driver's current position for nearest-free-driver matching. Called roughly once a
+ * minute by the driver app's foreground `setInterval`, only while the driver is toggled online —
+ * deliberately NOT continuous background tracking (Phase 1 explicitly defers live tracking, see
+ * root plan doc).
+ */
+export async function updateDriverLocation(driverId: string, latitude: number, longitude: number) {
+  return prisma.driver.update({
+    where: { id: driverId },
+    data: {
+      lastKnownLatitude: latitude,
+      lastKnownLongitude: longitude,
+      lastLocationAt: new Date(),
+    },
+    select: { id: true, lastKnownLatitude: true, lastKnownLongitude: true, lastLocationAt: true },
+  });
+}
+
+export async function registerDriverDeviceTokenForDriver(
+  driverId: string,
+  input: { expoPushToken: string; platform?: string },
+) {
+  return upsertDeviceToken("DRIVER", driverId, input);
 }

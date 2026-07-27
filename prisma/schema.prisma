@@ -354,6 +354,11 @@ model Branch {
   country          String?
   postalCode       String?
   isActive         Boolean            @default(true)
+  // Pickup-point coordinates for nearest-driver distance matching (see Driver.lastKnownLatitude
+  // below) — nullable since existing branches predate this column; backfilled by shop owners
+  // editing branch details going forward.
+  latitude         Float?
+  longitude        Float?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   deletedAt        DateTime?
@@ -995,6 +1000,10 @@ model SalesOrder {
   total               Decimal          @default(0) @db.Decimal(18, 4)
   notes               String?
   rejectionReason     String?
+  // Set at creation (createdAt + ORDER_CONFIRMATION_TIMEOUT_MINUTES). The order-confirmation
+  // sweep cron auto-rejects PENDING orders past this deadline — null for orders created before
+  // this column existed (never auto-cancelled, matching pre-existing behavior).
+  confirmationDeadlineAt DateTime?
   // Structured per-order delivery address, shape `{ addressLine, latitude, longitude }`
   // (all nullable). Populated at bridge order-creation time from the marketplace bridge's
   // customer payload (see marketplace.service.ts createBridgedSalesOrder) — kept separate from
@@ -1034,6 +1043,7 @@ model SalesOrder {
   @@unique([organizationId, orderNumber])
   @@index([organizationId, status])
   @@index([assignedDriverId, status])
+  @@index([status, confirmationDeadlineAt])
   // Branch-scoped status counting (e.g. the marketplace bridge's active-order-count endpoint)
   // filters by branchId + status without organizationId in the WHERE — the existing
   // [organizationId, status] index above doesn't help there since branchId isn't its leading
@@ -1056,11 +1066,53 @@ model Driver {
   vehicleType    String
   vehicleNumber  String
   status         DriverStatus @default(PENDING_VERIFICATION)
+  // Nearest-free-driver auto-assignment (see sales-orders driver-matching service): a driver is
+  // "free" when isAvailableForAssignment is true AND they have no SalesOrder currently assigned
+  // with status READY/OUT_FOR_DELIVERY. lastKnownLatitude/Longitude are updated by a periodic
+  // (~60s) foreground location ping from the driver app while online — deliberately NOT
+  // continuous background tracking (Phase 1 explicitly defers live tracking).
+  isAvailableForAssignment Boolean   @default(false)
+  lastKnownLatitude        Float?
+  lastKnownLongitude       Float?
+  lastLocationAt           DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   assignedOrders SalesOrder[] @relation("SalesOrderAssignedDriver")
+  refreshTokens  DriverRefreshToken[]
 
   @@index([status])
+  @@index([isAvailableForAssignment])
+}
+
+// Mirrors NearCart/backend's RefreshToken model/rotation design (rotate-on-use, hashed storage,
+// soft-revoke) — Driver previously had only a flat non-rotating JWT with no refresh mechanism at
+// all, which can't support a months-long session safely.
+model DriverRefreshToken {
+  id        String    @id @default(cuid())
+  driverId  String
+  tokenHash String    @unique
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+  driver    Driver    @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([driverId])
+  @@index([expiresAt])
+}
+
+// Shared by both shop-staff Users and Drivers since both live in this database — ownerType
+// discriminates which table ownerId points into (no FK, since it's polymorphic).
+model DeviceToken {
+  id             String   @id @default(cuid())
+  ownerType      String // 'USER' | 'DRIVER'
+  ownerId        String
+  expoPushToken  String
+  platform       String? // 'android' | 'ios'
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([ownerType, ownerId, expoPushToken])
+  @@index([ownerType, ownerId])
 }
 
 model SalesOrderItem {

@@ -1,6 +1,12 @@
 import type { Request, Response } from "express";
 
-import { DriverStatusError, loginDriver, registerDriver } from "./driver-auth.service";
+import {
+  DriverStatusError,
+  loginDriver,
+  logoutDriver,
+  refreshDriverSession,
+  registerDriver,
+} from "./driver-auth.service";
 
 /**
  * Deliberately NOT using sendSuccess()'s `{success,message,data}` envelope here — the driver API
@@ -25,4 +31,22 @@ export async function loginDriverController(req: Request, res: Response) {
 
     throw error;
   }
+}
+
+export async function refreshDriverTokenController(req: Request, res: Response) {
+  try {
+    const data = await refreshDriverSession(req.body.refreshToken);
+    return res.status(200).json(data);
+  } catch (error) {
+    if (error instanceof DriverStatusError) {
+      return res.status(403).json({ error: { code: error.code, message: error.message } });
+    }
+
+    throw error;
+  }
+}
+
+export async function logoutDriverController(req: Request, res: Response) {
+  await logoutDriver(req.body.refreshToken);
+  return res.status(200).json({ success: true });
 }

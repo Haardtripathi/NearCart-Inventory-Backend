@@ -356,6 +356,21 @@ async function normalizeMasterVariantDefaults(db, masterItemId, preferredDefault
         },
     });
 }
+// Auto-translation calls out to the (self-hosted) LibreTranslate service over HTTP. That must
+// never happen while an interactive Prisma transaction is open: on any real network latency
+// (or a slow/unreachable translation service) it reliably blows past Prisma's 5s interactive
+// transaction timeout and the whole write fails with "Transaction already closed" even though
+// nothing was actually wrong with the database. So this is resolved up front, before the
+// caller opens its `$transaction`, and `upsertMasterVariantTemplates` only ever does DB writes.
+async function enrichVariantTemplateTranslations(templates) {
+    return Promise.all(templates.map(async (template) => ({
+        ...template,
+        translations: await (0, autoTranslate_1.enrichWithAutoTranslations)({
+            baseName: template.name,
+            existingTranslations: template.translations,
+        }),
+    })));
+}
 async function upsertMasterVariantTemplates(db, masterItemId, templates) {
     const existingTemplates = await db.masterCatalogVariantTemplate.findMany({
         where: {
@@ -392,10 +407,7 @@ async function upsertMasterVariantTemplates(db, masterItemId, templates) {
     const existingByCode = new Map(existingTemplates.map((template) => [template.code, template]));
     const preferredDefaultCode = templates.find((template) => template.isDefault)?.code;
     for (const template of templates) {
-        const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
-            baseName: template.name,
-            existingTranslations: template.translations,
-        });
+        const translations = template.translations ?? [];
         const existing = existingByCode.get(template.code.trim());
         if (existing) {
             await db.masterCatalogVariantTemplate.update({
@@ -457,14 +469,14 @@ async function getMasterCatalogCategories(query, localeContext) {
         ...(query.search
             ? {
                 OR: [
-                    { code: { contains: query.search, mode: "insensitive" } },
-                    { slug: { contains: query.search, mode: "insensitive" } },
+                    { code: { contains: query.search } },
+                    { slug: { contains: query.search } },
                     {
                         translations: {
                             some: {
                                 OR: [
-                                    { name: { contains: query.search, mode: "insensitive" } },
-                                    { description: { contains: query.search, mode: "insensitive" } },
+                                    { name: { contains: query.search } },
+                                    { description: { contains: query.search } },
                                 ],
                             },
                         },
@@ -596,8 +608,8 @@ async function getMasterCatalogItems(query, localeContext, currentOrganizationId
             ? {
                 OR: [
                     { searchText: { contains: normalizedQuery } },
-                    { code: { contains: normalizedQuery, mode: "insensitive" } },
-                    { slug: { contains: normalizedQuery, mode: "insensitive" } },
+                    { code: { contains: normalizedQuery } },
+                    { slug: { contains: normalizedQuery } },
                 ],
             }
             : {}),
@@ -637,6 +649,7 @@ async function createMasterCatalogItem(actorUserId, input, localeContext) {
         baseDescription: input.canonicalDescription,
         existingTranslations: input.translations,
     });
+    const variantTemplates = await enrichVariantTemplateTranslations(input.variantTemplates ?? []);
     const item = await prisma_1.prisma.$transaction(async (tx) => {
         const created = await tx.masterCatalogItem.create({
             data: {
@@ -665,10 +678,10 @@ async function createMasterCatalogItem(actorUserId, input, localeContext) {
         });
         await upsertMasterItemTranslations(tx, created.id, translations);
         await replaceMasterItemAliases(tx, created.id, input.aliases ?? []);
-        await upsertMasterVariantTemplates(tx, created.id, input.variantTemplates ?? []);
+        await upsertMasterVariantTemplates(tx, created.id, variantTemplates);
         await rebuildMasterItemSearchText(tx, created.id);
         return created;
-    });
+    }, { timeout: 20000, maxWait: 10000 });
     const record = await getMasterCatalogItemRecordById(item.id);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         actorUserId,
@@ -684,14 +697,14 @@ async function updateMasterCatalogItem(itemId, actorUserId, input, localeContext
     const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
         baseName: input.canonicalName ?? existing.canonicalName,
         baseDescription: input.canonicalDescription ?? existing.canonicalDescription ?? undefined,
-        existingTranslations: input.translations ??
-            existing.translations.map((translation) => ({
-                language: translation.language,
-                name: translation.name,
-                shortName: translation.shortName ?? undefined,
-                description: translation.description ?? undefined,
-            })),
+        existingTranslations: (0, translations_1.mergeTranslationsForUpdate)(existing.translations.map((translation) => ({
+            language: translation.language,
+            name: translation.name,
+            shortName: translation.shortName ?? undefined,
+            description: translation.description ?? undefined,
+        })), input.translations),
     });
+    const variantTemplates = input.variantTemplates !== undefined ? await enrichVariantTemplateTranslations(input.variantTemplates) : undefined;
     await prisma_1.prisma.$transaction(async (tx) => {
         await tx.masterCatalogItem.update({
             where: {
@@ -728,11 +741,11 @@ async function updateMasterCatalogItem(itemId, actorUserId, input, localeContext
         if (input.aliases !== undefined) {
             await replaceMasterItemAliases(tx, itemId, input.aliases);
         }
-        if (input.variantTemplates !== undefined) {
-            await upsertMasterVariantTemplates(tx, itemId, input.variantTemplates);
+        if (variantTemplates !== undefined) {
+            await upsertMasterVariantTemplates(tx, itemId, variantTemplates);
         }
         await rebuildMasterItemSearchText(tx, itemId);
-    });
+    }, { timeout: 20000, maxWait: 10000 });
     const updated = await getMasterCatalogItemRecordById(itemId);
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         actorUserId,

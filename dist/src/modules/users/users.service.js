@@ -150,13 +150,11 @@ async function searchUsersDirectory(search) {
                     {
                         fullName: {
                             contains: query,
-                            mode: "insensitive",
                         },
                     },
                     {
                         email: {
                             contains: query,
-                            mode: "insensitive",
                         },
                     },
                 ],

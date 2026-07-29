@@ -13,6 +13,11 @@ const users_controller_1 = require("./users.controller");
 const users_validation_1 = require("./users.validation");
 exports.usersRouter = (0, express_1.Router)();
 exports.usersRouter.use(auth_middleware_1.authenticate);
+// Not gated behind requireOrganizationContext — a device token belongs to the User account
+// itself (push targeting is done per-org via OrganizationMembership lookups at send time, see
+// services/push-notification.service.ts sendPushToOrgStaff), not to whichever org happens to be
+// active in the request when the app registers its token.
+exports.usersRouter.post("/device-token", (0, validate_middleware_1.validateRequest)({ body: validation_1.deviceTokenSchema }), (0, asyncHandler_1.asyncHandler)(users_controller_1.registerUserDeviceTokenController));
 exports.usersRouter.get("/directory", (0, auth_middleware_1.requireRoles)(client_1.UserRole.SUPER_ADMIN), (0, validate_middleware_1.validateRequest)({ query: users_validation_1.usersDirectoryQuerySchema }), (0, asyncHandler_1.asyncHandler)(users_controller_1.searchUsersDirectoryController));
 exports.usersRouter.get("/", org_middleware_1.requireOrganizationContext, (0, auth_middleware_1.requireRoles)(...roles_1.USER_MANAGEMENT_ROLES), (0, asyncHandler_1.asyncHandler)(users_controller_1.listOrganizationUsersController));
 exports.usersRouter.post("/", org_middleware_1.requireOrganizationContext, (0, auth_middleware_1.requireRoles)(...roles_1.USER_MANAGEMENT_ROLES), (0, validate_middleware_1.validateRequest)({ body: users_validation_1.createOrganizationUserSchema }), (0, asyncHandler_1.asyncHandler)(users_controller_1.createOrganizationUserController));

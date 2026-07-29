@@ -52,7 +52,11 @@ async function enrichWithAutoTranslations(args) {
         }
         return Array.from(translationByLanguage.values());
     }
-    const generatedResults = await Promise.all(missingLanguages.map(async (language) => {
+    // Skip languages LibreTranslate has no model loaded for (see MACHINE_TRANSLATABLE_LANGUAGE_CODES) —
+    // leave them absent rather than storing an untranslated echo mislabeled as that language. Locale
+    // resolution already falls back to org default / base name for languages with no translation row.
+    const translatableLanguages = missingLanguages.filter((language) => localization_1.MACHINE_TRANSLATABLE_LANGUAGE_CODES.includes(language));
+    const generatedResults = await Promise.all(translatableLanguages.map(async (language) => {
         try {
             const [translatedName, translatedDescription] = await Promise.all([
                 (0, libreTranslate_1.translateLanguageCodeText)(args.baseName, sourceLanguage, language),
@@ -85,7 +89,7 @@ async function enrichWithAutoTranslations(args) {
             translationByLanguage.set(translation.language, translation);
         }
     }
-    for (const language of missingLanguages) {
+    for (const language of translatableLanguages) {
         if (!translationByLanguage.has(language)) {
             translationByLanguage.set(language, {
                 language,

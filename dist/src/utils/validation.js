@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.languageCodeSchema = exports.idParamSchema = exports.optionalDateInputSchema = exports.dateInputSchema = exports.optionalDecimalInputSchema = exports.decimalInputSchema = exports.paginationQuerySchema = exports.optionalJsonSchema = exports.jsonValueSchema = exports.optionalEmailSchema = exports.strictBooleanQueryParam = exports.nullableTrimmedString = exports.optionalTrimmedString = exports.trimmedString = void 0;
+exports.deviceTokenSchema = exports.languageCodeSchema = exports.idParamSchema = exports.optionalDateInputSchema = exports.dateInputSchema = exports.optionalDecimalInputSchema = exports.decimalInputSchema = exports.paginationQuerySchema = exports.optionalJsonSchema = exports.jsonValueSchema = exports.optionalEmailSchema = exports.strictBooleanQueryParam = exports.nullableTrimmedString = exports.optionalTrimmedString = exports.trimmedString = void 0;
 exports.uniqueLanguageArraySchema = uniqueLanguageArraySchema;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
@@ -59,6 +59,13 @@ exports.idParamSchema = zod_1.z.object({
     id: zod_1.z.string().trim().min(1),
 });
 exports.languageCodeSchema = zod_1.z.nativeEnum(client_1.LanguageCode);
+// Shared by both the shop-staff (`/api/users/device-token`) and driver
+// (`/api/driver/device-token`) registration endpoints — same payload shape either side of the
+// polymorphic DeviceToken model (see prisma schema: ownerType discriminates 'USER' vs 'DRIVER').
+exports.deviceTokenSchema = zod_1.z.object({
+    expoPushToken: exports.trimmedString,
+    platform: zod_1.z.enum(["android", "ios"]).optional(),
+});
 function uniqueLanguageArraySchema(itemSchema) {
     return zod_1.z.array(itemSchema).superRefine((entries, ctx) => {
         const seen = new Set();

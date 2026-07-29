@@ -49,7 +49,7 @@ async function listStockTransfers(organizationId, query) {
         ...(query.status ? { status: query.status } : {}),
         ...(query.search
             ? {
-                transferNumber: { contains: query.search, mode: "insensitive" },
+                transferNumber: { contains: query.search },
             }
             : {}),
     };

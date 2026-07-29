@@ -4,6 +4,8 @@ exports.createOrganizationController = createOrganizationController;
 exports.getMyOrganizationsController = getMyOrganizationsController;
 exports.getOrganizationByIdController = getOrganizationByIdController;
 exports.addIndustryToOrganizationController = addIndustryToOrganizationController;
+exports.getEnabledPagesController = getEnabledPagesController;
+exports.updateEnabledPagesController = updateEnabledPagesController;
 const ApiResponse_1 = require("../../utils/ApiResponse");
 const localization_1 = require("../../utils/localization");
 const organizations_service_1 = require("./organizations.service");
@@ -24,4 +26,12 @@ async function getOrganizationByIdController(req, res) {
 async function addIndustryToOrganizationController(req, res) {
     const data = await (0, organizations_service_1.addIndustryToOrganization)(req.auth.userId, req.auth.role, req.params.id, req.body);
     return (0, ApiResponse_1.sendSuccess)(res, 201, "Industry enabled for organization successfully", data);
+}
+async function getEnabledPagesController(req, res) {
+    const data = await (0, organizations_service_1.getEnabledPages)(req.auth.activeOrganizationId);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Sidebar page visibility fetched successfully", data);
+}
+async function updateEnabledPagesController(req, res) {
+    const data = await (0, organizations_service_1.updateEnabledPages)(req.auth.activeOrganizationId, req.auth.userId, req.body.enabledPages);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Sidebar page visibility updated successfully", data);
 }

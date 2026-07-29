@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SUPPORTED_LANGUAGE_CODES = void 0;
+exports.MACHINE_TRANSLATABLE_LANGUAGE_CODES = exports.SUPPORTED_LANGUAGE_CODES = void 0;
 exports.normalizeLanguageCode = normalizeLanguageCode;
 exports.parseAcceptLanguageHeader = parseAcceptLanguageHeader;
 exports.createLocaleContext = createLocaleContext;
@@ -10,6 +10,14 @@ exports.serializeLocalizedEntity = serializeLocalizedEntity;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../config/prisma");
 exports.SUPPORTED_LANGUAGE_CODES = [client_1.LanguageCode.EN, client_1.LanguageCode.HI, client_1.LanguageCode.GU];
+// Languages the self-hosted LibreTranslate instance actually has models loaded for
+// (see python/libretranslate/start-local.sh and start-render.sh: `--load-only en,hi`).
+// GU is a supported *display/manual-entry* language but is deliberately excluded here —
+// without a loaded model, LibreTranslate silently echoes the source text back unchanged,
+// which would get stored as a fake "GU" translation that's actually still English.
+// Auto-translate should skip GU entirely and leave it for manual entry until a GU model
+// is loaded (or GU support is dropped) — a product decision made 2026-07-23.
+exports.MACHINE_TRANSLATABLE_LANGUAGE_CODES = [client_1.LanguageCode.EN, client_1.LanguageCode.HI];
 function sanitizeSupportedLanguageCode(value) {
     return value && exports.SUPPORTED_LANGUAGE_CODES.includes(value) ? value : null;
 }
@@ -65,8 +73,8 @@ function parseAcceptLanguageHeader(headerValue) {
     });
     return parsed[0]?.language ?? null;
 }
-function buildFallbackLanguages(resolvedLanguage, orgDefaultLanguage) {
-    return Array.from(new Set([resolvedLanguage, orgDefaultLanguage ?? null, client_1.LanguageCode.EN].filter(Boolean)));
+function buildFallbackLanguages(resolvedLanguage, userPreferredLanguage, orgDefaultLanguage) {
+    return Array.from(new Set([resolvedLanguage, userPreferredLanguage ?? null, orgDefaultLanguage ?? null, client_1.LanguageCode.EN].filter(Boolean)));
 }
 function createLocaleContext(options) {
     const requestedLanguage = sanitizeSupportedLanguageCode(options?.requestedLanguage ?? null);
@@ -78,7 +86,7 @@ function createLocaleContext(options) {
         resolvedLanguage,
         orgDefaultLanguage,
         userPreferredLanguage,
-        fallbackLanguages: buildFallbackLanguages(resolvedLanguage, orgDefaultLanguage),
+        fallbackLanguages: buildFallbackLanguages(resolvedLanguage, userPreferredLanguage, orgDefaultLanguage),
     };
 }
 async function resolveLocaleContext(req, options) {

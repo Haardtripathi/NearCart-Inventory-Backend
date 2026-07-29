@@ -974,11 +974,17 @@ export async function createBridgedSalesOrder(
     // membership on this org (fire-and-forget: a push failure must never fail order creation,
     // same resilience posture as notifyOrderEvent). Only on an actual new row — not on the
     // idempotent-replay paths above/below, which didn't create anything new to be notified about.
+    // `sendPushToOrgStaff` only wraps the actual Expo API call in a try/catch internally — its
+    // leading `organizationMembership`/`deviceToken` lookups are not guarded, so a transient DB
+    // error there would otherwise become an unhandled promise rejection on this fire-and-forget
+    // call and crash the process (same bug class documented elsewhere this session).
     void sendPushToOrgStaff(organizationId, {
       title: "New order received",
       body: `Order #${created.orderNumber} — ${preparedItems.length} item(s), ${created.total.toString()} total.`,
       data: { salesOrderId: created.id },
       channelId: "order_alert",
+    }).catch((error) => {
+      console.warn(`[marketplace] Failed to notify org staff of new order ${created.id}`, error);
     });
 
     return { ...summarizeSalesOrder(created), created: true as const };

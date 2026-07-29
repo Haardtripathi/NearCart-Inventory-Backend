@@ -46,12 +46,12 @@ async function listBrands(organizationId, query, localeContext) {
         ...(query.search
             ? {
                 OR: [
-                    { name: { contains: query.search, mode: "insensitive" } },
-                    { slug: { contains: query.search, mode: "insensitive" } },
+                    { name: { contains: query.search } },
+                    { slug: { contains: query.search } },
                     {
                         translations: {
                             some: {
-                                name: { contains: query.search, mode: "insensitive" },
+                                name: { contains: query.search },
                             },
                         },
                     },
@@ -125,11 +125,10 @@ async function updateBrand(organizationId, brandId, actorUserId, input, localeCo
     const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
         organizationId,
         baseName: input.name ?? existing.name,
-        existingTranslations: input.translations ??
-            existing.translations.map((translation) => ({
-                language: translation.language,
-                name: translation.name,
-            })),
+        existingTranslations: (0, translations_1.mergeTranslationsForUpdate)(existing.translations.map((translation) => ({
+            language: translation.language,
+            name: translation.name,
+        })), input.translations),
     });
     await prisma_1.prisma.$transaction(async (tx) => {
         await tx.brand.update({

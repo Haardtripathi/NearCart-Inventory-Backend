@@ -1,8 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addOrganizationIndustrySchema = exports.createOrganizationSchema = void 0;
+exports.updateEnabledPagesSchema = exports.addOrganizationIndustrySchema = exports.createOrganizationSchema = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
+const pageVisibility_1 = require("../../constants/pageVisibility");
 const validation_1 = require("../../utils/validation");
 const branchInputSchema = zod_1.z.object({
     code: validation_1.optionalTrimmedString,
@@ -54,4 +55,12 @@ exports.addOrganizationIndustrySchema = zod_1.z.object({
     isPrimary: zod_1.z.boolean().optional(),
     enabledFeatures: zod_1.z.record(zod_1.z.any()).optional(),
     customSettings: zod_1.z.unknown().optional(),
+});
+const sidebarModuleKeyEnum = zod_1.z.enum(pageVisibility_1.SIDEBAR_MODULE_KEYS);
+exports.updateEnabledPagesSchema = zod_1.z.object({
+    enabledPages: zod_1.z
+        .record(sidebarModuleKeyEnum, zod_1.z.boolean())
+        .refine((value) => Object.keys(value).length > 0, {
+        message: "At least one module toggle is required",
+    }),
 });

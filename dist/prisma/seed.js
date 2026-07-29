@@ -6,10 +6,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const client_1 = require("@prisma/client");
+const prisma_1 = require("../src/config/prisma");
 const masterCatalog_1 = require("../src/utils/masterCatalog");
 const slug_1 = require("../src/utils/slug");
 const nearcart_grocery_fmcg_seed_patch_1 = require("./nearcart_grocery_fmcg_seed_patch");
-const prisma = new client_1.PrismaClient();
 const seedScope = (process.env.SEED_SCOPE ?? "full").trim().toLowerCase();
 const seedSuperAdminConfig = {
     email: (process.env.SEED_SUPER_ADMIN_EMAIL ?? "superadmin@nearcart.local").trim().toLowerCase(),
@@ -1337,14 +1337,14 @@ function translationEntries(translations) {
 }
 async function seedUnits() {
     for (const unit of systemUnits) {
-        const existing = await prisma.unit.findFirst({
+        const existing = await prisma_1.prisma.unit.findFirst({
             where: {
                 organizationId: null,
                 code: unit.code,
             },
         });
         if (existing) {
-            await prisma.unit.update({
+            await prisma_1.prisma.unit.update({
                 where: { id: existing.id },
                 data: {
                     name: unit.name,
@@ -1355,7 +1355,7 @@ async function seedUnits() {
             });
             continue;
         }
-        await prisma.unit.create({
+        await prisma_1.prisma.unit.create({
             data: {
                 organizationId: null,
                 code: unit.code,
@@ -1380,7 +1380,7 @@ async function seedUnitTranslations() {
         pack: names("Pack", "पैक", "પેક"),
     };
     for (const [code, translations] of Object.entries(unitTranslations)) {
-        const unit = await prisma.unit.findFirst({
+        const unit = await prisma_1.prisma.unit.findFirst({
             where: {
                 organizationId: null,
                 code,
@@ -1389,12 +1389,12 @@ async function seedUnitTranslations() {
         if (!unit) {
             continue;
         }
-        await prisma.unitTranslation.deleteMany({
+        await prisma_1.prisma.unitTranslation.deleteMany({
             where: {
                 unitId: unit.id,
             },
         });
-        await prisma.unitTranslation.createMany({
+        await prisma_1.prisma.unitTranslation.createMany({
             data: Object.entries(translations).map(([language, name]) => ({
                 unitId: unit.id,
                 language: language,
@@ -1404,7 +1404,7 @@ async function seedUnitTranslations() {
     }
 }
 async function seedIndustryCatalog(industrySeed) {
-    const industry = await prisma.industry.upsert({
+    const industry = await prisma_1.prisma.industry.upsert({
         where: { code: industrySeed.code },
         update: {
             name: industrySeed.canonicalName,
@@ -1420,19 +1420,19 @@ async function seedIndustryCatalog(industrySeed) {
             defaultFeatures: industrySeed.defaultFeatures,
         },
     });
-    await prisma.industryTranslation.deleteMany({
+    await prisma_1.prisma.industryTranslation.deleteMany({
         where: {
             industryId: industry.id,
         },
     });
-    await prisma.industryTranslation.createMany({
+    await prisma_1.prisma.industryTranslation.createMany({
         data: translationEntries(industrySeed.translations).map((translation) => ({
             industryId: industry.id,
             ...translation,
         })),
     });
     for (const categorySeed of industrySeed.categories) {
-        const category = await prisma.masterCatalogCategory.upsert({
+        const category = await prisma_1.prisma.masterCatalogCategory.upsert({
             where: {
                 industryId_code: {
                     industryId: industry.id,
@@ -1454,19 +1454,19 @@ async function seedIndustryCatalog(industrySeed) {
                 isActive: true,
             },
         });
-        await prisma.masterCatalogCategoryTranslation.deleteMany({
+        await prisma_1.prisma.masterCatalogCategoryTranslation.deleteMany({
             where: {
                 masterCategoryId: category.id,
             },
         });
-        await prisma.masterCatalogCategoryTranslation.createMany({
+        await prisma_1.prisma.masterCatalogCategoryTranslation.createMany({
             data: translationEntries(categorySeed.translations).map((translation) => ({
                 masterCategoryId: category.id,
                 ...translation,
             })),
         });
     }
-    const categoriesByCode = new Map((await prisma.masterCatalogCategory.findMany({
+    const categoriesByCode = new Map((await prisma_1.prisma.masterCatalogCategory.findMany({
         where: {
             industryId: industry.id,
         },
@@ -1476,7 +1476,7 @@ async function seedIndustryCatalog(industrySeed) {
         },
     })).map((category) => [category.code, category.id]));
     for (const categorySeed of industrySeed.categories) {
-        await prisma.masterCatalogCategory.update({
+        await prisma_1.prisma.masterCatalogCategory.update({
             where: {
                 industryId_code: {
                     industryId: industry.id,
@@ -1490,7 +1490,7 @@ async function seedIndustryCatalog(industrySeed) {
     }
     for (const itemSeed of industrySeed.items) {
         const masterItemSlug = (0, slug_1.slugify)(`${industrySeed.code}-${itemSeed.canonicalName}`);
-        const masterItem = await prisma.masterCatalogItem.upsert({
+        const masterItem = await prisma_1.prisma.masterCatalogItem.upsert({
             where: {
                 code: itemSeed.code,
             },
@@ -1543,12 +1543,12 @@ async function seedIndustryCatalog(industrySeed) {
                 isActive: true,
             },
         });
-        await prisma.masterCatalogItemTranslation.deleteMany({
+        await prisma_1.prisma.masterCatalogItemTranslation.deleteMany({
             where: {
                 masterItemId: masterItem.id,
             },
         });
-        await prisma.masterCatalogItemTranslation.createMany({
+        await prisma_1.prisma.masterCatalogItemTranslation.createMany({
             data: Object.entries(itemSeed.translations).map(([language, value]) => ({
                 masterItemId: masterItem.id,
                 language: language,
@@ -1557,14 +1557,14 @@ async function seedIndustryCatalog(industrySeed) {
                 description: value.description ?? null,
             })),
         });
-        await prisma.masterCatalogItemAlias.deleteMany({
+        await prisma_1.prisma.masterCatalogItemAlias.deleteMany({
             where: {
                 masterItemId: masterItem.id,
             },
         });
         const aliases = (0, masterCatalog_1.normalizeMasterCatalogAliasValues)(itemSeed.aliases ?? []);
         if (aliases.length > 0) {
-            await prisma.masterCatalogItemAlias.createMany({
+            await prisma_1.prisma.masterCatalogItemAlias.createMany({
                 data: aliases.map((alias) => ({
                     masterItemId: masterItem.id,
                     language: alias.language,
@@ -1572,7 +1572,7 @@ async function seedIndustryCatalog(industrySeed) {
                 })),
             });
         }
-        const existingVariantTemplates = await prisma.masterCatalogVariantTemplate.findMany({
+        const existingVariantTemplates = await prisma_1.prisma.masterCatalogVariantTemplate.findMany({
             where: {
                 masterItemId: masterItem.id,
             },
@@ -1581,21 +1581,21 @@ async function seedIndustryCatalog(industrySeed) {
             },
         });
         if (existingVariantTemplates.length > 0) {
-            await prisma.masterCatalogVariantTranslation.deleteMany({
+            await prisma_1.prisma.masterCatalogVariantTranslation.deleteMany({
                 where: {
                     masterVariantTemplateId: {
                         in: existingVariantTemplates.map((template) => template.id),
                     },
                 },
             });
-            await prisma.masterCatalogVariantTemplate.deleteMany({
+            await prisma_1.prisma.masterCatalogVariantTemplate.deleteMany({
                 where: {
                     masterItemId: masterItem.id,
                 },
             });
         }
         for (const [index, variantSeed] of (itemSeed.variantTemplates ?? []).entries()) {
-            const createdVariant = await prisma.masterCatalogVariantTemplate.create({
+            const createdVariant = await prisma_1.prisma.masterCatalogVariantTemplate.create({
                 data: {
                     masterItemId: masterItem.id,
                     code: variantSeed.code,
@@ -1618,7 +1618,7 @@ async function seedIndustryCatalog(industrySeed) {
                 },
             });
             if (variantSeed.translations) {
-                await prisma.masterCatalogVariantTranslation.createMany({
+                await prisma_1.prisma.masterCatalogVariantTranslation.createMany({
                     data: Object.entries(variantSeed.translations).map(([language, name]) => ({
                         masterVariantTemplateId: createdVariant.id,
                         language: language,
@@ -1637,7 +1637,7 @@ async function seedIndustryCatalog(industrySeed) {
             })),
             aliases,
         });
-        await prisma.masterCatalogItem.update({
+        await prisma_1.prisma.masterCatalogItem.update({
             where: {
                 id: masterItem.id,
             },
@@ -3611,7 +3611,7 @@ function bilingualTranslationRows(translations) {
 }
 async function upsertUserSeed(params) {
     const passwordHash = await bcrypt_1.default.hash(seedOrganizationUserConfig.password, 12);
-    return prisma.user.upsert({
+    return prisma_1.prisma.user.upsert({
         where: { email: params.email },
         update: {
             fullName: params.fullName,
@@ -3636,7 +3636,7 @@ async function upsertUserSeed(params) {
 }
 async function ensureSeedSuperAdmin() {
     const passwordHash = await bcrypt_1.default.hash(seedSuperAdminConfig.password, 12);
-    return prisma.user.upsert({
+    return prisma_1.prisma.user.upsert({
         where: { email: seedSuperAdminConfig.email },
         update: {
             fullName: seedSuperAdminConfig.fullName,
@@ -3660,7 +3660,7 @@ async function ensureSeedSuperAdmin() {
     });
 }
 async function upsertOrganizationSeed(params) {
-    return prisma.organization.upsert({
+    return prisma_1.prisma.organization.upsert({
         where: { slug: params.slug },
         update: {
             name: params.name,
@@ -3695,7 +3695,7 @@ async function upsertOrganizationSeed(params) {
     });
 }
 async function upsertMembershipSeed(params) {
-    return prisma.organizationMembership.upsert({
+    return prisma_1.prisma.organizationMembership.upsert({
         where: {
             userId_organizationId: {
                 userId: params.userId,
@@ -3720,14 +3720,14 @@ async function upsertMembershipSeed(params) {
     });
 }
 async function upsertOrgIndustryConfig(params) {
-    const industry = await prisma.industry.findUnique({
+    const industry = await prisma_1.prisma.industry.findUnique({
         where: { code: params.industryCode },
     });
     if (!industry) {
         throw new Error(`Industry not found: ${params.industryCode}`);
     }
     const enabledFeatures = (params.enabledFeatures ?? industry.defaultFeatures ?? client_1.Prisma.JsonNull);
-    return prisma.organizationIndustryConfig.upsert({
+    return prisma_1.prisma.organizationIndustryConfig.upsert({
         where: {
             organizationId_industryId: {
                 organizationId: params.organizationId,
@@ -3747,7 +3747,7 @@ async function upsertOrgIndustryConfig(params) {
     });
 }
 async function upsertBranchSeed(organizationId, branchSeed) {
-    return prisma.branch.upsert({
+    return prisma_1.prisma.branch.upsert({
         where: {
             organizationId_code: {
                 organizationId,
@@ -3784,7 +3784,7 @@ async function upsertBranchSeed(organizationId, branchSeed) {
     });
 }
 async function upsertBrandSeed(organizationId, brandSeed) {
-    const brand = await prisma.brand.upsert({
+    const brand = await prisma_1.prisma.brand.upsert({
         where: {
             organizationId_slug: {
                 organizationId,
@@ -3803,12 +3803,12 @@ async function upsertBrandSeed(organizationId, brandSeed) {
             isActive: true,
         },
     });
-    await prisma.brandTranslation.deleteMany({
+    await prisma_1.prisma.brandTranslation.deleteMany({
         where: {
             brandId: brand.id,
         },
     });
-    await prisma.brandTranslation.createMany({
+    await prisma_1.prisma.brandTranslation.createMany({
         data: [
             { brandId: brand.id, language: client_1.LanguageCode.EN, name: brandSeed.translations.EN },
             { brandId: brand.id, language: client_1.LanguageCode.HI, name: brandSeed.translations.HI },
@@ -3818,7 +3818,7 @@ async function upsertBrandSeed(organizationId, brandSeed) {
 }
 async function upsertCategorySeed(organizationId, categorySeed) {
     const parent = categorySeed.parentSlug
-        ? await prisma.category.findUnique({
+        ? await prisma_1.prisma.category.findUnique({
             where: {
                 organizationId_slug: {
                     organizationId,
@@ -3827,7 +3827,7 @@ async function upsertCategorySeed(organizationId, categorySeed) {
             },
         })
         : null;
-    const category = await prisma.category.upsert({
+    const category = await prisma_1.prisma.category.upsert({
         where: {
             organizationId_slug: {
                 organizationId,
@@ -3852,12 +3852,12 @@ async function upsertCategorySeed(organizationId, categorySeed) {
             isActive: true,
         },
     });
-    await prisma.categoryTranslation.deleteMany({
+    await prisma_1.prisma.categoryTranslation.deleteMany({
         where: {
             categoryId: category.id,
         },
     });
-    await prisma.categoryTranslation.createMany({
+    await prisma_1.prisma.categoryTranslation.createMany({
         data: bilingualTranslationRows(categorySeed.translations).map((row) => ({
             categoryId: category.id,
             language: row.language,
@@ -3868,14 +3868,14 @@ async function upsertCategorySeed(organizationId, categorySeed) {
     return category;
 }
 async function upsertTaxRateSeed(organizationId, name, code, rate, isInclusive = false) {
-    const existing = await prisma.taxRate.findFirst({
+    const existing = await prisma_1.prisma.taxRate.findFirst({
         where: {
             organizationId,
             code,
         },
     });
     if (existing) {
-        return prisma.taxRate.update({
+        return prisma_1.prisma.taxRate.update({
             where: { id: existing.id },
             data: {
                 name,
@@ -3885,7 +3885,7 @@ async function upsertTaxRateSeed(organizationId, name, code, rate, isInclusive =
             },
         });
     }
-    return prisma.taxRate.create({
+    return prisma_1.prisma.taxRate.create({
         data: {
             organizationId,
             name,
@@ -3897,14 +3897,14 @@ async function upsertTaxRateSeed(organizationId, name, code, rate, isInclusive =
     });
 }
 async function upsertSupplierSeed(organizationId, seed) {
-    const existing = await prisma.supplier.findFirst({
+    const existing = await prisma_1.prisma.supplier.findFirst({
         where: {
             organizationId,
             code: seed.code,
         },
     });
     const supplier = existing
-        ? await prisma.supplier.update({
+        ? await prisma_1.prisma.supplier.update({
             where: { id: existing.id },
             data: {
                 name: seed.translations.EN,
@@ -3917,7 +3917,7 @@ async function upsertSupplierSeed(organizationId, seed) {
                 deletedAt: null,
             },
         })
-        : await prisma.supplier.create({
+        : await prisma_1.prisma.supplier.create({
             data: {
                 organizationId,
                 code: seed.code,
@@ -3930,12 +3930,12 @@ async function upsertSupplierSeed(organizationId, seed) {
                 isActive: true,
             },
         });
-    await prisma.supplierTranslation.deleteMany({
+    await prisma_1.prisma.supplierTranslation.deleteMany({
         where: {
             supplierId: supplier.id,
         },
     });
-    await prisma.supplierTranslation.createMany({
+    await prisma_1.prisma.supplierTranslation.createMany({
         data: [
             { supplierId: supplier.id, language: client_1.LanguageCode.EN, name: seed.translations.EN },
             { supplierId: supplier.id, language: client_1.LanguageCode.HI, name: seed.translations.HI },
@@ -3944,7 +3944,7 @@ async function upsertSupplierSeed(organizationId, seed) {
     return supplier;
 }
 async function upsertCustomerSeed(organizationId, seed) {
-    const existing = await prisma.customer.findFirst({
+    const existing = await prisma_1.prisma.customer.findFirst({
         where: {
             organizationId,
             phone: seed.phone ?? undefined,
@@ -3952,7 +3952,7 @@ async function upsertCustomerSeed(organizationId, seed) {
         },
     });
     if (existing) {
-        return prisma.customer.update({
+        return prisma_1.prisma.customer.update({
             where: { id: existing.id },
             data: {
                 name: seed.name,
@@ -3965,7 +3965,7 @@ async function upsertCustomerSeed(organizationId, seed) {
             },
         });
     }
-    return prisma.customer.create({
+    return prisma_1.prisma.customer.create({
         data: {
             organizationId,
             name: seed.name,
@@ -3978,7 +3978,7 @@ async function upsertCustomerSeed(organizationId, seed) {
     });
 }
 async function getSystemUnitByCode(code) {
-    const unit = await prisma.unit.findFirst({
+    const unit = await prisma_1.prisma.unit.findFirst({
         where: {
             organizationId: null,
             code,
@@ -3991,7 +3991,7 @@ async function getSystemUnitByCode(code) {
 }
 async function upsertProductSeed(params) {
     const { organizationId, productSeed } = params;
-    const category = await prisma.category.findUnique({
+    const category = await prisma_1.prisma.category.findUnique({
         where: {
             organizationId_slug: {
                 organizationId,
@@ -4003,7 +4003,7 @@ async function upsertProductSeed(params) {
         throw new Error(`Category not found for org product seed: ${productSeed.categorySlug}`);
     }
     const brand = productSeed.brandSlug
-        ? await prisma.brand.findUnique({
+        ? await prisma_1.prisma.brand.findUnique({
             where: {
                 organizationId_slug: {
                     organizationId,
@@ -4012,14 +4012,14 @@ async function upsertProductSeed(params) {
             },
         })
         : null;
-    const industry = await prisma.industry.findUnique({
+    const industry = await prisma_1.prisma.industry.findUnique({
         where: { code: productSeed.industryCode },
     });
     if (!industry) {
         throw new Error(`Industry not found for product seed: ${productSeed.industryCode}`);
     }
     const masterItem = productSeed.masterItemCode
-        ? await prisma.masterCatalogItem.findUnique({
+        ? await prisma_1.prisma.masterCatalogItem.findUnique({
             where: { code: productSeed.masterItemCode },
         })
         : null;
@@ -4030,13 +4030,13 @@ async function upsertProductSeed(params) {
     const productType = productSeed.productType ??
         (hasVariants ? client_1.ProductType.VARIABLE : client_1.ProductType.SIMPLE);
     const defaultTaxCode = productSeed.trackMethod === client_1.TrackMethod.PIECE && productSeed.categorySlug.includes("hygiene") ? "GST18" : "GST5";
-    const taxRate = await prisma.taxRate.findFirst({
+    const taxRate = await prisma_1.prisma.taxRate.findFirst({
         where: {
             organizationId,
             code: defaultTaxCode,
         },
     });
-    const product = await prisma.product.upsert({
+    const product = await prisma_1.prisma.product.upsert({
         where: {
             organizationId_slug: {
                 organizationId,
@@ -4094,12 +4094,12 @@ async function upsertProductSeed(params) {
             updatedById: params.updatedById ?? null,
         },
     });
-    await prisma.productTranslation.deleteMany({
+    await prisma_1.prisma.productTranslation.deleteMany({
         where: {
             productId: product.id,
         },
     });
-    await prisma.productTranslation.createMany({
+    await prisma_1.prisma.productTranslation.createMany({
         data: [
             {
                 productId: product.id,
@@ -4118,7 +4118,7 @@ async function upsertProductSeed(params) {
     const variantsBySku = new Map();
     for (const [index, variantSeed] of productSeed.variants.entries()) {
         const unit = variantSeed.unitCode ? await getSystemUnitByCode(variantSeed.unitCode) : primaryUnit;
-        const variant = await prisma.productVariant.upsert({
+        const variant = await prisma_1.prisma.productVariant.upsert({
             where: {
                 organizationId_sku: {
                     organizationId,
@@ -4164,12 +4164,12 @@ async function upsertProductSeed(params) {
             },
         });
         variantsBySku.set(variantSeed.sku, variant.id);
-        await prisma.productVariantTranslation.deleteMany({
+        await prisma_1.prisma.productVariantTranslation.deleteMany({
             where: {
                 variantId: variant.id,
             },
         });
-        await prisma.productVariantTranslation.createMany({
+        await prisma_1.prisma.productVariantTranslation.createMany({
             data: [
                 { variantId: variant.id, language: client_1.LanguageCode.EN, name: variantSeed.translations.EN },
                 { variantId: variant.id, language: client_1.LanguageCode.HI, name: variantSeed.translations.HI },
@@ -4191,7 +4191,7 @@ async function seedInventoryBalances(params) {
         if (!variantRef) {
             throw new Error(`Variant not found for inventory seed: ${inventorySeed.sku}`);
         }
-        await prisma.inventoryBalance.upsert({
+        await prisma_1.prisma.inventoryBalance.upsert({
             where: {
                 organizationId_branchId_variantId: {
                     organizationId: params.organizationId,
@@ -4215,7 +4215,7 @@ async function seedInventoryBalances(params) {
             },
         });
         const referenceId = `OPEN-${inventorySeed.branchCode}-${inventorySeed.sku}`;
-        const existingLedger = await prisma.inventoryLedger.findFirst({
+        const existingLedger = await prisma_1.prisma.inventoryLedger.findFirst({
             where: {
                 organizationId: params.organizationId,
                 branchId,
@@ -4225,7 +4225,7 @@ async function seedInventoryBalances(params) {
             },
         });
         if (!existingLedger) {
-            await prisma.inventoryLedger.create({
+            await prisma_1.prisma.inventoryLedger.create({
                 data: {
                     organizationId: params.organizationId,
                     branchId,
@@ -4254,7 +4254,7 @@ async function seedInventoryBatches(params) {
         if (!branchId || !variantRef) {
             throw new Error(`Missing branch or variant for batch seed: ${batchSeed.batchNumber}`);
         }
-        await prisma.inventoryBatch.upsert({
+        await prisma_1.prisma.inventoryBatch.upsert({
             where: {
                 organizationId_branchId_variantId_batchNumber: {
                     organizationId: params.organizationId,
@@ -4295,14 +4295,14 @@ async function seedSerialNumbers(params) {
         if (!branchId || !variantRef) {
             throw new Error(`Missing branch or variant for serial seed: ${serialSeed.serialNumber}`);
         }
-        const existing = await prisma.serialNumber.findFirst({
+        const existing = await prisma_1.prisma.serialNumber.findFirst({
             where: {
                 organizationId: params.organizationId,
                 serialNumber: serialSeed.serialNumber,
             },
         });
         if (existing) {
-            await prisma.serialNumber.update({
+            await prisma_1.prisma.serialNumber.update({
                 where: { id: existing.id },
                 data: {
                     branchId,
@@ -4311,7 +4311,7 @@ async function seedSerialNumbers(params) {
             });
             continue;
         }
-        await prisma.serialNumber.create({
+        await prisma_1.prisma.serialNumber.create({
             data: {
                 organizationId: params.organizationId,
                 branchId,
@@ -4328,7 +4328,7 @@ async function seedPurchaseReceipts(params) {
             throw new Error(`Branch not found for receipt seed: ${receiptSeed.branchCode}`);
         }
         const supplierId = receiptSeed.supplierCode ? params.supplierMap.get(receiptSeed.supplierCode) ?? null : null;
-        const receipt = await prisma.purchaseReceipt.upsert({
+        const receipt = await prisma_1.prisma.purchaseReceipt.upsert({
             where: {
                 organizationId_receiptNumber: {
                     organizationId: params.organizationId,
@@ -4356,7 +4356,7 @@ async function seedPurchaseReceipts(params) {
                 createdById: params.createdById ?? null,
             },
         });
-        await prisma.purchaseReceiptItem.deleteMany({
+        await prisma_1.prisma.purchaseReceiptItem.deleteMany({
             where: {
                 purchaseReceiptId: receipt.id,
             },
@@ -4379,7 +4379,7 @@ async function seedPurchaseReceipts(params) {
             subtotal = subtotal.plus(lineSubTotal);
             taxTotal = taxTotal.plus(taxAmount);
             discountTotal = discountTotal.plus(discountAmount);
-            await prisma.purchaseReceiptItem.create({
+            await prisma_1.prisma.purchaseReceiptItem.create({
                 data: {
                     purchaseReceiptId: receipt.id,
                     productId: variantRef.productId,
@@ -4395,7 +4395,7 @@ async function seedPurchaseReceipts(params) {
                 },
             });
         }
-        await prisma.purchaseReceipt.update({
+        await prisma_1.prisma.purchaseReceipt.update({
             where: { id: receipt.id },
             data: {
                 subtotal: roundMoney(subtotal),
@@ -4413,7 +4413,7 @@ async function seedSalesOrders(params) {
             throw new Error(`Branch not found for sales order seed: ${orderSeed.branchCode}`);
         }
         const customerId = orderSeed.customerPhone ? params.customerMap.get(orderSeed.customerPhone) ?? null : null;
-        const order = await prisma.salesOrder.upsert({
+        const order = await prisma_1.prisma.salesOrder.upsert({
             where: {
                 organizationId_orderNumber: {
                     organizationId: params.organizationId,
@@ -4451,7 +4451,7 @@ async function seedSalesOrders(params) {
                 deliveredAt: orderSeed.deliveredAt ? new Date(orderSeed.deliveredAt) : null,
             },
         });
-        await prisma.salesOrderItem.deleteMany({
+        await prisma_1.prisma.salesOrderItem.deleteMany({
             where: {
                 salesOrderId: order.id,
             },
@@ -4474,7 +4474,7 @@ async function seedSalesOrders(params) {
             subtotal = subtotal.plus(lineSubTotal);
             taxTotal = taxTotal.plus(taxAmount);
             discountTotal = discountTotal.plus(discountAmount);
-            await prisma.salesOrderItem.create({
+            await prisma_1.prisma.salesOrderItem.create({
                 data: {
                     salesOrderId: order.id,
                     productId: variantRef.productId,
@@ -4491,7 +4491,7 @@ async function seedSalesOrders(params) {
                 },
             });
         }
-        await prisma.salesOrder.update({
+        await prisma_1.prisma.salesOrder.update({
             where: { id: order.id },
             data: {
                 subtotal: roundMoney(subtotal),
@@ -4509,7 +4509,7 @@ async function seedStockTransfers(params) {
         if (!fromBranchId || !toBranchId) {
             throw new Error(`Missing branch for stock transfer seed: ${transferSeed.transferNumber}`);
         }
-        const transfer = await prisma.stockTransfer.upsert({
+        const transfer = await prisma_1.prisma.stockTransfer.upsert({
             where: {
                 organizationId_transferNumber: {
                     organizationId: params.organizationId,
@@ -4537,7 +4537,7 @@ async function seedStockTransfers(params) {
                 approvedAt: transferSeed.approvedAt ? new Date(transferSeed.approvedAt) : null,
             },
         });
-        await prisma.stockTransferItem.deleteMany({
+        await prisma_1.prisma.stockTransferItem.deleteMany({
             where: {
                 stockTransferId: transfer.id,
             },
@@ -4547,7 +4547,7 @@ async function seedStockTransfers(params) {
             if (!variantRef) {
                 throw new Error(`Variant not found for transfer item: ${item.sku}`);
             }
-            await prisma.stockTransferItem.create({
+            await prisma_1.prisma.stockTransferItem.create({
                 data: {
                     stockTransferId: transfer.id,
                     productId: variantRef.productId,
@@ -4560,7 +4560,7 @@ async function seedStockTransfers(params) {
     }
 }
 async function seedAuditLogSeed(params) {
-    const existing = await prisma.auditLog.findFirst({
+    const existing = await prisma_1.prisma.auditLog.findFirst({
         where: {
             organizationId: params.organizationId,
             action: params.action,
@@ -4571,7 +4571,7 @@ async function seedAuditLogSeed(params) {
     if (existing) {
         return;
     }
-    await prisma.auditLog.create({
+    await prisma_1.prisma.auditLog.create({
         data: {
             organizationId: params.organizationId,
             actorUserId: params.actorUserId ?? null,
@@ -4747,7 +4747,7 @@ async function seedDemoOrganizationCatalog(params) {
             approvedById: adminUser.id,
         });
     }
-    const createdOrder = await prisma.salesOrder.findFirst({
+    const createdOrder = await prisma_1.prisma.salesOrder.findFirst({
         where: {
             organizationId: organization.id,
         },
@@ -4765,7 +4765,7 @@ async function seedDemoOrganizationCatalog(params) {
             meta: { seeded: true },
         });
     }
-    const createdTransfer = await prisma.stockTransfer.findFirst({
+    const createdTransfer = await prisma_1.prisma.stockTransfer.findFirst({
         where: {
             organizationId: organization.id,
         },
@@ -4861,10 +4861,10 @@ async function main() {
 }
 main()
     .then(async () => {
-    await prisma.$disconnect();
+    await prisma_1.prisma.$disconnect();
 })
     .catch(async (error) => {
     console.error("Extended seed failed", error);
-    await prisma.$disconnect();
+    await prisma_1.prisma.$disconnect();
     process.exit(1);
 });

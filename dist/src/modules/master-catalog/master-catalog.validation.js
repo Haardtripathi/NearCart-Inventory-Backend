@@ -18,11 +18,13 @@ const aliasSchema = zod_1.z.object({
     language: validation_1.languageCodeSchema,
     value: validation_1.trimmedString,
 });
+const nonNegativeDecimalInputSchema = validation_1.decimalInputSchema.refine((value) => Number(value) >= 0, { message: "Value must not be negative" });
+const optionalNonNegativeDecimalInputSchema = nonNegativeDecimalInputSchema.optional();
 const pricingOverrideSchema = zod_1.z.object({
     masterVariantTemplateId: validation_1.optionalTrimmedString,
-    sellingPrice: validation_1.decimalInputSchema.optional(),
-    costPrice: validation_1.decimalInputSchema.optional(),
-    mrp: validation_1.decimalInputSchema.optional(),
+    sellingPrice: optionalNonNegativeDecimalInputSchema,
+    costPrice: optionalNonNegativeDecimalInputSchema,
+    mrp: optionalNonNegativeDecimalInputSchema,
 });
 const namingOverrideSchema = zod_1.z.object({
     canonicalName: validation_1.optionalTrimmedString,
@@ -33,13 +35,13 @@ const masterVariantTemplateSchema = zod_1.z.object({
     skuSuffix: validation_1.optionalTrimmedString,
     barcode: validation_1.optionalTrimmedString,
     attributes: zod_1.z.unknown().optional(),
-    defaultCostPrice: validation_1.optionalDecimalInputSchema,
-    defaultSellingPrice: validation_1.optionalDecimalInputSchema,
-    defaultMrp: validation_1.optionalDecimalInputSchema,
-    reorderLevel: validation_1.optionalDecimalInputSchema,
-    minStockLevel: validation_1.optionalDecimalInputSchema,
-    maxStockLevel: validation_1.optionalDecimalInputSchema,
-    weight: validation_1.optionalDecimalInputSchema,
+    defaultCostPrice: optionalNonNegativeDecimalInputSchema,
+    defaultSellingPrice: optionalNonNegativeDecimalInputSchema,
+    defaultMrp: optionalNonNegativeDecimalInputSchema,
+    reorderLevel: optionalNonNegativeDecimalInputSchema,
+    minStockLevel: optionalNonNegativeDecimalInputSchema,
+    maxStockLevel: optionalNonNegativeDecimalInputSchema,
+    weight: optionalNonNegativeDecimalInputSchema,
     unitCode: validation_1.optionalTrimmedString,
     isDefault: zod_1.z.boolean().optional(),
     isActive: zod_1.z.boolean().optional(),
@@ -70,13 +72,21 @@ exports.createMasterCatalogCategorySchema = zod_1.z.object({
     translations: (0, validation_1.uniqueLanguageArraySchema)(localizedNameDescriptionSchema),
 });
 exports.updateMasterCatalogCategorySchema = exports.createMasterCatalogCategorySchema.partial();
+// NOTE: `z.coerce.boolean()` is a footgun for query params: `Boolean("false")` is `true` in
+// JS because it only checks for a non-empty string, so `?isActive=false` was silently coerced
+// to `true` and the "inactive only" / "single variant" filters on this list endpoint were
+// unusable (they behaved identically to their `true` counterpart). Parse the literal string
+// instead.
+const booleanQueryParamSchema = zod_1.z
+    .union([zod_1.z.literal("true"), zod_1.z.literal("false"), zod_1.z.boolean()])
+    .transform((value) => value === true || value === "true");
 exports.masterCatalogItemsQuerySchema = validation_1.paginationQuerySchema.omit({ search: true }).extend({
     industryId: validation_1.trimmedString,
     categoryId: validation_1.optionalTrimmedString,
     q: validation_1.optionalTrimmedString,
     lang: validation_1.optionalTrimmedString,
-    hasVariants: zod_1.z.coerce.boolean().optional(),
-    isActive: zod_1.z.coerce.boolean().optional(),
+    hasVariants: booleanQueryParamSchema.optional(),
+    isActive: booleanQueryParamSchema.optional(),
 });
 exports.createMasterCatalogItemSchema = zod_1.z.object({
     industryId: validation_1.trimmedString,
@@ -112,6 +122,7 @@ exports.importMasterCatalogItemSchema = zod_1.z
     allowDuplicate: zod_1.z.boolean().optional(),
     strictIndustryMatch: zod_1.z.boolean().optional(),
     forceImport: zod_1.z.boolean().optional(),
+    defaultVariantTemplateId: validation_1.optionalTrimmedString,
     pricingOverrides: zod_1.z
         .object({
         variantPrices: zod_1.z.array(pricingOverrideSchema).optional(),
@@ -139,6 +150,7 @@ exports.importManyMasterCatalogItemsSchema = zod_1.z
     items: zod_1.z
         .array(zod_1.z.object({
         masterItemId: validation_1.trimmedString,
+        defaultVariantTemplateId: validation_1.optionalTrimmedString,
         pricingOverrides: zod_1.z
             .object({
             variantPrices: zod_1.z.array(pricingOverrideSchema).optional(),

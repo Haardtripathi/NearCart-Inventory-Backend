@@ -96,12 +96,12 @@ async function listCategories(organizationId, query, localeContext) {
         ...(query.search
             ? {
                 OR: [
-                    { name: { contains: query.search, mode: "insensitive" } },
-                    { slug: { contains: query.search, mode: "insensitive" } },
+                    { name: { contains: query.search } },
+                    { slug: { contains: query.search } },
                     {
                         translations: {
                             some: {
-                                name: { contains: query.search, mode: "insensitive" },
+                                name: { contains: query.search },
                             },
                         },
                     },
@@ -240,12 +240,11 @@ async function updateCategory(organizationId, categoryId, actorUserId, input, lo
         organizationId,
         baseName: input.name ?? existing.name,
         baseDescription: input.description ?? existing.description ?? undefined,
-        existingTranslations: input.translations ??
-            existing.translations.map((translation) => ({
-                language: translation.language,
-                name: translation.name,
-                description: translation.description ?? undefined,
-            })),
+        existingTranslations: (0, translations_1.mergeTranslationsForUpdate)(existing.translations.map((translation) => ({
+            language: translation.language,
+            name: translation.name,
+            description: translation.description ?? undefined,
+        })), input.translations),
     });
     if (input.parentId !== undefined) {
         if (input.parentId === categoryId) {

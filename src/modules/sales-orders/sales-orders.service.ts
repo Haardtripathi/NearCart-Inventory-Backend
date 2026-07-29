@@ -409,10 +409,13 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
 
   const confirmed = await prisma.$transaction(async (tx) => {
     // Guard against a concurrent confirm racing this same transition (e.g. a double-click or a
-    // duplicated webhook retry): claim the row atomically before touching stock — Postgres locks
-    // the row on this UPDATE, so a second concurrent transaction's updateMany blocks until this
-    // one commits, then re-evaluates the status predicate against 0 matching rows and safely
-    // no-ops instead of also decrementing stock for the same order.
+    // duplicated webhook retry): claim the row atomically before touching stock. `updateMany`
+    // compiles to a single atomic `UPDATE ... WHERE` statement, so the status predicate and the
+    // write happen as one indivisible step on any engine (Postgres or, post-migration, SQLite/
+    // libSQL) — a second concurrent caller's updateMany re-evaluates the predicate against 0
+    // matching rows once this one commits and safely no-ops instead of also decrementing stock for
+    // the same order. (Unlike `assignDriverToSalesOrder` below, this doesn't need a cross-row
+    // NOT EXISTS check, so the plain compare-and-swap here was never Postgres-specific.)
     const { count } = await tx.salesOrder.updateMany({
       where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
       data: {
@@ -746,9 +749,9 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    // Guard against a concurrent request racing this same transition: the WHERE clause's
-    // status check is evaluated atomically by Postgres as part of the UPDATE, so only one
-    // concurrent caller can ever flip CONFIRMED -> READY for this row.
+    // Guard against a concurrent request racing this same transition: `updateMany` compiles to a
+    // single atomic `UPDATE ... WHERE` statement on any engine, so only one concurrent caller can
+    // ever flip CONFIRMED -> READY for this row.
     const { count } = await tx.salesOrder.updateMany({
       where: { id: orderId, organizationId, status: SalesOrderStatus.CONFIRMED },
       data: {
@@ -852,47 +855,50 @@ export async function assignDriverToSalesOrder(
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    // Bug fixed 2026-07-27 (found via audit, not yet hit in the single-order manual E2E test):
-    // nothing here previously re-checked that `driverId` was still free at assignment time. The
-    // order-side status check below (READY -> assigned) is atomic, but that only protects against
-    // double-assigning the same ORDER — it does nothing to stop the same DRIVER being assigned to
-    // two different orders. That's a real race: findNearestFreeDriver (markSalesOrderReady's
-    // auto-assign path) runs as a separate query before this transaction even opens, so two
-    // orders going READY around the same time (or a manual dropdown assignment racing an
-    // auto-assign) can both see the same driver as "free" and both call this function for it. Lock
-    // the driver row for the duration of this transaction so concurrent callers targeting the same
-    // driver serialize here, then re-verify under that lock that the driver has no other active
-    // (READY/OUT_FOR_DELIVERY) assignment before proceeding — otherwise the second caller commits
-    // an assignment for a driver who's already out on a different delivery.
-    await tx.$queryRaw`SELECT id FROM "Driver" WHERE id = ${driverId} FOR UPDATE`;
+    // Bug fixed 2026-07-28: this previously took a Postgres row lock via
+    // `tx.$queryRaw\`SELECT id FROM "Driver" WHERE id = ${driverId} FOR UPDATE\`` to serialize
+    // concurrent assignment attempts for the same driver before re-checking activeAssignmentCount.
+    // `FOR UPDATE` is not valid SQLite/libSQL syntax at all — verified live against this Turso DB,
+    // it throws `SQL_PARSE_ERROR: near FOR` — so since today's Postgres -> Turso migration this
+    // function has thrown on literally every call, not just raced under concurrency. Even setting
+    // that aside, SQLite/libSQL has no per-row locking to fall back to (locking is whole-database),
+    // so a straight port to some other "lock the row" primitive wouldn't have closed the race
+    // either. Fixed by folding the "driver has no other active delivery" check into the SAME atomic
+    // UPDATE statement that flips READY -> assigned via a NOT EXISTS subquery: a single SQL
+    // statement is atomic on SQLite/libSQL regardless of isolation level, so the check-then-set race
+    // is closed by the statement itself rather than by a preceding lock. Verified this exact
+    // UPDATE...NOT EXISTS shape parses and executes against the live Turso DB.
+    const affected = await tx.$executeRaw`
+      UPDATE "SalesOrder"
+      SET "assignedDriverId" = ${driverId},
+          "assignedById" = ${actorUserId},
+          "assignedAt" = ${new Date()}
+      WHERE "id" = ${orderId}
+        AND "organizationId" = ${organizationId}
+        AND "status" = ${SalesOrderStatus.READY}
+        AND NOT EXISTS (
+          SELECT 1 FROM "SalesOrder" AS "other"
+          WHERE "other"."assignedDriverId" = ${driverId}
+            AND "other"."id" != ${orderId}
+            AND "other"."status" IN (${SalesOrderStatus.READY}, ${SalesOrderStatus.OUT_FOR_DELIVERY})
+        )
+    `;
 
-    const activeAssignmentCount = await tx.salesOrder.count({
-      where: {
-        assignedDriverId: driverId,
-        status: { in: ACTIVE_DRIVER_ORDER_STATUSES },
-        id: { not: orderId },
-      },
-    });
+    if (affected === 0) {
+      // The atomic UPDATE above is what actually prevents double-booking; this second read is
+      // best-effort and only picks which error message to surface (a tiny race window exists
+      // between the UPDATE and this SELECT, but it can only misattribute the reason, never allow
+      // an incorrect assignment through).
+      const stillReady = await tx.salesOrder.findFirst({
+        where: { id: orderId, organizationId, status: SalesOrderStatus.READY },
+        select: { id: true },
+      });
 
-    if (activeAssignmentCount > 0) {
+      if (!stillReady) {
+        throw ApiError.conflict("Order is no longer READY — it may have already been assigned or its state changed");
+      }
+
       throw ApiError.conflict("Driver already has another active delivery assigned");
-    }
-
-    // Guard against a concurrent request racing this same transition (e.g. two staff members
-    // assigning different drivers at once): the WHERE clause's status check is evaluated
-    // atomically by Postgres as part of the UPDATE, so only one concurrent caller can ever win
-    // the READY -> assigned transition for this row.
-    const { count } = await tx.salesOrder.updateMany({
-      where: { id: orderId, organizationId, status: SalesOrderStatus.READY },
-      data: {
-        assignedDriverId: driverId,
-        assignedById: actorUserId,
-        assignedAt: new Date(),
-      },
-    });
-
-    if (count === 0) {
-      throw ApiError.conflict("Order is no longer READY — it may have already been assigned or its state changed");
     }
 
     const result = await tx.salesOrder.findUniqueOrThrow({
@@ -936,11 +942,17 @@ export async function assignDriverToSalesOrder(
     });
   }
 
+  // `sendPushToDriver` only wraps the actual Expo API call in a try/catch internally — its
+  // leading `deviceToken.findMany` lookup is not guarded, so a transient DB error there would
+  // otherwise become an unhandled promise rejection on this fire-and-forget call and crash the
+  // process (same bug class documented elsewhere this session).
   void sendPushToDriver(driverId, {
     title: "New delivery assigned",
     body: `You've been assigned order #${updated.orderNumber}.`,
     data: { salesOrderId: updated.id },
     channelId: "order_alert",
+  }).catch((error) => {
+    console.warn(`[sales-orders] Failed to notify driver ${driverId} of assignment for order ${updated.id}`, error);
   });
 
   return updated;

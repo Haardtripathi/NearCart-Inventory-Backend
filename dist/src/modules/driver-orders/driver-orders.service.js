@@ -3,10 +3,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listDriverOrders = listDriverOrders;
 exports.pickupDriverOrder = pickupDriverOrder;
 exports.deliverDriverOrder = deliverDriverOrder;
+exports.updateDriverAvailability = updateDriverAvailability;
+exports.updateDriverLocation = updateDriverLocation;
+exports.registerDriverDeviceTokenForDriver = registerDriverDeviceTokenForDriver;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
 const audit_service_1 = require("../audit/audit.service");
+const order_event_webhook_service_1 = require("../../services/order-event-webhook.service");
+const device_tokens_service_1 = require("../../services/device-tokens.service");
 const DRIVER_VISIBLE_STATUSES = [client_1.SalesOrderStatus.READY, client_1.SalesOrderStatus.OUT_FOR_DELIVERY];
 function serializeDriverOrder(order) {
     return {
@@ -36,10 +41,12 @@ function serializeDriverOrder(order) {
                 phone: order.customer.phone,
             }
             : null,
-        // Delivery address / lat-long (when available) is whatever shape the order-creating flow
-        // stored on the customer record — this schema has no dedicated SalesOrder delivery-address
-        // field, so the customer's address JSON is forwarded as-is.
-        deliveryAddress: order.customer?.address ?? null,
+        // Structured `{ addressLine, latitude, longitude }` populated at bridge order-creation time
+        // (see marketplace.service.ts createBridgedSalesOrder). Falls back to the customer's generic
+        // address only for pre-migration rows where deliveryAddress is still null — the customer's
+        // address can be stale/wrong for a repeat customer ordering somewhere new, so this fallback
+        // is a courtesy for old data, not the primary source going forward.
+        deliveryAddress: order.deliveryAddress ?? order.customer?.address ?? null,
         items: order.items.map((item) => ({
             productName: item.productNameSnapshot,
             variantName: item.variantNameSnapshot,
@@ -127,6 +134,13 @@ async function pickupDriverOrder(driverId, orderId) {
         });
         return result;
     });
+    if (updated.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: updated.externalOrderId,
+            status: updated.status,
+            eventType: "OUT_FOR_DELIVERY",
+        });
+    }
     return serializeDriverOrder(updated);
 }
 async function deliverDriverOrder(driverId, orderId) {
@@ -167,5 +181,45 @@ async function deliverDriverOrder(driverId, orderId) {
         });
         return result;
     });
+    if (updated.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: updated.externalOrderId,
+            status: updated.status,
+            eventType: "DELIVERED",
+        });
+    }
     return serializeDriverOrder(updated);
+}
+/**
+ * Toggles a driver's own "online/offline" availability for nearest-free-driver auto-assignment
+ * (see sales-orders.service.ts's findNearestFreeDriver). Going offline does NOT unassign any
+ * order already in progress — it only takes the driver out of consideration for *future*
+ * auto-matches.
+ */
+async function updateDriverAvailability(driverId, isAvailableForAssignment) {
+    return prisma_1.prisma.driver.update({
+        where: { id: driverId },
+        data: { isAvailableForAssignment },
+        select: { id: true, isAvailableForAssignment: true },
+    });
+}
+/**
+ * Records a driver's current position for nearest-free-driver matching. Called roughly once a
+ * minute by the driver app's foreground `setInterval`, only while the driver is toggled online —
+ * deliberately NOT continuous background tracking (Phase 1 explicitly defers live tracking, see
+ * root plan doc).
+ */
+async function updateDriverLocation(driverId, latitude, longitude) {
+    return prisma_1.prisma.driver.update({
+        where: { id: driverId },
+        data: {
+            lastKnownLatitude: latitude,
+            lastKnownLongitude: longitude,
+            lastLocationAt: new Date(),
+        },
+        select: { id: true, lastKnownLatitude: true, lastKnownLongitude: true, lastLocationAt: true },
+    });
+}
+async function registerDriverDeviceTokenForDriver(driverId, input) {
+    return (0, device_tokens_service_1.upsertDeviceToken)("DRIVER", driverId, input);
 }

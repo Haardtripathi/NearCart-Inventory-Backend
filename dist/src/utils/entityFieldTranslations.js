@@ -5,17 +5,18 @@ exports.listEntityFieldTranslations = listEntityFieldTranslations;
 exports.resolveEntityFieldValue = resolveEntityFieldValue;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../config/prisma");
+const env_1 = require("../config/env");
 const localization_1 = require("./localization");
 const libreTranslate_1 = require("./libreTranslate");
 function normalizeText(value) {
     const trimmed = value?.trim();
     return trimmed ? trimmed : null;
 }
-async function resolveEnabledLanguages(organizationId) {
+async function resolveEnabledLanguages(db, organizationId) {
     if (!organizationId) {
         return [...localization_1.SUPPORTED_LANGUAGE_CODES];
     }
-    const organization = await prisma_1.prisma.organization.findUnique({
+    const organization = await db.organization.findUnique({
         where: { id: organizationId },
         select: {
             defaultLanguage: true,
@@ -33,14 +34,28 @@ async function resolveEnabledLanguages(organizationId) {
     ]));
 }
 async function buildFieldTranslations(value, languages, sourceLanguage) {
-    const translations = await Promise.all(languages.map(async (language) => ({
+    // Machine translation on write is opt-in via AUTO_TRANSLATE_ON_WRITE (see enrichWithAutoTranslations,
+    // which already gates the entity `translations` array the same way). Without this check, every write
+    // that touches syncEntityFieldTranslations - user registration, org/branch creation, sales-order
+    // notes/rejection reasons, purchase-receipt notes, stock-transfer notes, inventory adjustment notes,
+    // etc. - made a blocking call to LibreTranslate on every request regardless of the flag, turning the
+    // self-hosted Python service into a silent hard dependency for almost every write endpoint in the app.
+    if (!env_1.env.AUTO_TRANSLATE_ON_WRITE) {
+        return languages
+            .map((language) => ({ language, value }))
+            .filter((entry) => normalizeText(entry.value));
+    }
+    // Skip languages LibreTranslate has no model loaded for (see MACHINE_TRANSLATABLE_LANGUAGE_CODES) —
+    // leave them absent rather than storing an untranslated echo mislabeled as that language.
+    const translatableLanguages = languages.filter((language) => localization_1.MACHINE_TRANSLATABLE_LANGUAGE_CODES.includes(language));
+    const translations = await Promise.all(translatableLanguages.map(async (language) => ({
         language,
         value: (await (0, libreTranslate_1.translateLanguageCodeText)(value, sourceLanguage, language)) ?? value,
     })));
     return translations.filter((entry) => normalizeText(entry.value));
 }
 async function syncEntityFieldTranslations(db, args) {
-    const enabledLanguages = await resolveEnabledLanguages(args.organizationId);
+    const enabledLanguages = await resolveEnabledLanguages(db, args.organizationId);
     for (const field of args.fields) {
         const normalizedValue = normalizeText(field.value);
         if (!normalizedValue) {

@@ -54,13 +54,13 @@ async function listUnits(organizationId, query, localeContext) {
                 AND: [
                     {
                         OR: [
-                            { name: { contains: query.search, mode: "insensitive" } },
-                            { code: { contains: query.search, mode: "insensitive" } },
-                            { symbol: { contains: query.search, mode: "insensitive" } },
+                            { name: { contains: query.search } },
+                            { code: { contains: query.search } },
+                            { symbol: { contains: query.search } },
                             {
                                 translations: {
                                     some: {
-                                        name: { contains: query.search, mode: "insensitive" },
+                                        name: { contains: query.search },
                                     },
                                 },
                             },
@@ -150,11 +150,10 @@ async function updateUnit(organizationId, unitId, actorUserId, input, localeCont
     const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
         organizationId: existing.organizationId ?? organizationId,
         baseName: input.name ?? existing.name,
-        existingTranslations: input.translations ??
-            existing.translations.map((translation) => ({
-                language: translation.language,
-                name: translation.name,
-            })),
+        existingTranslations: (0, translations_1.mergeTranslationsForUpdate)(existing.translations.map((translation) => ({
+            language: translation.language,
+            name: translation.name,
+        })), input.translations),
     });
     await prisma_1.prisma.$transaction(async (tx) => {
         if (!existing.isSystem) {

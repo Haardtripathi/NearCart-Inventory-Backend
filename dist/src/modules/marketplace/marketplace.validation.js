@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.externalOrderIdParamSchema = exports.createBridgedSalesOrderSchema = exports.marketplaceAvailabilitySchema = exports.marketplaceScopedQuerySchema = exports.marketplaceCatalogQuerySchema = exports.marketplaceOrganizationsQuerySchema = void 0;
+exports.organizationBranchParamSchema = exports.organizationExternalOrderIdParamSchema = exports.externalOrderIdParamSchema = exports.createBridgedSalesOrderSchema = exports.marketplaceAvailabilitySchema = exports.marketplaceScopedQuerySchema = exports.marketplaceCatalogQuerySchema = exports.marketplaceOrganizationsQuerySchema = void 0;
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
 exports.marketplaceOrganizationsQuerySchema = zod_1.z.object({
@@ -70,4 +70,12 @@ exports.createBridgedSalesOrderSchema = zod_1.z.object({
 });
 exports.externalOrderIdParamSchema = zod_1.z.object({
     externalOrderId: validation_1.trimmedString,
+});
+exports.organizationExternalOrderIdParamSchema = zod_1.z.object({
+    organizationId: validation_1.trimmedString,
+    externalOrderId: validation_1.trimmedString,
+});
+exports.organizationBranchParamSchema = zod_1.z.object({
+    organizationId: validation_1.trimmedString,
+    branchId: validation_1.trimmedString,
 });

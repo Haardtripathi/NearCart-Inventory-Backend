@@ -21,6 +21,10 @@ const booleanFromEnv = zod_1.z.preprocess((value) => {
 const envSchema = zod_1.z
     .object({
     DATABASE_URL: zod_1.z.string().min(1, "DATABASE_URL is required"),
+    // Auth token for the hosted libSQL/Turso database referenced by DATABASE_URL. Optional since a
+    // local `file:` SQLite URL (e.g. for tests) needs no auth — passed separately from the URL to
+    // PrismaLibSql's Config object (see src/config/prisma.ts), mirroring NearCart/backend's setup.
+    DATABASE_AUTH_TOKEN: zod_1.z.string().trim().optional(),
     PORT: zod_1.z.coerce.number().int().positive().default(5001),
     NODE_ENV: zod_1.z.enum(["development", "test", "production"]).default("development"),
     JWT_SECRET: zod_1.z.string().min(1, "JWT_SECRET is required"),
@@ -32,7 +36,9 @@ const envSchema = zod_1.z
     UPSTASH_REDIS_REST_TOKEN: zod_1.z.string().trim().min(1).optional(),
     REDIS_KEY_PREFIX: zod_1.z.string().trim().min(1).default("nearcart"),
     LIBRETRANSLATE_URL: zod_1.z.string().trim().url().default("http://127.0.0.1:5000"),
-    AUTO_TRANSLATE_ON_WRITE: booleanFromEnv.default(false),
+    // Defaults on (2026-07-23 product decision) — requires LIBRETRANSLATE_URL to be reachable;
+    // AUTO_TRANSLATE_FAIL_OPEN keeps writes succeeding (untranslated) if it isn't.
+    AUTO_TRANSLATE_ON_WRITE: booleanFromEnv.default(true),
     AUTO_TRANSLATE_FAIL_OPEN: booleanFromEnv.default(true),
     TRANSLATION_CACHE_TTL_SECONDS: zod_1.z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
     CLOUDINARY_CLOUD_NAME: zod_1.z.string().trim().min(1).optional(),
@@ -41,6 +47,13 @@ const envSchema = zod_1.z
     CLOUDINARY_UPLOAD_FOLDER: zod_1.z.string().trim().min(1).default("nearcart-inventory"),
     IMAGE_UPLOAD_MAX_BYTES: zod_1.z.coerce.number().int().positive().default(5 * 1024 * 1024),
     MARKETPLACE_INTERNAL_TOKEN: zod_1.z.string().trim().min(1).optional(),
+    // Outbound reverse notification webhook (this backend -> NearCart) — same shared secret as
+    // MARKETPLACE_INTERNAL_TOKEN authenticates NearCart's inbound calls to us, reused here for
+    // the reverse direction so no second secret is needed.
+    NEARCART_SERVICE_URL: zod_1.z.string().trim().url().optional(),
+    FIREBASE_PROJECT_ID: zod_1.z.string().trim().min(1).optional(),
+    FIREBASE_CLIENT_EMAIL: zod_1.z.string().trim().min(1).optional(),
+    FIREBASE_PRIVATE_KEY: zod_1.z.string().trim().min(1).optional(),
     SMTP_HOST: zod_1.z.string().trim().min(1).optional(),
     SMTP_PORT: zod_1.z.coerce.number().int().positive().default(587),
     SMTP_SECURE: booleanFromEnv.default(false),
@@ -50,6 +63,20 @@ const envSchema = zod_1.z
     OTP_TTL_MINUTES: zod_1.z.coerce.number().int().positive().default(10),
     OTP_RESEND_COOLDOWN_SECONDS: zod_1.z.coerce.number().int().positive().default(60),
     OTP_MAX_ATTEMPTS: zod_1.z.coerce.number().int().positive().default(5),
+    // How long a bridged/created PENDING SalesOrder waits for shop confirmation before the
+    // order-confirmation-sweep cron auto-rejects it (see jobs/order-confirmation-sweep.ts).
+    ORDER_CONFIRMATION_TIMEOUT_MINUTES: zod_1.z.coerce.number().int().positive().default(10),
+    // Max distance (km) a driver's last known location may be from a branch's pickup point to be
+    // considered for nearest-free-driver auto-assignment (see sales-orders driver-matching logic).
+    DRIVER_MATCH_RADIUS_KM: zod_1.z.coerce.number().positive().default(15),
+    // Driver access-token lifetime is deliberately short (unlike JWT_EXPIRES_IN's 7d default for
+    // org staff) now that DriverRefreshToken (see utils/driverRefreshToken.ts) provides real
+    // months-long session longevity via rotation — the access token only needs to bridge the gap
+    // between refreshes.
+    DRIVER_JWT_EXPIRES_IN: zod_1.z.string().min(1).default("1d"),
+    // "Months" tenor for a driver's rotating refresh session, mirroring NearCart/backend's
+    // AUTH_REFRESH_TTL_DAYS for the same reason (long-lived mobile sessions).
+    DRIVER_REFRESH_TTL_DAYS: zod_1.z.coerce.number().int().positive().default(90),
 })
     .refine((values) => (!!values.UPSTASH_REDIS_REST_URL && !!values.UPSTASH_REDIS_REST_TOKEN) ||
     (!values.UPSTASH_REDIS_REST_URL && !values.UPSTASH_REDIS_REST_TOKEN), {
@@ -64,6 +91,17 @@ const envSchema = zod_1.z
     .refine((values) => (!!values.SMTP_HOST && !!values.SMTP_USER && !!values.SMTP_PASS) || !values.SMTP_HOST, {
     message: "SMTP_USER and SMTP_PASS must be set together with SMTP_HOST when enabling email delivery",
     path: ["SMTP_HOST"],
+})
+    .refine((values) => {
+    const urlLower = values.DATABASE_URL.toLowerCase();
+    const isRemote = urlLower.startsWith("libsql://") || urlLower.startsWith("https://");
+    if (isRemote && !values.DATABASE_AUTH_TOKEN) {
+        return false;
+    }
+    return true;
+}, {
+    message: "DATABASE_AUTH_TOKEN is required for remote libSQL/Turso database URLs",
+    path: ["DATABASE_AUTH_TOKEN"],
 });
 const parsed = envSchema.safeParse({
     ...process.env,

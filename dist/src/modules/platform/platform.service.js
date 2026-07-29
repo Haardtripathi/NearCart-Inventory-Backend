@@ -85,12 +85,11 @@ async function updateIndustry(industryId, input, localeContext) {
     const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
         baseName: input.name ?? existing.name,
         baseDescription: input.description ?? existing.description ?? undefined,
-        existingTranslations: input.translations ??
-            existing.translations.map((translation) => ({
-                language: translation.language,
-                name: translation.name,
-                description: translation.description ?? undefined,
-            })),
+        existingTranslations: (0, translations_1.mergeTranslationsForUpdate)(existing.translations.map((translation) => ({
+            language: translation.language,
+            name: translation.name,
+            description: translation.description ?? undefined,
+        })), input.translations),
     });
     await prisma_1.prisma.$transaction(async (tx) => {
         await tx.industry.update({

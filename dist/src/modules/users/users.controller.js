@@ -5,7 +5,9 @@ exports.listOrganizationUsersController = listOrganizationUsersController;
 exports.createOrganizationUserController = createOrganizationUserController;
 exports.updateOrganizationUserController = updateOrganizationUserController;
 exports.generateOrganizationUserAccessLinkController = generateOrganizationUserAccessLinkController;
+exports.registerUserDeviceTokenController = registerUserDeviceTokenController;
 const ApiResponse_1 = require("../../utils/ApiResponse");
+const device_tokens_service_1 = require("../../services/device-tokens.service");
 const users_service_1 = require("./users.service");
 async function searchUsersDirectoryController(req, res) {
     const data = await (0, users_service_1.searchUsersDirectory)(typeof req.query.search === "string" ? req.query.search : undefined);
@@ -26,4 +28,8 @@ async function updateOrganizationUserController(req, res) {
 async function generateOrganizationUserAccessLinkController(req, res) {
     const data = await (0, users_service_1.generateOrganizationUserAccessLink)(req.auth.userId, req.auth.activeOrganizationId, req.params.id);
     return (0, ApiResponse_1.sendSuccess)(res, 201, "User access link generated successfully", data);
+}
+async function registerUserDeviceTokenController(req, res) {
+    const data = await (0, device_tokens_service_1.upsertDeviceToken)("USER", req.auth.userId, req.body);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Device token registered successfully", data);
 }

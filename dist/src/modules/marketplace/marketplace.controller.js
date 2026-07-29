@@ -8,6 +8,8 @@ exports.listMarketplaceCategoriesController = listMarketplaceCategoriesControlle
 exports.listMarketplaceBrandsController = listMarketplaceBrandsController;
 exports.createBridgedSalesOrderController = createBridgedSalesOrderController;
 exports.getSalesOrderByExternalIdController = getSalesOrderByExternalIdController;
+exports.cancelBridgedSalesOrderController = cancelBridgedSalesOrderController;
+exports.getBranchActiveOrderCountController = getBranchActiveOrderCountController;
 const ApiResponse_1 = require("../../utils/ApiResponse");
 const localization_1 = require("../../utils/localization");
 const marketplace_service_1 = require("./marketplace.service");
@@ -56,4 +58,12 @@ async function createBridgedSalesOrderController(req, res) {
 async function getSalesOrderByExternalIdController(req, res) {
     const data = await (0, marketplace_service_1.getSalesOrderByExternalId)(req.params.externalOrderId);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Sales order fetched successfully", data);
+}
+async function cancelBridgedSalesOrderController(req, res) {
+    const data = await (0, marketplace_service_1.cancelBridgedSalesOrder)(req.params.organizationId, req.params.externalOrderId);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Sales order cancelled successfully", data);
+}
+async function getBranchActiveOrderCountController(req, res) {
+    const data = await (0, marketplace_service_1.getBranchActiveOrderCount)(req.params.organizationId, req.params.branchId);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Branch active order count fetched successfully", data);
 }

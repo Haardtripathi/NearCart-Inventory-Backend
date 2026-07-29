@@ -6,6 +6,8 @@ exports.getMyOrganizations = getMyOrganizations;
 exports.getOrganizationById = getOrganizationById;
 exports.addIndustryToOrganization = addIndustryToOrganization;
 exports.backfillOrganizationIndustryCatalogDefaults = backfillOrganizationIndustryCatalogDefaults;
+exports.getEnabledPages = getEnabledPages;
+exports.updateEnabledPages = updateEnabledPages;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const ApiError_1 = require("../../utils/ApiError");
@@ -16,6 +18,8 @@ const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations")
 const json_1 = require("../../utils/json");
 const branchCode_1 = require("../../utils/branchCode");
 const localization_1 = require("../../utils/localization");
+const pageVisibility_1 = require("../../constants/pageVisibility");
+const audit_service_1 = require("../audit/audit.service");
 const defaultBrandTranslationLanguages = [client_1.LanguageCode.EN, client_1.LanguageCode.HI, client_1.LanguageCode.GU];
 const defaultOrganizationTaxRates = [
     { code: "GST0", name: "GST 0%", rate: "0" },
@@ -832,5 +836,73 @@ async function backfillOrganizationIndustryCatalogDefaults() {
     }
     return {
         processed: configs.length,
+    };
+}
+/**
+ * Merge the organization's stored `enabledPages` JSON over the hardcoded
+ * catalog defaults so newly added modules (added to
+ * `SIDEBAR_MODULE_CATALOG` after an org last saved its preferences)
+ * automatically fall back to a sensible default instead of disappearing or
+ * throwing on `undefined`.
+ */
+function mergeEnabledPages(stored) {
+    const storedRecord = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+    const merged = { ...pageVisibility_1.DEFAULT_ENABLED_PAGES };
+    for (const moduleKey of Object.keys(pageVisibility_1.DEFAULT_ENABLED_PAGES)) {
+        if (typeof storedRecord[moduleKey] === "boolean") {
+            merged[moduleKey] = storedRecord[moduleKey];
+        }
+    }
+    for (const requiredKey of pageVisibility_1.REQUIRED_MODULE_KEYS) {
+        merged[requiredKey] = true;
+    }
+    return merged;
+}
+async function getEnabledPages(organizationId) {
+    const organization = await prisma_1.prisma.organization.findFirst({
+        where: { id: organizationId, deletedAt: null },
+        select: { enabledPages: true },
+    });
+    if (!organization) {
+        throw ApiError_1.ApiError.notFound("Organization not found");
+    }
+    return {
+        enabledPages: mergeEnabledPages(organization.enabledPages),
+        modules: pageVisibility_1.SIDEBAR_MODULE_CATALOG,
+    };
+}
+async function updateEnabledPages(organizationId, actorUserId, patch) {
+    const organization = await prisma_1.prisma.organization.findFirst({
+        where: { id: organizationId, deletedAt: null },
+        select: { enabledPages: true },
+    });
+    if (!organization) {
+        throw ApiError_1.ApiError.notFound("Organization not found");
+    }
+    const before = mergeEnabledPages(organization.enabledPages);
+    const after = { ...before, ...patch };
+    for (const requiredKey of pageVisibility_1.REQUIRED_MODULE_KEYS) {
+        after[requiredKey] = true;
+    }
+    const updated = await prisma_1.prisma.$transaction(async (tx) => {
+        const result = await tx.organization.update({
+            where: { id: organizationId },
+            data: { enabledPages: (0, json_1.toJsonValue)(after) },
+            select: { enabledPages: true },
+        });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId,
+            actorUserId,
+            action: client_1.AuditAction.UPDATE,
+            entityType: "OrganizationEnabledPages",
+            entityId: organizationId,
+            before,
+            after,
+        });
+        return result;
+    });
+    return {
+        enabledPages: mergeEnabledPages(updated.enabledPages),
+        modules: pageVisibility_1.SIDEBAR_MODULE_CATALOG,
     };
 }

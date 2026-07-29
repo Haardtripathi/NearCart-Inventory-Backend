@@ -326,36 +326,43 @@ async function validateIndustryCompatibility(organizationId, masterItem, input) 
     return "Industry mismatch allowed because strictIndustryMatch is disabled";
 }
 async function createProductTranslations(db, productId, masterItem) {
-    for (const translation of masterItem.translations) {
-        await db.productTranslation.create({
-            data: {
-                productId,
-                language: translation.language,
-                name: translation.name,
-                description: translation.description,
-            },
-        });
+    if (masterItem.translations.length === 0) {
+        return;
     }
+    await db.productTranslation.createMany({
+        data: masterItem.translations.map((translation) => ({
+            productId,
+            language: translation.language,
+            name: translation.name,
+            description: translation.description,
+        })),
+    });
 }
 async function createVariantTranslations(db, variantId, translations) {
-    for (const translation of translations) {
-        await db.productVariantTranslation.create({
-            data: {
-                variantId,
-                language: translation.language,
-                name: translation.name,
-            },
-        });
+    if (translations.length === 0) {
+        return;
     }
+    await db.productVariantTranslation.createMany({
+        data: translations.map((translation) => ({
+            variantId,
+            language: translation.language,
+            name: translation.name,
+        })),
+    });
 }
-function normalizeTemplateDefaultFlags(templates) {
-    const preferredDefaultId = templates.find((template) => template.isDefault)?.id ?? templates[0]?.id ?? null;
+function normalizeTemplateDefaultFlags(templates, requestedDefaultTemplateId) {
+    const preferredDefaultId = (requestedDefaultTemplateId && templates.some((template) => template.id === requestedDefaultTemplateId)
+        ? requestedDefaultTemplateId
+        : null) ??
+        templates.find((template) => template.isDefault)?.id ??
+        templates[0]?.id ??
+        null;
     return templates.map((template) => ({
         ...template,
         isDefault: template.id === preferredDefaultId,
     }));
 }
-async function createImportedVariants(db, organizationId, productId, productName, masterItem, primaryUnitId, pricingOverrides) {
+async function createImportedVariants(db, organizationId, productId, productName, masterItem, primaryUnitId, pricingOverrides, defaultVariantTemplateId) {
     if (masterItem.variantTemplates.length === 0) {
         const priceOverride = getVariantPriceOverride(pricingOverrides);
         const sku = await generateUniqueVariantSku(db, organizationId, masterItem.code);
@@ -388,7 +395,7 @@ async function createImportedVariants(db, organizationId, productId, productName
         })));
         return;
     }
-    const templates = normalizeTemplateDefaultFlags(masterItem.variantTemplates);
+    const templates = normalizeTemplateDefaultFlags(masterItem.variantTemplates, defaultVariantTemplateId);
     for (const template of templates) {
         const priceOverride = getVariantPriceOverride(pricingOverrides, template.id);
         const templateUnit = await resolveUnitByCode(db, organizationId, template.unitCode ?? masterItem.defaultUnitCode);
@@ -441,6 +448,10 @@ async function importMasterCatalogItem(masterItemId, actorUserId, activeOrganiza
     }
     const masterItem = await getImportMasterCatalogItem(masterItemId);
     const industryWarning = await validateIndustryCompatibility(organizationId, masterItem, input);
+    if (input.defaultVariantTemplateId &&
+        !masterItem.variantTemplates.some((template) => template.id === input.defaultVariantTemplateId)) {
+        throw ApiError_1.ApiError.badRequest("defaultVariantTemplateId does not belong to this master catalog item");
+    }
     const existingProduct = await prisma_1.prisma.product.findFirst({
         where: {
             organizationId,
@@ -510,8 +521,16 @@ async function importMasterCatalogItem(masterItemId, actorUserId, activeOrganiza
             },
         });
         await createProductTranslations(tx, createdProduct.id, masterItem);
-        await createImportedVariants(tx, organizationId, createdProduct.id, productName, masterItem, primaryUnit?.id ?? null, input.pricingOverrides);
+        await createImportedVariants(tx, organizationId, createdProduct.id, productName, masterItem, primaryUnit?.id ?? null, input.pricingOverrides, input.defaultVariantTemplateId);
         return createdProduct;
+    }, {
+        // Imports with several variant templates issue many sequential queries
+        // (unit/brand/tax lookups, unique SKU/slug checks, per-variant + per-translation
+        // inserts). Prisma's default interactive transaction timeout is 5s, which was
+        // regularly exceeded (and the whole import failed) once an item had more than a
+        // couple of variant templates. Give it more headroom.
+        timeout: 20000,
+        maxWait: 10000,
     });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
@@ -542,6 +561,7 @@ async function importManyMasterCatalogItems(actorUserId, activeOrganizationId, i
             allowDuplicate: input.allowDuplicate,
             strictIndustryMatch: input.strictIndustryMatch,
             forceImport: input.forceImport,
+            defaultVariantTemplateId: item.defaultVariantTemplateId,
             pricingOverrides: item.pricingOverrides,
             namingOverrides: item.namingOverrides,
         }, localeContext);

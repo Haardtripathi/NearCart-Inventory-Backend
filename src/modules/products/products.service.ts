@@ -433,18 +433,25 @@ async function upsertVariantTranslations(
   });
 }
 
+/**
+ * Bug fixed 2026-07-28: this used to call `enrichWithAutoTranslations` internally, which reads
+ * `Organization.enabledLanguages` via the module-level `prisma` singleton (not the `db`/`tx`
+ * client passed in here) and, when `AUTO_TRANSLATE_ON_WRITE` is on, makes an outbound LibreTranslate
+ * HTTP call. Both callers of this function (`createProduct`, `createVariant` below) invoke it from
+ * inside an open `prisma.$transaction`, so that global-`prisma` read raced the still-open `tx`
+ * write transaction on the same DB — the exact bug class already found and fixed once in
+ * `resolveEnabledLanguages` (see utils/entityFieldTranslations.ts), which caused 30s+ Turso lock
+ * hangs. `master-catalog.service.ts` (see `enrichVariantTemplateTranslations` there) already
+ * documents the fix for this exact hazard: resolve translations up front, before opening the
+ * transaction, and have the tx-scoped function only ever do DB writes via `db`. Applied the same
+ * fix here — `input.translations` is now expected to already be fully resolved by the caller.
+ */
 async function createVariantRecord(
   db: DbClient,
   organizationId: string,
   productId: string,
   input: NormalizedVariantInput,
 ) {
-  const translations = await enrichWithAutoTranslations<VariantTranslationInput>({
-    organizationId,
-    baseName: input.name,
-    existingTranslations: input.translations,
-  });
-
   const variant = await db.productVariant.create({
     data: {
       organizationId,
@@ -469,9 +476,27 @@ async function createVariantRecord(
     },
   });
 
-  await upsertVariantTranslations(db, variant.id, translations);
+  await upsertVariantTranslations(db, variant.id, input.translations);
 
   return variant;
+}
+
+/** Resolves auto-translations for a batch of variants before any transaction opens (see the
+ * `createVariantRecord` comment above for why this must happen up front). */
+async function enrichVariantPayloadTranslations(
+  organizationId: string,
+  variants: NormalizedVariantInput[],
+): Promise<NormalizedVariantInput[]> {
+  return Promise.all(
+    variants.map(async (variant) => ({
+      ...variant,
+      translations: await enrichWithAutoTranslations<VariantTranslationInput>({
+        organizationId,
+        baseName: variant.name,
+        existingTranslations: variant.translations,
+      }),
+    })),
+  );
 }
 
 export async function listProducts(
@@ -618,7 +643,10 @@ export async function createProduct(
     existingTranslations: input.translations,
   });
 
-  const normalizedVariants = normalizeVariantPayload(input.name, computedHasVariants, rawVariants);
+  const normalizedVariants = await enrichVariantPayloadTranslations(
+    organizationId,
+    normalizeVariantPayload(input.name, computedHasVariants, rawVariants),
+  );
   const slug = slugify(input.slug ?? input.name);
 
   const productId = await prisma.$transaction(
@@ -859,7 +887,12 @@ export async function createVariant(
   await ensureVariantUniquenessInDb(organizationId, [input]);
 
   const shouldBeDefault = input.isDefault ?? product.variants.every((variant) => !variant.isDefault);
-  const normalized = normalizeVariantPayload(product.name, true, [{ ...input, isDefault: shouldBeDefault }])[0]!;
+  const normalized = (
+    await enrichVariantPayloadTranslations(
+      organizationId,
+      normalizeVariantPayload(product.name, true, [{ ...input, isDefault: shouldBeDefault }]),
+    )
+  )[0]!;
 
   const created = await prisma.$transaction(
     async (tx) => {

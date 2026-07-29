@@ -330,30 +330,23 @@ async function registerOrganizationOwner(input, meta, localeContext) {
             organizationId: organization.organization.id,
         };
     }, INTERACTIVE_TRANSACTION_OPTIONS);
-    await prisma_1.prisma.user.update({
-        where: {
-            id: created.userId,
-        },
-        data: {
-            lastLoginAt: new Date(),
-        },
-    });
-    const session = await buildAuthenticatedSession(created.userId, created.organizationId, localeContext);
-    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+    // Unlike an existing account calling /auth/login, a brand-new self-registered owner has not
+    // proven ownership of their inbox yet (emailVerified: false above, same as any self-serve
+    // signup) — so, to match what login() enforces for that exact case, do NOT hand out a working
+    // session token here. Previously this called buildAuthenticatedSession() and returned a full
+    // token that worked immediately against every authenticated route, bypassing the same
+    // emailVerified check login() performs moments later for the same account. Instead, kick off
+    // the same OTP flow /auth/send-otp already exposes and tell the client verification is still
+    // required; the client completes login (via POST /auth/login) only after /auth/verify-otp
+    // succeeds — see LoginPage.tsx / LoginScreen.tsx's existing unverified-login OTP panel, which
+    // this now feeds into directly instead of duplicating.
+    await sendEmailVerificationOtp({ email });
+    return {
+        requiresEmailVerification: true,
+        email,
+        fullName: input.fullName.trim(),
         organizationId: created.organizationId,
-        actorUserId: created.userId,
-        action: client_1.AuditAction.LOGIN,
-        entityType: "User",
-        entityId: created.userId,
-        meta: {
-            activeOrganizationId: created.organizationId,
-            role: session.role,
-            source: "registration",
-        },
-        ipAddress: meta.ipAddress,
-        userAgent: meta.userAgent,
-    });
-    return session;
+    };
 }
 async function completeCredentialFlow(token, purpose, password, meta, localeContext) {
     const tokenRecord = await (0, userActionTokens_1.getUserActionTokenByRawToken)(prisma_1.prisma, token, purpose);

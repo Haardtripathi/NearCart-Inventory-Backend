@@ -8,10 +8,12 @@ exports.confirmSalesOrder = confirmSalesOrder;
 exports.rejectSalesOrder = rejectSalesOrder;
 exports.cancelSalesOrder = cancelSalesOrder;
 exports.deliverSalesOrder = deliverSalesOrder;
+exports.findNearestFreeDriver = findNearestFreeDriver;
 exports.markSalesOrderReady = markSalesOrderReady;
 exports.assignDriverToSalesOrder = assignDriverToSalesOrder;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
+const env_1 = require("../../config/env");
 const decimal_1 = require("../../utils/decimal");
 const ApiError_1 = require("../../utils/ApiError");
 const entityFieldTranslations_1 = require("../../utils/entityFieldTranslations");
@@ -21,6 +23,8 @@ const numbering_1 = require("../../utils/numbering");
 const pagination_1 = require("../../utils/pagination");
 const audit_service_1 = require("../audit/audit.service");
 const inventory_service_1 = require("../inventory/inventory.service");
+const order_event_webhook_service_1 = require("../../services/order-event-webhook.service");
+const push_notification_service_1 = require("../../services/push-notification.service");
 const INTERACTIVE_TRANSACTION_OPTIONS = {
     maxWait: 10_000,
     timeout: 30_000,
@@ -111,8 +115,8 @@ async function listSalesOrders(organizationId, query) {
         ...(query.search
             ? {
                 OR: [
-                    { orderNumber: { contains: query.search, mode: "insensitive" } },
-                    { customer: { name: { contains: query.search, mode: "insensitive" } } },
+                    { orderNumber: { contains: query.search } },
+                    { customer: { name: { contains: query.search } } },
                 ],
             }
             : {}),
@@ -156,6 +160,11 @@ async function createSalesOrder(organizationId, actorUserId, input) {
             status: input.status ?? client_1.SalesOrderStatus.PENDING,
             paymentStatus: input.paymentStatus ?? client_1.PaymentStatus.UNPAID,
             notes: input.notes ?? null,
+            // Only PENDING orders are ever auto-cancelled by the confirmation sweep (see
+            // jobs/order-confirmation-sweep.ts) — a DRAFT/CONFIRMED/etc. created directly via this
+            // staff-facing endpoint with an explicit status still gets a deadline set for consistency,
+            // but the sweep's own WHERE clause only ever matches status = PENDING rows.
+            confirmationDeadlineAt: new Date(Date.now() + env_1.env.ORDER_CONFIRMATION_TIMEOUT_MINUTES * 60_000),
             createdById: actorUserId,
             subtotal: prepared.totals.subtotal,
             taxTotal: prepared.totals.taxTotal,
@@ -311,10 +320,13 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
     }
     const confirmed = await prisma_1.prisma.$transaction(async (tx) => {
         // Guard against a concurrent confirm racing this same transition (e.g. a double-click or a
-        // duplicated webhook retry): claim the row atomically before touching stock — Postgres locks
-        // the row on this UPDATE, so a second concurrent transaction's updateMany blocks until this
-        // one commits, then re-evaluates the status predicate against 0 matching rows and safely
-        // no-ops instead of also decrementing stock for the same order.
+        // duplicated webhook retry): claim the row atomically before touching stock. `updateMany`
+        // compiles to a single atomic `UPDATE ... WHERE` statement, so the status predicate and the
+        // write happen as one indivisible step on any engine (Postgres or, post-migration, SQLite/
+        // libSQL) — a second concurrent caller's updateMany re-evaluates the predicate against 0
+        // matching rows once this one commits and safely no-ops instead of also decrementing stock for
+        // the same order. (Unlike `assignDriverToSalesOrder` below, this doesn't need a cross-row
+        // NOT EXISTS check, so the plain compare-and-swap here was never Postgres-specific.)
         const { count } = await tx.salesOrder.updateMany({
             where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
             data: {
@@ -359,8 +371,22 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
         });
         return updated;
     }, INTERACTIVE_TRANSACTION_OPTIONS);
+    if (confirmed.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: confirmed.externalOrderId,
+            status: confirmed.status,
+            eventType: "CONFIRMED",
+        });
+    }
     return confirmed;
 }
+/**
+ * `actorUserId` is nullable for the same reason as `cancelSalesOrder` above: the
+ * order-confirmation-sweep cron (jobs/order-confirmation-sweep.ts) auto-rejects PENDING orders
+ * past their `confirmationDeadlineAt` with no authenticated staff user behind the action. Passing
+ * `null` round-trips cleanly through `createAuditLog`'s already-nullable `actorUserId` — real
+ * staff-initiated rejects (the controller) continue to pass a real string.
+ */
 async function rejectSalesOrder(organizationId, orderId, actorUserId, rejectionReason) {
     const order = await getSalesOrderById(organizationId, orderId);
     if (DELIVERED_OR_RETURNED_STATUSES.includes(order.status)) {
@@ -391,8 +417,26 @@ async function rejectSalesOrder(organizationId, orderId, actorUserId, rejectionR
         before: order,
         after: updated,
     });
+    if (updated.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: updated.externalOrderId,
+            status: updated.status,
+            eventType: "REJECTED",
+        });
+    }
     return updated;
 }
+/**
+ * `actorUserId` is nullable: this is the one sales-order transition that can also be triggered
+ * by the marketplace bridge (see marketplace.service.ts cancelBridgedSalesOrder) rather than an
+ * authenticated staff user, and there is no sentinel "system" User row in this schema to fall
+ * back to — fabricating one would require a schema change of its own and would misrepresent the
+ * action as having been taken by a real account. Passing `null` here is the deliberate choice:
+ * `AuditLog.actorUserId` and `InventoryLedger.createdById` are both already nullable FKs, so a
+ * null actor round-trips cleanly, and the audit action (ORDER_CANCEL vs ORDER_CANCEL_BRIDGE,
+ * chosen below) plus the `meta` note is what actually distinguishes "cancelled via the customer
+ * app" for reporting — not a fake user id.
+ */
 async function cancelSalesOrder(organizationId, orderId, actorUserId) {
     const order = await getSalesOrderById(organizationId, orderId);
     if (CLOSED_ORDER_STATUSES.includes(order.status)) {
@@ -414,7 +458,7 @@ async function cancelSalesOrder(organizationId, orderId, actorUserId) {
                     quantityDelta: item.quantity,
                     unitCost: item.variant.costPrice,
                     note: "Sales order cancelled",
-                    createdById: actorUserId,
+                    createdById: actorUserId ?? undefined,
                 });
             }
         }
@@ -427,11 +471,16 @@ async function cancelSalesOrder(organizationId, orderId, actorUserId) {
         await (0, audit_service_1.createAuditLog)(tx, {
             organizationId,
             actorUserId,
-            action: client_1.AuditAction.UPDATE,
+            // Was plain AuditAction.UPDATE regardless of caller before this change — every other
+            // transition (CONFIRM/REJECT/DELIVER/READY) already had a dedicated action, cancel was the
+            // one exception. Fixed alongside adding the bridge distinction since both changes touch
+            // this exact line.
+            action: actorUserId ? client_1.AuditAction.ORDER_CANCEL : client_1.AuditAction.ORDER_CANCEL_BRIDGE,
             entityType: "SalesOrder",
             entityId: order.id,
             before: order,
             after: updated,
+            meta: actorUserId ? undefined : { source: "marketplace_bridge", note: "Cancelled via NearCart customer app" },
         });
         return updated;
     }, INTERACTIVE_TRANSACTION_OPTIONS);
@@ -462,7 +511,83 @@ async function deliverSalesOrder(organizationId, orderId, actorUserId) {
         before: order,
         after: updated,
     });
+    if (updated.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: updated.externalOrderId,
+            status: updated.status,
+            eventType: "DELIVERED",
+        });
+    }
     return updated;
+}
+const ACTIVE_DRIVER_ORDER_STATUSES = [
+    client_1.SalesOrderStatus.READY,
+    client_1.SalesOrderStatus.OUT_FOR_DELIVERY,
+];
+const EARTH_RADIUS_KM = 6371;
+function toRadians(degrees) {
+    return (degrees * Math.PI) / 180;
+}
+/** Standard haversine great-circle distance between two lat/long points, in kilometers. */
+function haversineDistanceKm(from, to) {
+    const dLat = toRadians(to.latitude - from.latitude);
+    const dLon = toRadians(to.longitude - from.longitude);
+    const lat1 = toRadians(from.latitude);
+    const lat2 = toRadians(to.latitude);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return EARTH_RADIUS_KM * c;
+}
+/**
+ * Ranks currently-free, VERIFIED drivers by distance from a branch's pickup-point coordinates and
+ * returns the closest one within `DRIVER_MATCH_RADIUS_KM`, or `null` if the branch has no
+ * coordinates set, no driver is free, or no free driver is within radius. "Free" = a driver has
+ * `isAvailableForAssignment: true` and no `SalesOrder` currently assigned to them with status
+ * READY/OUT_FOR_DELIVERY (see the `Driver.assignedOrders` relation). Called automatically from
+ * `markSalesOrderReady` below — the existing manual assign-driver dropdown in the Inventory
+ * frontend remains available as a fallback when this returns null.
+ */
+async function findNearestFreeDriver(branchId) {
+    const branch = await prisma_1.prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { latitude: true, longitude: true },
+    });
+    if (!branch || branch.latitude == null || branch.longitude == null) {
+        return null;
+    }
+    const branchOrigin = { latitude: branch.latitude, longitude: branch.longitude };
+    const candidates = await prisma_1.prisma.driver.findMany({
+        where: {
+            isAvailableForAssignment: true,
+            status: client_1.DriverStatus.VERIFIED,
+            lastKnownLatitude: { not: null },
+            lastKnownLongitude: { not: null },
+            assignedOrders: {
+                none: {
+                    status: { in: ACTIVE_DRIVER_ORDER_STATUSES },
+                },
+            },
+        },
+        select: { id: true, lastKnownLatitude: true, lastKnownLongitude: true },
+    });
+    let nearest = null;
+    for (const candidate of candidates) {
+        if (candidate.lastKnownLatitude == null || candidate.lastKnownLongitude == null) {
+            continue;
+        }
+        const distanceKm = haversineDistanceKm(branchOrigin, {
+            latitude: candidate.lastKnownLatitude,
+            longitude: candidate.lastKnownLongitude,
+        });
+        if (distanceKm > env_1.env.DRIVER_MATCH_RADIUS_KM) {
+            continue;
+        }
+        if (!nearest || distanceKm < nearest.distanceKm) {
+            nearest = { id: candidate.id, distanceKm };
+        }
+    }
+    return nearest ? { id: nearest.id } : null;
 }
 /**
  * Transitions CONFIRMED -> READY, the first of the two previously-dead SalesOrderStatus
@@ -477,9 +602,9 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
         throw ApiError_1.ApiError.badRequest("Only confirmed orders can be marked ready");
     }
     const updated = await prisma_1.prisma.$transaction(async (tx) => {
-        // Guard against a concurrent request racing this same transition: the WHERE clause's
-        // status check is evaluated atomically by Postgres as part of the UPDATE, so only one
-        // concurrent caller can ever flip CONFIRMED -> READY for this row.
+        // Guard against a concurrent request racing this same transition: `updateMany` compiles to a
+        // single atomic `UPDATE ... WHERE` statement on any engine, so only one concurrent caller can
+        // ever flip CONFIRMED -> READY for this row.
         const { count } = await tx.salesOrder.updateMany({
             where: { id: orderId, organizationId, status: client_1.SalesOrderStatus.CONFIRMED },
             data: {
@@ -503,6 +628,33 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
         });
         return result;
     }, INTERACTIVE_TRANSACTION_OPTIONS);
+    if (updated.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: updated.externalOrderId,
+            status: updated.status,
+            eventType: "READY",
+        });
+    }
+    // Nearest-free-driver auto-assignment: fires right after the READY transition commits, on a
+    // best-effort basis. A failure here must never turn a successful mark-ready into an error
+    // response — the order simply stays READY and unassigned, same as if no driver had ever been
+    // free, and the existing manual assign-driver dropdown in the Inventory frontend remains the
+    // fallback path.
+    //
+    // Bug fixed 2026-07-27 (found via live end-to-end test): this used to unconditionally
+    // `return updated`, the pre-auto-assign snapshot — so a caller that got a driver auto-assigned
+    // would see `assignedDriverId: null` in THIS response, only seeing the real assignment on a
+    // subsequent GET. The driver was correctly assigned in the DB the whole time; only the
+    // response body was stale. Now returns the post-assignment row when assignment succeeds.
+    try {
+        const nearestDriver = await findNearestFreeDriver(updated.branchId);
+        if (nearestDriver) {
+            return await assignDriverToSalesOrder(organizationId, updated.id, null, nearestDriver.id);
+        }
+    }
+    catch (error) {
+        console.warn(`[sales-orders] Nearest-free-driver auto-assignment failed for order ${updated.id}`, error);
+    }
     return updated;
 }
 /**
@@ -510,6 +662,14 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
  * model, not an OrganizationMembership) — see PHASE1_REQUIREMENTS.md's locked 2026-07-24 decision
  * — so any org's staff may assign any VERIFIED driver, without an organization-membership check
  * on the driver itself. See modules/driver-orders for the driver-side pickup/deliver transitions.
+ */
+/**
+ * `actorUserId` is nullable: the nearest-free-driver auto-assign path (called from
+ * `markSalesOrderReady` below, right after a READY transition) has no authenticated staff user
+ * behind it — the system picked the driver, not a person. `assignedById` is a nullable FK
+ * (`SalesOrder.assignedById String?`) and `createAuditLog`'s `actorUserId` is already nullable, so
+ * this mirrors the same pattern already used for `cancelSalesOrder`/`rejectSalesOrder`. The
+ * manual assign-driver controller continues to pass a real string.
  */
 async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, driverId) {
     const order = await getSalesOrderById(organizationId, orderId);
@@ -527,20 +687,47 @@ async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, dr
         throw ApiError_1.ApiError.badRequest("Only verified drivers can be assigned to orders");
     }
     const updated = await prisma_1.prisma.$transaction(async (tx) => {
-        // Guard against a concurrent request racing this same transition (e.g. two staff members
-        // assigning different drivers at once): the WHERE clause's status check is evaluated
-        // atomically by Postgres as part of the UPDATE, so only one concurrent caller can ever win
-        // the READY -> assigned transition for this row.
-        const { count } = await tx.salesOrder.updateMany({
-            where: { id: orderId, organizationId, status: client_1.SalesOrderStatus.READY },
-            data: {
-                assignedDriverId: driverId,
-                assignedById: actorUserId,
-                assignedAt: new Date(),
-            },
-        });
-        if (count === 0) {
-            throw ApiError_1.ApiError.conflict("Order is no longer READY — it may have already been assigned or its state changed");
+        // Bug fixed 2026-07-28: this previously took a Postgres row lock via
+        // `tx.$queryRaw\`SELECT id FROM "Driver" WHERE id = ${driverId} FOR UPDATE\`` to serialize
+        // concurrent assignment attempts for the same driver before re-checking activeAssignmentCount.
+        // `FOR UPDATE` is not valid SQLite/libSQL syntax at all — verified live against this Turso DB,
+        // it throws `SQL_PARSE_ERROR: near FOR` — so since today's Postgres -> Turso migration this
+        // function has thrown on literally every call, not just raced under concurrency. Even setting
+        // that aside, SQLite/libSQL has no per-row locking to fall back to (locking is whole-database),
+        // so a straight port to some other "lock the row" primitive wouldn't have closed the race
+        // either. Fixed by folding the "driver has no other active delivery" check into the SAME atomic
+        // UPDATE statement that flips READY -> assigned via a NOT EXISTS subquery: a single SQL
+        // statement is atomic on SQLite/libSQL regardless of isolation level, so the check-then-set race
+        // is closed by the statement itself rather than by a preceding lock. Verified this exact
+        // UPDATE...NOT EXISTS shape parses and executes against the live Turso DB.
+        const affected = await tx.$executeRaw `
+      UPDATE "SalesOrder"
+      SET "assignedDriverId" = ${driverId},
+          "assignedById" = ${actorUserId},
+          "assignedAt" = ${new Date()}
+      WHERE "id" = ${orderId}
+        AND "organizationId" = ${organizationId}
+        AND "status" = ${client_1.SalesOrderStatus.READY}
+        AND NOT EXISTS (
+          SELECT 1 FROM "SalesOrder" AS "other"
+          WHERE "other"."assignedDriverId" = ${driverId}
+            AND "other"."id" != ${orderId}
+            AND "other"."status" IN (${client_1.SalesOrderStatus.READY}, ${client_1.SalesOrderStatus.OUT_FOR_DELIVERY})
+        )
+    `;
+        if (affected === 0) {
+            // The atomic UPDATE above is what actually prevents double-booking; this second read is
+            // best-effort and only picks which error message to surface (a tiny race window exists
+            // between the UPDATE and this SELECT, but it can only misattribute the reason, never allow
+            // an incorrect assignment through).
+            const stillReady = await tx.salesOrder.findFirst({
+                where: { id: orderId, organizationId, status: client_1.SalesOrderStatus.READY },
+                select: { id: true },
+            });
+            if (!stillReady) {
+                throw ApiError_1.ApiError.conflict("Order is no longer READY — it may have already been assigned or its state changed");
+            }
+            throw ApiError_1.ApiError.conflict("Driver already has another active delivery assigned");
         }
         const result = await tx.salesOrder.findUniqueOrThrow({
             where: { id: orderId },
@@ -565,5 +752,31 @@ async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, dr
         });
         return result;
     }, INTERACTIVE_TRANSACTION_OPTIONS);
+    if (updated.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: updated.externalOrderId,
+            status: updated.status,
+            eventType: "DRIVER_ASSIGNED",
+            assignedDriver: updated.assignedDriver
+                ? {
+                    fullName: updated.assignedDriver.fullName,
+                    phone: updated.assignedDriver.phone,
+                    vehicleType: updated.assignedDriver.vehicleType,
+                }
+                : null,
+        });
+    }
+    // `sendPushToDriver` only wraps the actual Expo API call in a try/catch internally — its
+    // leading `deviceToken.findMany` lookup is not guarded, so a transient DB error there would
+    // otherwise become an unhandled promise rejection on this fire-and-forget call and crash the
+    // process (same bug class documented elsewhere this session).
+    void (0, push_notification_service_1.sendPushToDriver)(driverId, {
+        title: "New delivery assigned",
+        body: `You've been assigned order #${updated.orderNumber}.`,
+        data: { salesOrderId: updated.id },
+        channelId: "order_alert",
+    }).catch((error) => {
+        console.warn(`[sales-orders] Failed to notify driver ${driverId} of assignment for order ${updated.id}`, error);
+    });
     return updated;
 }

@@ -106,6 +106,20 @@ const envSchema = z
       message: "SMTP_USER and SMTP_PASS must be set together with SMTP_HOST when enabling email delivery",
       path: ["SMTP_HOST"],
     },
+  )
+  .refine(
+    (values) => {
+      const urlLower = values.DATABASE_URL.toLowerCase();
+      const isRemote = urlLower.startsWith("libsql://") || urlLower.startsWith("https://");
+      if (isRemote && !values.DATABASE_AUTH_TOKEN) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: "DATABASE_AUTH_TOKEN is required for remote libSQL/Turso database URLs",
+      path: ["DATABASE_AUTH_TOKEN"],
+    }
   );
 
 const parsed = envSchema.safeParse({

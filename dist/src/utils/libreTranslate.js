@@ -151,12 +151,15 @@ async function buildTranslations(value, sourceLanguage = "auto") {
     if (!normalizedValue) {
         throw new Error("Text is required");
     }
-    const [en, hi, gu] = await Promise.all([
+    const [en, hi] = await Promise.all([
         translateText(normalizedValue, "en", sourceLanguage),
         translateText(normalizedValue, "hi", sourceLanguage),
-        translateText(normalizedValue, "gu", sourceLanguage),
     ]);
-    return { en, hi, gu };
+    // GU is intentionally not machine-translated: the self-hosted LibreTranslate instance has no
+    // Gujarati model loaded, so a request would silently echo the source text back unchanged instead
+    // of erroring — indistinguishable from a real (bad) translation. Return null so callers can tell
+    // "not translated" apart from "translated to the same string", rather than storing a fake GU value.
+    return { en, hi, gu: null };
 }
 async function translateLanguageCodeText(value, sourceLanguage, targetLanguage) {
     const normalizedValue = value.trim();

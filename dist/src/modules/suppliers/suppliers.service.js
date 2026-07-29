@@ -46,14 +46,14 @@ async function listSuppliers(organizationId, query, localeContext) {
         ...(query.search
             ? {
                 OR: [
-                    { name: { contains: query.search, mode: "insensitive" } },
-                    { code: { contains: query.search, mode: "insensitive" } },
-                    { phone: { contains: query.search, mode: "insensitive" } },
-                    { email: { contains: query.search, mode: "insensitive" } },
+                    { name: { contains: query.search } },
+                    { code: { contains: query.search } },
+                    { phone: { contains: query.search } },
+                    { email: { contains: query.search } },
                     {
                         translations: {
                             some: {
-                                name: { contains: query.search, mode: "insensitive" },
+                                name: { contains: query.search },
                             },
                         },
                     },
@@ -131,11 +131,10 @@ async function updateSupplier(organizationId, supplierId, actorUserId, input, lo
     const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
         organizationId,
         baseName: input.name ?? existing.name,
-        existingTranslations: input.translations ??
-            existing.translations.map((translation) => ({
-                language: translation.language,
-                name: translation.name,
-            })),
+        existingTranslations: (0, translations_1.mergeTranslationsForUpdate)(existing.translations.map((translation) => ({
+            language: translation.language,
+            name: translation.name,
+        })), input.translations),
     });
     const updated = await prisma_1.prisma.$transaction(async (tx) => {
         const nextSupplier = await tx.supplier.update({

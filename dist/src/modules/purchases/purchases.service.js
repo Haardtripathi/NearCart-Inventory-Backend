@@ -82,8 +82,8 @@ async function listPurchases(organizationId, query) {
         ...(query.search
             ? {
                 OR: [
-                    { receiptNumber: { contains: query.search, mode: "insensitive" } },
-                    { supplier: { name: { contains: query.search, mode: "insensitive" } } },
+                    { receiptNumber: { contains: query.search } },
+                    { supplier: { name: { contains: query.search } } },
                 ],
             }
             : {}),

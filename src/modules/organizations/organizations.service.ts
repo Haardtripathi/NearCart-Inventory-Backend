@@ -53,6 +53,8 @@ export interface CreateOrganizationInput {
     state?: string;
     country?: string;
     postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
   };
 }
 
@@ -700,6 +702,8 @@ export async function createOrganizationWithResolvedOwner(
       state: input.firstBranch.state ?? null,
       country: input.firstBranch.country ?? null,
       postalCode: input.firstBranch.postalCode ?? null,
+      latitude: input.firstBranch.latitude ?? null,
+      longitude: input.firstBranch.longitude ?? null,
     },
   });
 

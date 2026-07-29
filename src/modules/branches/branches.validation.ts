@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import {
   optionalEmailSchema,
+  optionalLatitudeSchema,
+  optionalLongitudeSchema,
   paginationQuerySchema,
   optionalTrimmedString,
   strictBooleanQueryParam,
@@ -27,6 +29,11 @@ export const createBranchSchema = z.object({
   state: optionalTrimmedString,
   country: optionalTrimmedString,
   postalCode: optionalTrimmedString,
+  // Pickup-point coordinates for nearest-free-driver auto-assignment (see
+  // `findNearestFreeDriver` in sales-orders.service.ts) — optional since not every shop owner has
+  // coordinates handy at creation time; can be backfilled later via PATCH.
+  latitude: optionalLatitudeSchema,
+  longitude: optionalLongitudeSchema,
   isActive: z.boolean().optional(),
 });
 

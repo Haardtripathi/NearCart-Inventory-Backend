@@ -76,6 +76,20 @@ export const idParamSchema = z.object({
 
 export const languageCodeSchema = z.nativeEnum(LanguageCode);
 
+// Optional pickup-point coordinates (e.g. `Branch.latitude`/`longitude`, used by
+// nearest-free-driver auto-assignment). `z.coerce.number()` so a raw form input or querystring
+// value still validates, but an explicit `null` is preserved (rather than coerced to 0) so a
+// caller can intentionally clear a previously-set coordinate.
+export const optionalLatitudeSchema = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.coerce.number().min(-90).max(90).nullable().optional(),
+);
+
+export const optionalLongitudeSchema = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.coerce.number().min(-180).max(180).nullable().optional(),
+);
+
 // Shared by both the shop-staff (`/api/users/device-token`) and driver
 // (`/api/driver/device-token`) registration endpoints — same payload shape either side of the
 // polymorphic DeviceToken model (see prisma schema: ownerType discriminates 'USER' vs 'DRIVER').

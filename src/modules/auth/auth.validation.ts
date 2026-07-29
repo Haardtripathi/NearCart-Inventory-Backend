@@ -4,6 +4,8 @@ import { z } from "zod";
 import {
   languageCodeSchema,
   optionalEmailSchema,
+  optionalLatitudeSchema,
+  optionalLongitudeSchema,
   optionalTrimmedString,
   trimmedString,
   uniqueLanguageArraySchema,
@@ -21,6 +23,10 @@ const branchInputSchema = z.object({
   state: optionalTrimmedString,
   country: optionalTrimmedString,
   postalCode: optionalTrimmedString,
+  // Optional at registration time — a shop owner may not have coordinates handy while signing
+  // up; can be backfilled later via PATCH /branches/:id. See branches.validation.ts.
+  latitude: optionalLatitudeSchema,
+  longitude: optionalLongitudeSchema,
 });
 
 export const bootstrapSuperAdminSchema = z.object({

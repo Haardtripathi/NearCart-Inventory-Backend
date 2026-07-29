@@ -89,6 +89,8 @@ export async function createBranch(organizationId: string, input: {
   state?: string;
   country?: string;
   postalCode?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   isActive?: boolean;
 }, localeContext: LocaleContext) {
   // Generate code if not provided
@@ -121,6 +123,8 @@ export async function createBranch(organizationId: string, input: {
       state: input.state ?? null,
       country: input.country ?? null,
       postalCode: input.postalCode ?? null,
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
       isActive: input.isActive ?? true,
     },
   });
@@ -179,6 +183,8 @@ export async function updateBranch(
     state: string;
     country: string;
     postalCode: string;
+    latitude: number | null;
+    longitude: number | null;
     isActive: boolean;
   }>,
   localeContext: LocaleContext,
@@ -199,6 +205,8 @@ export async function updateBranch(
       ...(input.state !== undefined ? { state: input.state || null } : {}),
       ...(input.country !== undefined ? { country: input.country || null } : {}),
       ...(input.postalCode !== undefined ? { postalCode: input.postalCode || null } : {}),
+      ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
+      ...(input.longitude !== undefined ? { longitude: input.longitude } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
     },
   });

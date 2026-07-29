@@ -12,6 +12,7 @@ import {
 } from "../../utils/driverRefreshToken";
 import { renderOtpEmail, sendMail } from "../../utils/mailer";
 import { issueOtp, verifyOtp } from "../../utils/otp";
+import { isUniqueConstraintError } from "../../utils/prismaErrors";
 import { createAuditLog } from "../audit/audit.service";
 
 interface RegisterDriverInput {
@@ -118,9 +119,10 @@ export async function registerDriver(input: RegisterDriverInput) {
   } catch (error) {
     // Narrow race: two concurrent registrations for the same phone/email both pass the
     // findUnique checks above before either commits. The @unique DB constraints already prevent
-    // duplicate rows either way — this just turns the resulting P2002 into the same friendly
-    // conflict response the pre-check above gives, instead of a raw 500.
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    // duplicate rows either way — this just turns the resulting unique-constraint violation into
+    // the same friendly conflict response the pre-check above gives, instead of a raw 500. See
+    // utils/prismaErrors.ts — can't compare `error.code === "P2002"` directly under this adapter.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && isUniqueConstraintError(error)) {
       throw ApiError.conflict("A driver account with this phone number or email already exists");
     }
 

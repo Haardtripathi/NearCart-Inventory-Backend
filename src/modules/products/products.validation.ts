@@ -7,6 +7,7 @@ import {
   optionalDecimalInputSchema,
   optionalTrimmedString,
   paginationQuerySchema,
+  strictBooleanQueryParam,
   trimmedString,
   uniqueLanguageArraySchema,
 } from "../../utils/validation";
@@ -70,7 +71,10 @@ export const productQuerySchema = paginationQuerySchema.extend({
   status: z.nativeEnum(ProductStatus).optional(),
   categoryId: optionalTrimmedString,
   brandId: optionalTrimmedString,
-  hasVariants: z.coerce.boolean().optional(),
+  // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+  // "false" as truthy (Boolean("false") === true), which inverted the "Simple only" filter —
+  // ?hasVariants=false was silently behaving identically to ?hasVariants=true.
+  hasVariants: strictBooleanQueryParam,
   lang: optionalTrimmedString,
 });
 

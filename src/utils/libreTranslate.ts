@@ -32,6 +32,27 @@ let supportedLanguagesCache:
     }
   | null = null;
 
+// Circuit breaker for a fully-unreachable LibreTranslate instance (e.g. self-hosted service not
+// running locally, or down in prod). Without this, every single translatable field write across
+// every module (products, categories, brands, suppliers, master-catalog, org registration, ...)
+// paid for TWO guaranteed-failure network round trips per field per language — one to /languages
+// (isTranslationAvailable) and one to /translate (requestLibreTranslate) — every single call,
+// since the languages cache above is only ever populated on success. That's the dominant cost
+// behind org registration measured at ~15s in this session despite AUTO_TRANSLATE_FAIL_OPEN=true
+// being set specifically to keep writes usable when translation is down. Once either call fails,
+// assume the whole instance is down for a short cooldown and skip network entirely — still
+// fail-open, just without redundantly re-proving unreachability on every request.
+const SERVICE_DOWN_COOLDOWN_MS = 30 * 1000;
+let serviceDownUntil = 0;
+
+function markServiceDown() {
+  serviceDownUntil = Date.now() + SERVICE_DOWN_COOLDOWN_MS;
+}
+
+function isServiceKnownDown() {
+  return Date.now() < serviceDownUntil;
+}
+
 function toIsoLanguage(languageCode: LanguageCode) {
   return languageCodeToIso[languageCode] ?? "en";
 }
@@ -87,6 +108,10 @@ async function getSupportedLanguagesTargets() {
 }
 
 async function isTranslationAvailable(source: TranslationSource, target: TranslationTarget) {
+  if (isServiceKnownDown()) {
+    return true;
+  }
+
   try {
     const targetsByLanguage = await getSupportedLanguagesTargets();
 
@@ -101,6 +126,7 @@ async function isTranslationAvailable(source: TranslationSource, target: Transla
     return targetsByLanguage.get(source)?.has(target) ?? false;
   } catch (error) {
     console.warn("LibreTranslate languages availability check failed", error);
+    markServiceDown();
     return true;
   }
 }
@@ -176,11 +202,20 @@ export async function translateText(
     }
   }
 
+  if (isServiceKnownDown()) {
+    if (!env.AUTO_TRANSLATE_FAIL_OPEN) {
+      throw new Error(`Translation from ${sourceLanguage} to ${targetLanguage} is not available`);
+    }
+    return normalizedValue;
+  }
+
   let translatedText: string;
 
   try {
     translatedText = await requestLibreTranslate(normalizedValue, sourceLanguage, targetLanguage);
   } catch (error) {
+    markServiceDown();
+
     if (!env.AUTO_TRANSLATE_FAIL_OPEN) {
       throw error;
     }

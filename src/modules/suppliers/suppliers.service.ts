@@ -118,6 +118,21 @@ export async function createSupplier(
   },
   localeContext: LocaleContext,
 ) {
+  // Explicit pre-check: unlike Category/Brand/Branch, `Supplier.code` has no `@@unique` in the
+  // schema at all, so nothing stops two suppliers in the same org silently sharing a code without
+  // this check (confirmed live during API testing — two POSTs with the same code both returned
+  // 201). Mirrors the same duplicate-code guard already used in units.service.ts createUnit.
+  if (input.code) {
+    const existingByCode = await prisma.supplier.findFirst({
+      where: { organizationId, code: input.code, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (existingByCode) {
+      throw ApiError.conflict("A supplier with this code already exists in this organization");
+    }
+  }
+
   const translations = await enrichWithAutoTranslations<SupplierTranslationInput>({
     organizationId,
     baseName: input.name,
@@ -186,6 +201,18 @@ export async function updateSupplier(
   localeContext: LocaleContext,
 ) {
   const existing = await getSupplierRecordById(organizationId, supplierId);
+
+  if (input.code && input.code !== existing.code) {
+    const existingByCode = await prisma.supplier.findFirst({
+      where: { organizationId, code: input.code, deletedAt: null, id: { not: supplierId } },
+      select: { id: true },
+    });
+
+    if (existingByCode) {
+      throw ApiError.conflict("A supplier with this code already exists in this organization");
+    }
+  }
+
   const translations = await enrichWithAutoTranslations<SupplierTranslationInput>({
     organizationId,
     baseName: input.name ?? existing.name,

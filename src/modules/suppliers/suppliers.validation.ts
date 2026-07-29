@@ -5,6 +5,7 @@ import {
   optionalEmailSchema,
   paginationQuerySchema,
   optionalTrimmedString,
+  strictBooleanQueryParam,
   trimmedString,
   uniqueLanguageArraySchema,
 } from "../../utils/validation";
@@ -15,7 +16,9 @@ const supplierTranslationSchema = z.object({
 });
 
 export const supplierQuerySchema = paginationQuerySchema.extend({
-  isActive: z.coerce.boolean().optional(),
+  // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+  // "false" as truthy, silently inverting an explicit ?isActive=false filter.
+  isActive: strictBooleanQueryParam,
 });
 
 export const createSupplierSchema = z.object({

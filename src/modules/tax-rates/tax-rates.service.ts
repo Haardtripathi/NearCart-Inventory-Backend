@@ -89,6 +89,22 @@ export async function createTaxRate(
   },
   localeContext: LocaleContext,
 ) {
+  // Explicit pre-check: `TaxRate.code` has no `@@unique` in the schema (only an index on
+  // organizationId+isActive), so nothing stops two tax rates in the same org silently sharing a
+  // code without this check (confirmed live during API testing — duplicate codes already existed
+  // in seeded data, and two fresh POSTs with the same code both returned 201). Mirrors the same
+  // duplicate-code guard already used in units.service.ts createUnit / suppliers.service.ts.
+  if (input.code) {
+    const existingByCode = await prisma.taxRate.findFirst({
+      where: { organizationId, code: input.code },
+      select: { id: true },
+    });
+
+    if (existingByCode) {
+      throw ApiError.conflict("A tax rate with this code already exists in this organization");
+    }
+  }
+
   const taxRate = await prisma.taxRate.create({
     data: {
       organizationId,
@@ -141,6 +157,17 @@ export async function updateTaxRate(
 
   if (!existing) {
     throw ApiError.notFound("Tax rate not found");
+  }
+
+  if (input.code && input.code !== existing.code) {
+    const existingByCode = await prisma.taxRate.findFirst({
+      where: { organizationId, code: input.code, id: { not: taxRateId } },
+      select: { id: true },
+    });
+
+    if (existingByCode) {
+      throw ApiError.conflict("A tax rate with this code already exists in this organization");
+    }
   }
 
   const updated = await prisma.taxRate.update({

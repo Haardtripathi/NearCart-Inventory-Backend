@@ -4,6 +4,7 @@ import {
   languageCodeSchema,
   paginationQuerySchema,
   optionalTrimmedString,
+  strictBooleanQueryParam,
   trimmedString,
   uniqueLanguageArraySchema,
 } from "../../utils/validation";
@@ -16,7 +17,9 @@ const categoryTranslationSchema = z.object({
 
 export const categoryQuerySchema = paginationQuerySchema.extend({
   parentId: optionalTrimmedString,
-  isActive: z.coerce.boolean().optional(),
+  // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+  // "false" as truthy, silently inverting an explicit ?isActive=false filter.
+  isActive: strictBooleanQueryParam,
   lang: optionalTrimmedString,
 });
 

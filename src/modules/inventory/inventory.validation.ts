@@ -7,6 +7,7 @@ import {
   optionalDateInputSchema,
   optionalTrimmedString,
   paginationQuerySchema,
+  strictBooleanQueryParam,
   trimmedString,
 } from "../../utils/validation";
 
@@ -14,7 +15,9 @@ export const inventoryBalanceQuerySchema = paginationQuerySchema.extend({
   branchId: optionalTrimmedString,
   productId: optionalTrimmedString,
   variantId: optionalTrimmedString,
-  lowStock: z.coerce.boolean().optional(),
+  // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+  // "false" as truthy, silently inverting an explicit ?lowStock=false filter.
+  lowStock: strictBooleanQueryParam,
 });
 
 export const inventoryLedgerQuerySchema = paginationQuerySchema.extend({

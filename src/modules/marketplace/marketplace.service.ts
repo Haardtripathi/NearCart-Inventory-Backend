@@ -14,6 +14,7 @@ import {
 import { generateDocumentNumber } from "../../utils/numbering";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { getAvailableStock, isLowStock } from "../../utils/stock";
+import { isUniqueConstraintError } from "../../utils/prismaErrors";
 import { createAuditLog } from "../audit/audit.service";
 import { cancelSalesOrder } from "../sales-orders/sales-orders.service";
 import { sendPushToOrgStaff } from "../../services/push-notification.service";
@@ -991,8 +992,11 @@ export async function createBridgedSalesOrder(
   } catch (error) {
     // Idempotency race: two concurrent replays of the same externalOrderId. The unique
     // constraint on externalOrderId is the source of truth — re-fetch and return it instead of
-    // surfacing a 500/409 for what is, from NearCart's point of view, a successful retry.
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    // surfacing a 500/409 for what is, from NearCart's point of view, a successful retry. See
+    // utils/prismaErrors.ts — can't compare `error.code === "P2002"` directly under this adapter
+    // (it silently stopped matching after the Postgres -> Turso migration, which would have
+    // turned every idempotent-retry push from NearCart into a hard failure instead of a replay).
+    if (error instanceof Prisma.PrismaClientKnownRequestError && isUniqueConstraintError(error)) {
       const raceWinner = await prisma.salesOrder.findUnique({
         where: { externalOrderId: input.externalOrderId },
       });

@@ -222,36 +222,45 @@ export async function updateUnit(
           ...(input.allowsDecimal !== undefined ? { allowsDecimal: input.allowsDecimal } : {}),
         },
       });
-    }
 
-    await upsertTranslations({
-      entries: translations,
-      listExisting: () =>
-        tx.unitTranslation.findMany({
-          where: {
-            unitId,
-          },
-          select: {
-            id: true,
-            language: true,
-          },
-        }),
-      create: (translation) =>
-        tx.unitTranslation.create({
-          data: {
-            unitId,
-            language: translation.language,
-            name: translation.name.trim(),
-          },
-        }),
-      update: (current, translation) =>
-        tx.unitTranslation.update({
-          where: { id: current.id },
-          data: {
-            name: translation.name.trim(),
-          },
-        }),
-    });
+      // Bug fixed: this upsertTranslations call used to run unconditionally, outside the
+      // `!existing.isSystem` guard above. System units (`organizationId: null, isSystem: true`)
+      // are shared platform-wide reference data — e.g. "kg"/Kilogram — visible to and used by
+      // every organization. Any org's ORG_ADMIN/MANAGER could call PATCH /units/:id with an
+      // explicit `translations` array for a system unit and overwrite its shared localized name
+      // for every other org on the platform, confirmed live (Org A editing "kg" changed what
+      // Org B saw too). Only org-owned (non-system) units may have their translations edited via
+      // this endpoint now; a system unit's translations are platform reference data maintained
+      // separately (e.g. via master-catalog/seed data), not per-org PATCH.
+      await upsertTranslations({
+        entries: translations,
+        listExisting: () =>
+          tx.unitTranslation.findMany({
+            where: {
+              unitId,
+            },
+            select: {
+              id: true,
+              language: true,
+            },
+          }),
+        create: (translation) =>
+          tx.unitTranslation.create({
+            data: {
+              unitId,
+              language: translation.language,
+              name: translation.name.trim(),
+            },
+          }),
+        update: (current, translation) =>
+          tx.unitTranslation.update({
+            where: { id: current.id },
+            data: {
+              name: translation.name.trim(),
+            },
+          }),
+      });
+    }
   });
 
   const updated = await getUnitRecordById(organizationId, unitId);

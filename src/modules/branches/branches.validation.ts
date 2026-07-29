@@ -5,11 +5,14 @@ import {
   optionalEmailSchema,
   paginationQuerySchema,
   optionalTrimmedString,
+  strictBooleanQueryParam,
   trimmedString,
 } from "../../utils/validation";
 
 export const branchQuerySchema = paginationQuerySchema.extend({
-  isActive: z.coerce.boolean().optional(),
+  // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+  // "false" as truthy, silently inverting an explicit ?isActive=false filter.
+  isActive: strictBooleanQueryParam,
 });
 
 export const createBranchSchema = z.object({

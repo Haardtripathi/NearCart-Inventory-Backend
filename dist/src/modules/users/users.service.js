@@ -89,6 +89,14 @@ async function assertNotRemovingLastActiveOrgAdmin(organizationId, membershipId,
             status: client_1.MembershipStatus.ACTIVE,
             user: {
                 isActive: true,
+                // Bug fixed: a platform SUPER_ADMIN commonly holds an incidental ORG_ADMIN membership
+                // row in every org (e.g. seeded demo data, or a support-access grant) — that row is not
+                // a genuine day-to-day org admin, so counting it here defeated this guard's entire
+                // purpose. Confirmed live: an org's real owner-admin could self-demote to STAFF with no
+                // warning whenever the platform super-admin also happened to have a membership row in
+                // that org, silently leaving the organization with no practical admin. Exclude
+                // SUPER_ADMIN-held memberships so this only counts real org-level admins.
+                platformRole: { not: client_1.UserRole.SUPER_ADMIN },
             },
         },
     });

@@ -19,6 +19,7 @@ const driverJwt_1 = require("../../utils/driverJwt");
 const driverRefreshToken_1 = require("../../utils/driverRefreshToken");
 const mailer_1 = require("../../utils/mailer");
 const otp_1 = require("../../utils/otp");
+const prismaErrors_1 = require("../../utils/prismaErrors");
 const audit_service_1 = require("../audit/audit.service");
 /**
  * Thrown when a driver's credentials are correct but their account status blocks login. The
@@ -90,9 +91,10 @@ async function registerDriver(input) {
     catch (error) {
         // Narrow race: two concurrent registrations for the same phone/email both pass the
         // findUnique checks above before either commits. The @unique DB constraints already prevent
-        // duplicate rows either way — this just turns the resulting P2002 into the same friendly
-        // conflict response the pre-check above gives, instead of a raw 500.
-        if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        // duplicate rows either way — this just turns the resulting unique-constraint violation into
+        // the same friendly conflict response the pre-check above gives, instead of a raw 500. See
+        // utils/prismaErrors.ts — can't compare `error.code === "P2002"` directly under this adapter.
+        if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && (0, prismaErrors_1.isUniqueConstraintError)(error)) {
             throw ApiError_1.ApiError.conflict("A driver account with this phone number or email already exists");
         }
         throw error;

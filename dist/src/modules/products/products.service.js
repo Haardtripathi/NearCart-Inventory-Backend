@@ -218,31 +218,66 @@ async function ensureVariantUniquenessInDb(organizationId, variants, excludeVari
         }
     }
 }
+/**
+ * Bug fixed: `decimalInputSchema` (used for costPrice/sellingPrice/mrp/reorderLevel/
+ * minStockLevel/maxStockLevel/weight) has no lower-bound check at the Zod level — confirmed live,
+ * `sellingPrice: -5` was silently accepted with a 201. Purchases already guards the equivalent
+ * `unitCost` at the service layer (`purchases.service.ts` — `if (unitCost.isNegative()) throw
+ * ApiError.badRequest(...)`); this mirrors that same pattern for product/variant pricing and
+ * stock-level fields, which had no such guard anywhere. Zero is intentionally still allowed
+ * (legitimate for promotional/free items and default reorder/min stock levels).
+ */
+function assertNonNegativeVariantFields(fields) {
+    const checks = [
+        ["costPrice", fields.costPrice],
+        ["sellingPrice", fields.sellingPrice],
+        ["mrp", fields.mrp],
+        ["reorderLevel", fields.reorderLevel],
+        ["minStockLevel", fields.minStockLevel],
+        ["maxStockLevel", fields.maxStockLevel],
+        ["weight", fields.weight],
+    ];
+    for (const [field, value] of checks) {
+        if (value !== null && value.isNegative()) {
+            throw ApiError_1.ApiError.badRequest(`${field} cannot be negative`);
+        }
+    }
+}
 function normalizeVariantPayload(productName, hasVariants, variants) {
     let defaultIndex = variants.findIndex((variant) => variant.isDefault);
     if (defaultIndex < 0) {
         defaultIndex = 0;
     }
-    return variants.map((variant, index) => ({
-        name: variant.name?.trim() || (hasVariants ? `${productName.trim()} ${index + 1}` : productName.trim()),
-        sku: variant.sku.trim(),
-        barcode: variant.barcode?.trim() || null,
-        attributes: (0, json_1.toNullableJsonValue)(variant.attributes),
-        costPrice: (0, decimal_1.toDecimal)(variant.costPrice),
-        sellingPrice: (0, decimal_1.toDecimal)(variant.sellingPrice),
-        mrp: variant.mrp !== undefined ? (0, decimal_1.toDecimal)(variant.mrp) : null,
-        reorderLevel: variant.reorderLevel !== undefined ? (0, decimal_1.toDecimal)(variant.reorderLevel) : new client_1.Prisma.Decimal(0),
-        minStockLevel: variant.minStockLevel !== undefined ? (0, decimal_1.toDecimal)(variant.minStockLevel) : new client_1.Prisma.Decimal(0),
-        maxStockLevel: variant.maxStockLevel !== undefined ? (0, decimal_1.toDecimal)(variant.maxStockLevel) : null,
-        weight: variant.weight !== undefined ? (0, decimal_1.toDecimal)(variant.weight) : null,
-        unitId: variant.unitId ?? null,
-        isDefault: index === defaultIndex,
-        isActive: variant.isActive ?? true,
-        imageUrl: variant.imageUrl ?? null,
-        customFields: (0, json_1.toNullableJsonValue)(variant.customFields),
-        metadata: (0, json_1.toNullableJsonValue)(variant.metadata),
-        translations: variant.translations ?? [],
-    }));
+    return variants.map((variant, index) => {
+        const costPrice = (0, decimal_1.toDecimal)(variant.costPrice);
+        const sellingPrice = (0, decimal_1.toDecimal)(variant.sellingPrice);
+        const mrp = variant.mrp !== undefined ? (0, decimal_1.toDecimal)(variant.mrp) : null;
+        const reorderLevel = variant.reorderLevel !== undefined ? (0, decimal_1.toDecimal)(variant.reorderLevel) : new client_1.Prisma.Decimal(0);
+        const minStockLevel = variant.minStockLevel !== undefined ? (0, decimal_1.toDecimal)(variant.minStockLevel) : new client_1.Prisma.Decimal(0);
+        const maxStockLevel = variant.maxStockLevel !== undefined ? (0, decimal_1.toDecimal)(variant.maxStockLevel) : null;
+        const weight = variant.weight !== undefined ? (0, decimal_1.toDecimal)(variant.weight) : null;
+        assertNonNegativeVariantFields({ costPrice, sellingPrice, mrp, reorderLevel, minStockLevel, maxStockLevel, weight });
+        return {
+            name: variant.name?.trim() || (hasVariants ? `${productName.trim()} ${index + 1}` : productName.trim()),
+            sku: variant.sku.trim(),
+            barcode: variant.barcode?.trim() || null,
+            attributes: (0, json_1.toNullableJsonValue)(variant.attributes),
+            costPrice,
+            sellingPrice,
+            mrp,
+            reorderLevel,
+            minStockLevel,
+            maxStockLevel,
+            weight,
+            unitId: variant.unitId ?? null,
+            isDefault: index === defaultIndex,
+            isActive: variant.isActive ?? true,
+            imageUrl: variant.imageUrl ?? null,
+            customFields: (0, json_1.toNullableJsonValue)(variant.customFields),
+            metadata: (0, json_1.toNullableJsonValue)(variant.metadata),
+            translations: variant.translations ?? [],
+        };
+    });
 }
 async function upsertProductTranslations(db, productId, translations) {
     await (0, translations_1.upsertTranslations)({
@@ -659,6 +694,16 @@ async function updateVariant(organizationId, productId, variantId, actorUserId, 
     if (input.unitId) {
         await (0, guards_1.assertUnitAvailable)(prisma_1.prisma, organizationId, input.unitId);
     }
+    // Same guard as normalizeVariantPayload (create path) — see assertNonNegativeVariantFields.
+    assertNonNegativeVariantFields({
+        costPrice: input.costPrice !== undefined ? (0, decimal_1.toDecimal)(input.costPrice) : existing.costPrice,
+        sellingPrice: input.sellingPrice !== undefined ? (0, decimal_1.toDecimal)(input.sellingPrice) : existing.sellingPrice,
+        mrp: input.mrp !== undefined ? (0, decimal_1.toDecimal)(input.mrp) : existing.mrp,
+        reorderLevel: input.reorderLevel !== undefined ? (0, decimal_1.toDecimal)(input.reorderLevel) : existing.reorderLevel,
+        minStockLevel: input.minStockLevel !== undefined ? (0, decimal_1.toDecimal)(input.minStockLevel) : existing.minStockLevel,
+        maxStockLevel: input.maxStockLevel !== undefined ? (0, decimal_1.toDecimal)(input.maxStockLevel) : existing.maxStockLevel,
+        weight: input.weight !== undefined ? (0, decimal_1.toDecimal)(input.weight) : existing.weight,
+    });
     await ensureVariantUniquenessInDb(organizationId, [
         {
             sku: input.sku ?? existing.sku,

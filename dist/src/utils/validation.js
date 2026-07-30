@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deviceTokenSchema = exports.languageCodeSchema = exports.idParamSchema = exports.optionalDateInputSchema = exports.dateInputSchema = exports.optionalDecimalInputSchema = exports.decimalInputSchema = exports.paginationQuerySchema = exports.optionalJsonSchema = exports.jsonValueSchema = exports.optionalEmailSchema = exports.strictBooleanQueryParam = exports.nullableTrimmedString = exports.optionalTrimmedString = exports.trimmedString = void 0;
+exports.deviceTokenSchema = exports.optionalLongitudeSchema = exports.optionalLatitudeSchema = exports.languageCodeSchema = exports.idParamSchema = exports.optionalDateInputSchema = exports.dateInputSchema = exports.optionalDecimalInputSchema = exports.decimalInputSchema = exports.paginationQuerySchema = exports.optionalJsonSchema = exports.jsonValueSchema = exports.optionalEmailSchema = exports.strictBooleanQueryParam = exports.nullableTrimmedString = exports.optionalTrimmedString = exports.trimmedString = void 0;
 exports.uniqueLanguageArraySchema = uniqueLanguageArraySchema;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
@@ -59,6 +59,12 @@ exports.idParamSchema = zod_1.z.object({
     id: zod_1.z.string().trim().min(1),
 });
 exports.languageCodeSchema = zod_1.z.nativeEnum(client_1.LanguageCode);
+// Optional pickup-point coordinates (e.g. `Branch.latitude`/`longitude`, used by
+// nearest-free-driver auto-assignment). `z.coerce.number()` so a raw form input or querystring
+// value still validates, but an explicit `null` is preserved (rather than coerced to 0) so a
+// caller can intentionally clear a previously-set coordinate.
+exports.optionalLatitudeSchema = zod_1.z.preprocess((value) => (value === "" ? undefined : value), zod_1.z.coerce.number().min(-90).max(90).nullable().optional());
+exports.optionalLongitudeSchema = zod_1.z.preprocess((value) => (value === "" ? undefined : value), zod_1.z.coerce.number().min(-180).max(180).nullable().optional());
 // Shared by both the shop-staff (`/api/users/device-token`) and driver
 // (`/api/driver/device-token`) registration endpoints — same payload shape either side of the
 // polymorphic DeviceToken model (see prisma schema: ownerType discriminates 'USER' vs 'DRIVER').

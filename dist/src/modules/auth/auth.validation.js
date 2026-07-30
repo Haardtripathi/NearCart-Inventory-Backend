@@ -16,6 +16,10 @@ const branchInputSchema = zod_1.z.object({
     state: validation_1.optionalTrimmedString,
     country: validation_1.optionalTrimmedString,
     postalCode: validation_1.optionalTrimmedString,
+    // Optional at registration time — a shop owner may not have coordinates handy while signing
+    // up; can be backfilled later via PATCH /branches/:id. See branches.validation.ts.
+    latitude: validation_1.optionalLatitudeSchema,
+    longitude: validation_1.optionalLongitudeSchema,
 });
 exports.bootstrapSuperAdminSchema = zod_1.z.object({
     secret: validation_1.trimmedString,

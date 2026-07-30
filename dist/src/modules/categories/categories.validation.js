@@ -10,7 +10,9 @@ const categoryTranslationSchema = zod_1.z.object({
 });
 exports.categoryQuerySchema = validation_1.paginationQuerySchema.extend({
     parentId: validation_1.optionalTrimmedString,
-    isActive: zod_1.z.coerce.boolean().optional(),
+    // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+    // "false" as truthy, silently inverting an explicit ?isActive=false filter.
+    isActive: validation_1.strictBooleanQueryParam,
     lang: validation_1.optionalTrimmedString,
 });
 exports.createCategorySchema = zod_1.z.object({

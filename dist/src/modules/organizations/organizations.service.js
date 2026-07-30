@@ -517,6 +517,8 @@ async function createOrganizationWithResolvedOwner(tx, input, options) {
             state: input.firstBranch.state ?? null,
             country: input.firstBranch.country ?? null,
             postalCode: input.firstBranch.postalCode ?? null,
+            latitude: input.firstBranch.latitude ?? null,
+            longitude: input.firstBranch.longitude ?? null,
         },
     });
     await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(tx, {

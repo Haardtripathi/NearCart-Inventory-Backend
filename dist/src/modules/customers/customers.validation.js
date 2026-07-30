@@ -4,7 +4,9 @@ exports.updateCustomerSchema = exports.createCustomerSchema = exports.customerQu
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
 exports.customerQuerySchema = validation_1.paginationQuerySchema.extend({
-    isActive: zod_1.z.coerce.boolean().optional(),
+    // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+    // "false" as truthy, silently inverting an explicit ?isActive=false filter.
+    isActive: validation_1.strictBooleanQueryParam,
 });
 exports.createCustomerSchema = zod_1.z.object({
     name: validation_1.trimmedString,

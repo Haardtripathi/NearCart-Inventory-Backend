@@ -84,6 +84,8 @@ async function createBranch(organizationId, input, localeContext) {
             state: input.state ?? null,
             country: input.country ?? null,
             postalCode: input.postalCode ?? null,
+            latitude: input.latitude ?? null,
+            longitude: input.longitude ?? null,
             isActive: input.isActive ?? true,
         },
     });
@@ -136,6 +138,8 @@ async function updateBranch(organizationId, branchId, input, localeContext) {
             ...(input.state !== undefined ? { state: input.state || null } : {}),
             ...(input.country !== undefined ? { country: input.country || null } : {}),
             ...(input.postalCode !== undefined ? { postalCode: input.postalCode || null } : {}),
+            ...(input.latitude !== undefined ? { latitude: input.latitude } : {}),
+            ...(input.longitude !== undefined ? { longitude: input.longitude } : {}),
             ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
         },
     });

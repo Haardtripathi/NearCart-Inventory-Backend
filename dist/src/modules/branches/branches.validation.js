@@ -5,7 +5,9 @@ const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
 exports.branchQuerySchema = validation_1.paginationQuerySchema.extend({
-    isActive: zod_1.z.coerce.boolean().optional(),
+    // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+    // "false" as truthy, silently inverting an explicit ?isActive=false filter.
+    isActive: validation_1.strictBooleanQueryParam,
 });
 exports.createBranchSchema = zod_1.z.object({
     code: validation_1.optionalTrimmedString, // Auto-generated if not provided
@@ -19,6 +21,11 @@ exports.createBranchSchema = zod_1.z.object({
     state: validation_1.optionalTrimmedString,
     country: validation_1.optionalTrimmedString,
     postalCode: validation_1.optionalTrimmedString,
+    // Pickup-point coordinates for nearest-free-driver auto-assignment (see
+    // `findNearestFreeDriver` in sales-orders.service.ts) — optional since not every shop owner has
+    // coordinates handy at creation time; can be backfilled later via PATCH.
+    latitude: validation_1.optionalLatitudeSchema,
+    longitude: validation_1.optionalLongitudeSchema,
     isActive: zod_1.z.boolean().optional(),
 });
 exports.updateBranchSchema = exports.createBranchSchema.partial();

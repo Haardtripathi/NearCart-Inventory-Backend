@@ -8,7 +8,9 @@ const supplierTranslationSchema = zod_1.z.object({
     name: validation_1.trimmedString,
 });
 exports.supplierQuerySchema = validation_1.paginationQuerySchema.extend({
-    isActive: zod_1.z.coerce.boolean().optional(),
+    // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+    // "false" as truthy, silently inverting an explicit ?isActive=false filter.
+    isActive: validation_1.strictBooleanQueryParam,
 });
 exports.createSupplierSchema = zod_1.z.object({
     name: validation_1.trimmedString,

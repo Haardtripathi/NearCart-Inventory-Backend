@@ -59,7 +59,10 @@ exports.productQuerySchema = validation_1.paginationQuerySchema.extend({
     status: zod_1.z.nativeEnum(client_1.ProductStatus).optional(),
     categoryId: validation_1.optionalTrimmedString,
     brandId: validation_1.optionalTrimmedString,
-    hasVariants: zod_1.z.coerce.boolean().optional(),
+    // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+    // "false" as truthy (Boolean("false") === true), which inverted the "Simple only" filter —
+    // ?hasVariants=false was silently behaving identically to ?hasVariants=true.
+    hasVariants: validation_1.strictBooleanQueryParam,
     lang: validation_1.optionalTrimmedString,
 });
 exports.createProductSchema = productBaseSchema.extend({

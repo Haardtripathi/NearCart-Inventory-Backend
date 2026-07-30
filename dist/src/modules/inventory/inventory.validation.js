@@ -8,7 +8,9 @@ exports.inventoryBalanceQuerySchema = validation_1.paginationQuerySchema.extend(
     branchId: validation_1.optionalTrimmedString,
     productId: validation_1.optionalTrimmedString,
     variantId: validation_1.optionalTrimmedString,
-    lowStock: zod_1.z.coerce.boolean().optional(),
+    // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
+    // "false" as truthy, silently inverting an explicit ?lowStock=false filter.
+    lowStock: validation_1.strictBooleanQueryParam,
 });
 exports.inventoryLedgerQuerySchema = validation_1.paginationQuerySchema.extend({
     search: validation_1.optionalTrimmedString,

@@ -4066,6 +4066,15 @@ async function upsertUserSeed(params: {
       preferredLanguage: params.preferredLanguage ?? LanguageCode.EN,
       isActive: true,
       passwordSetupRequired: false,
+      // Seed users are created directly by a trusted server-side script, not a self-serve signup —
+      // same reasoning ensureSeedSuperAdmin below and bootstrapSuperAdmin already use for the
+      // super-admin account. Without this, every org-admin/staff account this script creates
+      // (grocery.admin@nearcart.local etc.) defaults to emailVerified: false per the schema default
+      // and gets hard-blocked by login()'s "verify your email" check added for self-registered
+      // owners — there's no untrusted inbox to prove ownership of here, and no seeded account has a
+      // real inbox to run the OTP flow against, so demo/dev data would otherwise be permanently
+      // unable to log in.
+      emailVerified: true,
       passwordChangedAt: new Date(),
     },
     create: {
@@ -4076,6 +4085,7 @@ async function upsertUserSeed(params: {
       preferredLanguage: params.preferredLanguage ?? LanguageCode.EN,
       isActive: true,
       passwordSetupRequired: false,
+      emailVerified: true,
       passwordChangedAt: new Date(),
     },
   });

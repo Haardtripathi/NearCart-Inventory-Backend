@@ -5,6 +5,7 @@ import { validateRequest } from "../../middlewares/validate.middleware";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { deviceTokenSchema } from "../../utils/validation";
 import {
+  declineDriverOrderController,
   deliverDriverOrderController,
   listDriverOrdersController,
   pickupDriverOrderController,
@@ -20,6 +21,7 @@ driverOrdersRouter.use(authenticateDriver);
 
 driverOrdersRouter.get("/orders", asyncHandler(listDriverOrdersController));
 driverOrdersRouter.post("/orders/:id/pickup", asyncHandler(pickupDriverOrderController));
+driverOrdersRouter.post("/orders/:id/decline", asyncHandler(declineDriverOrderController));
 driverOrdersRouter.post("/orders/:id/deliver", asyncHandler(deliverDriverOrderController));
 
 driverOrdersRouter.patch(

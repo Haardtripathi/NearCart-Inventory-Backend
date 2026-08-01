@@ -7,7 +7,8 @@ type OrderEventType =
   | "DRIVER_ASSIGNED"
   | "OUT_FOR_DELIVERY"
   | "DELIVERED"
-  | "AUTO_CANCELLED";
+  | "AUTO_CANCELLED"
+  | "CANCELLED";
 
 interface NotifyOrderEventInput {
   externalOrderId: string;

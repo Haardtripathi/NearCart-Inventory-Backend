@@ -4,6 +4,7 @@ import { UserRole } from "@prisma/client";
 import { sendSuccess } from "../../utils/ApiResponse";
 import { resolveLocaleContext } from "../../utils/localization";
 import { getRequestMeta } from "../../utils/request";
+import { blacklistToken } from "../../utils/tokenBlacklist";
 import {
   bootstrapSuperAdmin,
   changePassword,
@@ -67,6 +68,17 @@ export async function sendEmailOtpController(req: Request, res: Response) {
 export async function verifyEmailOtpController(req: Request, res: Response) {
   const data = await verifyEmailVerificationOtp(req.body);
   return sendSuccess(res, 200, "Email verified successfully", data);
+}
+
+/**
+ * Was a literal no-op (204, nothing else) before this fix — the same access token kept working
+ * immediately after "logout" since nothing server-side was tracking issued tokens at all. Now
+ * revokes this specific token by jti for its remaining lifetime; see utils/tokenBlacklist.ts.
+ */
+export async function logoutController(req: Request, res: Response) {
+  const remainingTtlSeconds = req.auth!.tokenExpiresAt - Math.floor(Date.now() / 1000);
+  await blacklistToken(req.auth!.tokenJti, remainingTtlSeconds);
+  res.status(204).send();
 }
 
 export async function meController(req: Request, res: Response) {

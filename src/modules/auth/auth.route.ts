@@ -8,6 +8,7 @@ import {
   changePasswordController,
   completeAccountSetupController,
   loginController,
+  logoutController,
   meController,
   registerOrganizationOwnerController,
   resetPasswordController,
@@ -48,13 +49,7 @@ authRouter.post(
 authRouter.post("/reset-password", validateRequest({ body: resetPasswordSchema }), asyncHandler(resetPasswordController));
 authRouter.post("/send-otp", validateRequest({ body: sendEmailOtpSchema }), asyncHandler(sendEmailOtpController));
 authRouter.post("/verify-otp", validateRequest({ body: verifyEmailOtpSchema }), asyncHandler(verifyEmailOtpController));
-authRouter.post(
-  "/logout",
-  authenticate,
-  asyncHandler(async (_req, res) => {
-    res.status(204).send();
-  }),
-);
+authRouter.post("/logout", authenticate, asyncHandler(logoutController));
 authRouter.get("/me", authenticate, asyncHandler(meController));
 authRouter.patch(
   "/me/preferences",

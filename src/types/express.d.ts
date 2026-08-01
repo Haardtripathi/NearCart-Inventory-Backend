@@ -9,6 +9,8 @@ declare global {
         role: UserRole;
         userPreferredLanguage: LanguageCode | null;
         activeOrganizationDefaultLanguage: LanguageCode | null;
+        tokenJti: string;
+        tokenExpiresAt: number;
       };
       membership?: OrganizationMembership;
       activeOrganization?: {

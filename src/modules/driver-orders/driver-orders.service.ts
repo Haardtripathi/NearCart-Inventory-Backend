@@ -5,6 +5,7 @@ import { ApiError } from "../../utils/ApiError";
 import { createAuditLog } from "../audit/audit.service";
 import { notifyOrderEvent } from "../../services/order-event-webhook.service";
 import { upsertDeviceToken } from "../../services/device-tokens.service";
+import { assignDriverToSalesOrder, findNearestFreeDriver } from "../sales-orders/sales-orders.service";
 
 const DRIVER_VISIBLE_STATUSES: SalesOrderStatus[] = [SalesOrderStatus.READY, SalesOrderStatus.OUT_FOR_DELIVERY];
 
@@ -204,6 +205,79 @@ export async function deliverDriverOrder(driverId: string, orderId: string) {
       status: updated.status,
       eventType: "DELIVERED",
     });
+  }
+
+  return serializeDriverOrder(updated);
+}
+
+/**
+ * A driver declining an assignment before pickup — previously had no API-level path at all, only
+ * a manager manually re-calling assign-driver with a different driver from the dashboard. Only
+ * valid pre-pickup (status READY): once OUT_FOR_DELIVERY the driver already has the goods
+ * physically in hand, which is a "return/reassign in person" problem, not a decline.
+ *
+ * Unassigns the declining driver and puts the order back to a bare READY/unassigned state, then
+ * best-effort tries the same nearest-free-driver auto-match `markSalesOrderReady` uses so the
+ * order doesn't just sit unassigned until a manager notices — same fire-and-forget posture as
+ * that auto-assign call: a failure here must never turn a successful decline into an error
+ * response.
+ */
+export async function declineDriverOrder(driverId: string, orderId: string) {
+  const order = await findAssignedOrder(driverId, orderId);
+
+  if (order.status !== SalesOrderStatus.READY) {
+    throw ApiError.badRequest("Only orders that are READY (not yet picked up) can be declined");
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.salesOrder.updateMany({
+      where: { id: orderId, assignedDriverId: driverId, status: SalesOrderStatus.READY },
+      data: {
+        assignedDriverId: null,
+        assignedById: null,
+        assignedAt: null,
+      },
+    });
+
+    if (count === 0) {
+      throw ApiError.conflict("Order is no longer assigned to you — it may have already changed state");
+    }
+
+    const result = await tx.salesOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      include: { items: true, branch: true, customer: true, organization: true },
+    });
+
+    await createAuditLog(tx, {
+      organizationId: order.organizationId,
+      action: AuditAction.ORDER_DRIVER_DECLINE,
+      entityType: "SalesOrder",
+      entityId: order.id,
+      before: { status: order.status, assignedDriverId: driverId },
+      after: { status: result.status, assignedDriverId: null },
+      meta: { driverId },
+    });
+
+    return result;
+  });
+
+  try {
+    const nearestDriver = await findNearestFreeDriver(updated.branchId, driverId);
+
+    if (nearestDriver) {
+      await assignDriverToSalesOrder(updated.organizationId, updated.id, null, nearestDriver.id);
+      // assignDriverToSalesOrder's own return shape doesn't include `organization`, which
+      // serializeDriverOrder requires — re-fetch with the same include set the rest of this
+      // file uses (see pickupDriverOrder/deliverDriverOrder) rather than widening that
+      // function's include just for this one caller.
+      const reassigned = await prisma.salesOrder.findUniqueOrThrow({
+        where: { id: updated.id },
+        include: { items: true, branch: true, customer: true, organization: true },
+      });
+      return serializeDriverOrder(reassigned);
+    }
+  } catch (error) {
+    console.warn(`[driver-orders] Re-assignment after decline failed for order ${updated.id}`, error);
   }
 
   return serializeDriverOrder(updated);

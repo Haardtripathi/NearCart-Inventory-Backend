@@ -163,6 +163,10 @@ enum AuditAction {
   // work.
   ORDER_CANCEL
   ORDER_CANCEL_BRIDGE
+  // Added alongside the new driver decline endpoint (POST /driver/orders/:id/decline) — there
+  // was previously no API-level way for a driver to decline an assignment at all, only a
+  // manager manually re-calling assign-driver with someone else.
+  ORDER_DRIVER_DECLINE
 }
 
 enum DriverStatus {

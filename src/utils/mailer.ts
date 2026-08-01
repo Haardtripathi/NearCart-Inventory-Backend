@@ -82,7 +82,10 @@ async function sendMailViaResend(input: SendMailInput) {
 }
 
 /**
- * Sends an email via Resend (preferred) or raw SMTP (legacy fallback), in that order.
+ * Sends an email via SMTP (preferred — Brevo's relay, confirmed 2026-08-01 to work for arbitrary
+ * recipients with just a verified single sender, no domain needed) or Resend (fallback, only used
+ * if SMTP_HOST is unset — Resend's free tier restricts sending to the account's own email until a
+ * domain is verified there, so it's kept as a secondary option, not the primary one).
  *
  * When neither is configured (e.g. local development without a mail provider), this fails open
  * by logging the email to the console instead of throwing — this keeps local dev working without
@@ -90,15 +93,15 @@ async function sendMailViaResend(input: SendMailInput) {
  * a raw token/link through an API response.
  */
 export async function sendMail(input: SendMailInput) {
-  if (env.RESEND_API_KEY) {
-    return sendMailViaResend(input);
-  }
-
   const transporter = getTransporter();
 
   if (!transporter) {
+    if (env.RESEND_API_KEY) {
+      return sendMailViaResend(input);
+    }
+
     console.warn(
-      `[mailer] Neither RESEND_API_KEY nor SMTP_HOST is configured — logging email instead of sending it. to=${input.to} subject=${input.subject}`,
+      `[mailer] Neither SMTP_HOST nor RESEND_API_KEY is configured — logging email instead of sending it. to=${input.to} subject=${input.subject}`,
     );
     console.warn(`[mailer] body:\n${input.text ?? input.html}`);
     return { delivered: false as const };

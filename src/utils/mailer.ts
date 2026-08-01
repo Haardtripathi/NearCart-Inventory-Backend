@@ -29,6 +29,18 @@ function getTransporter(): Transporter | null {
               pass: env.SMTP_PASS,
             }
           : undefined,
+      // Bug found 2026-08-01: with no explicit timeouts, nodemailer's default connectionTimeout
+      // is 2 minutes — confirmed live against prod (a hung SMTP connection to smtp.gmail.com:587,
+      // almost certainly blocked by the hosting provider's egress rules, took exactly ~2 minutes
+      // to fail with 500). That means every OTP send against a blocked/unreachable SMTP endpoint
+      // ties up the request (and whatever else shares that timing budget) for a full 2 minutes
+      // before the client sees anything, which surfaces client-side as a generic "network error"
+      // long before the server ever actually responds. Failing fast doesn't fix SMTP being
+      // blocked, but it stops a single bad send from hanging this long — see mailer usage sites
+      // for the real fix recommendation (switch to an HTTP-based email API).
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 10_000,
     });
     transporterConfigured = true;
   }

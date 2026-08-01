@@ -48,20 +48,57 @@ function getTransporter(): Transporter | null {
   return cachedTransporter;
 }
 
+const RESEND_API_URL = "https://api.resend.com/emails";
+
 /**
- * Sends an email via the configured SMTP transport.
+ * Sends via Resend's HTTP API rather than raw SMTP — see RESEND_API_KEY's doc comment in
+ * config/env.ts for why. A normal HTTPS POST isn't subject to the outbound-SMTP-port blocking
+ * that broke raw SMTP in prod, and it fails in a bounded, ordinary HTTP-timeout way rather than
+ * hanging for minutes.
+ */
+async function sendMailViaResend(input: SendMailInput) {
+  const response = await fetch(RESEND_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to: [input.to],
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Resend API request failed with status ${response.status}: ${body}`);
+  }
+
+  return { delivered: true as const };
+}
+
+/**
+ * Sends an email via Resend (preferred) or raw SMTP (legacy fallback), in that order.
  *
- * When SMTP_HOST is not configured (e.g. local development without a mail provider), this
- * fails open by logging the email to the console instead of throwing — this keeps local dev
- * working without a mail server while still ensuring production (where SMTP_HOST must be set)
- * never leaks a raw token/link through an API response.
+ * When neither is configured (e.g. local development without a mail provider), this fails open
+ * by logging the email to the console instead of throwing — this keeps local dev working without
+ * a mail provider while still ensuring production (where one of the two must be set) never leaks
+ * a raw token/link through an API response.
  */
 export async function sendMail(input: SendMailInput) {
+  if (env.RESEND_API_KEY) {
+    return sendMailViaResend(input);
+  }
+
   const transporter = getTransporter();
 
   if (!transporter) {
     console.warn(
-      `[mailer] SMTP_HOST is not configured — logging email instead of sending it. to=${input.to} subject=${input.subject}`,
+      `[mailer] Neither RESEND_API_KEY nor SMTP_HOST is configured — logging email instead of sending it. to=${input.to} subject=${input.subject}`,
     );
     console.warn(`[mailer] body:\n${input.text ?? input.html}`);
     return { delivered: false as const };

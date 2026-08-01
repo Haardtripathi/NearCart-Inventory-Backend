@@ -62,6 +62,15 @@ const envSchema = z
     SMTP_USER: z.string().trim().min(1).optional(),
     SMTP_PASS: z.string().trim().min(1).optional(),
     SMTP_FROM: z.string().trim().min(1).default("NearCart Inventory <no-reply@nearcart.app>"),
+    // Preferred over raw SMTP when set — see utils/mailer.ts. Added 2026-08-01 after confirming
+    // live in prod that raw SMTP to smtp.gmail.com:587 hangs for ~2 minutes before failing,
+    // almost certainly because the hosting provider blocks outbound SMTP egress. Resend's HTTP
+    // API isn't affected by that class of block since it's just a normal HTTPS call.
+    RESEND_API_KEY: z.string().trim().min(1).optional(),
+    // "onboarding@resend.dev" is Resend's own shared sending address, usable before you've
+    // verified a custom domain with them — fine for getting OTP emails working immediately;
+    // swap to a verified domain address once one is set up.
+    RESEND_FROM: z.string().trim().min(1).default("NearCart Inventory <onboarding@resend.dev>"),
     OTP_TTL_MINUTES: z.coerce.number().int().positive().default(10),
     OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
     OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),

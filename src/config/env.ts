@@ -62,10 +62,17 @@ const envSchema = z
     SMTP_USER: z.string().trim().min(1).optional(),
     SMTP_PASS: z.string().trim().min(1).optional(),
     SMTP_FROM: z.string().trim().min(1).default("NearCart Inventory <no-reply@nearcart.app>"),
-    // Preferred over raw SMTP when set — see utils/mailer.ts. Added 2026-08-01 after confirming
-    // live in prod that raw SMTP to smtp.gmail.com:587 hangs for ~2 minutes before failing,
-    // almost certainly because the hosting provider blocks outbound SMTP egress. Resend's HTTP
-    // API isn't affected by that class of block since it's just a normal HTTPS call.
+    // Highest priority when set — see utils/mailer.ts. Added 2026-08-01 after confirming that
+    // even Brevo's own SMTP relay (smtp-relay.brevo.com:587) gets ETIMEDOUT on some Render
+    // service instances despite working fine on others with identical credentials — a real
+    // per-service network egress restriction, not a config issue. Brevo's HTTP API isn't
+    // affected since it's a normal HTTPS call, same reasoning as RESEND_API_KEY below but with
+    // Brevo's un-restricted-recipient free tier instead of Resend's own-email-only sandbox.
+    BREVO_API_KEY: z.string().trim().min(1).optional(),
+    BREVO_FROM: z.string().trim().min(1).default("NearCart Inventory <no-reply@nearcart.app>"),
+    // Preferred over raw SMTP when BREVO_API_KEY is unset — see utils/mailer.ts. Resend's HTTP
+    // API isn't affected by SMTP-port blocking either, but its free tier restricts sending to
+    // the account's own email until a domain is verified there.
     RESEND_API_KEY: z.string().trim().min(1).optional(),
     // "onboarding@resend.dev" is Resend's own shared sending address, usable before you've
     // verified a custom domain with them — fine for getting OTP emails working immediately;
@@ -88,6 +95,20 @@ const envSchema = z
     // "Months" tenor for a driver's rotating refresh session, mirroring NearCart/backend's
     // AUTH_REFRESH_TTL_DAYS for the same reason (long-lived mobile sessions).
     DRIVER_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(90),
+    // Server-side Google Maps key: reverse-geocoding a dropped pin into address fields (branch
+    // location picker) and Places Text/Nearby Search for shop-photo verification
+    // (placeLocationMatch check in POST /branches/:id/verification/photo). Optional — when unset,
+    // reverse-geocode calls fail closed (caller keeps the manual address fields, which are always
+    // editable regardless) and placeLocationMatch/matchedPlaceCandidates come back empty with a
+    // reason string rather than throwing.
+    GOOGLE_MAPS_API_KEY: z.string().trim().min(1).optional(),
+    // Shop-photo clarity/name-OCR (POST /branches/:id/verification/photo) and driver
+    // vehicle-photo/license OCR (POST /driver/verification/*). Leave unset to run in stub mode —
+    // those endpoints return a clear 503 { error: "verification_unavailable" } instead of
+    // crashing the server. Mirrors the CLOUDINARY_* stub-mode convention above exactly: the
+    // feature is fully wired end-to-end and activates the instant a real token is set here, no
+    // further code changes needed.
+    REPLICATE_API_TOKEN: z.string().trim().min(1).optional(),
   })
   .refine(
     (values) =>

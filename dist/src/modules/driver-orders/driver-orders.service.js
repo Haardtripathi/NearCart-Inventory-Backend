@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listDriverOrders = listDriverOrders;
 exports.pickupDriverOrder = pickupDriverOrder;
 exports.deliverDriverOrder = deliverDriverOrder;
+exports.declineDriverOrder = declineDriverOrder;
 exports.updateDriverAvailability = updateDriverAvailability;
 exports.updateDriverLocation = updateDriverLocation;
 exports.registerDriverDeviceTokenForDriver = registerDriverDeviceTokenForDriver;
@@ -12,6 +13,7 @@ const ApiError_1 = require("../../utils/ApiError");
 const audit_service_1 = require("../audit/audit.service");
 const order_event_webhook_service_1 = require("../../services/order-event-webhook.service");
 const device_tokens_service_1 = require("../../services/device-tokens.service");
+const sales_orders_service_1 = require("../sales-orders/sales-orders.service");
 const DRIVER_VISIBLE_STATUSES = [client_1.SalesOrderStatus.READY, client_1.SalesOrderStatus.OUT_FOR_DELIVERY];
 function serializeDriverOrder(order) {
     return {
@@ -187,6 +189,70 @@ async function deliverDriverOrder(driverId, orderId) {
             status: updated.status,
             eventType: "DELIVERED",
         });
+    }
+    return serializeDriverOrder(updated);
+}
+/**
+ * A driver declining an assignment before pickup — previously had no API-level path at all, only
+ * a manager manually re-calling assign-driver with a different driver from the dashboard. Only
+ * valid pre-pickup (status READY): once OUT_FOR_DELIVERY the driver already has the goods
+ * physically in hand, which is a "return/reassign in person" problem, not a decline.
+ *
+ * Unassigns the declining driver and puts the order back to a bare READY/unassigned state, then
+ * best-effort tries the same nearest-free-driver auto-match `markSalesOrderReady` uses so the
+ * order doesn't just sit unassigned until a manager notices — same fire-and-forget posture as
+ * that auto-assign call: a failure here must never turn a successful decline into an error
+ * response.
+ */
+async function declineDriverOrder(driverId, orderId) {
+    const order = await findAssignedOrder(driverId, orderId);
+    if (order.status !== client_1.SalesOrderStatus.READY) {
+        throw ApiError_1.ApiError.badRequest("Only orders that are READY (not yet picked up) can be declined");
+    }
+    const updated = await prisma_1.prisma.$transaction(async (tx) => {
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, assignedDriverId: driverId, status: client_1.SalesOrderStatus.READY },
+            data: {
+                assignedDriverId: null,
+                assignedById: null,
+                assignedAt: null,
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer assigned to you — it may have already changed state");
+        }
+        const result = await tx.salesOrder.findUniqueOrThrow({
+            where: { id: orderId },
+            include: { items: true, branch: true, customer: true, organization: true },
+        });
+        await (0, audit_service_1.createAuditLog)(tx, {
+            organizationId: order.organizationId,
+            action: client_1.AuditAction.ORDER_DRIVER_DECLINE,
+            entityType: "SalesOrder",
+            entityId: order.id,
+            before: { status: order.status, assignedDriverId: driverId },
+            after: { status: result.status, assignedDriverId: null },
+            meta: { driverId },
+        });
+        return result;
+    });
+    try {
+        const nearestDriver = await (0, sales_orders_service_1.findNearestFreeDriver)(updated.branchId, driverId);
+        if (nearestDriver) {
+            await (0, sales_orders_service_1.assignDriverToSalesOrder)(updated.organizationId, updated.id, null, nearestDriver.id);
+            // assignDriverToSalesOrder's own return shape doesn't include `organization`, which
+            // serializeDriverOrder requires — re-fetch with the same include set the rest of this
+            // file uses (see pickupDriverOrder/deliverDriverOrder) rather than widening that
+            // function's include just for this one caller.
+            const reassigned = await prisma_1.prisma.salesOrder.findUniqueOrThrow({
+                where: { id: updated.id },
+                include: { items: true, branch: true, customer: true, organization: true },
+            });
+            return serializeDriverOrder(reassigned);
+        }
+    }
+    catch (error) {
+        console.warn(`[driver-orders] Re-assignment after decline failed for order ${updated.id}`, error);
     }
     return serializeDriverOrder(updated);
 }

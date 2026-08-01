@@ -5,10 +5,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.signAuthToken = signAuthToken;
 exports.verifyAuthToken = verifyAuthToken;
+const node_crypto_1 = require("node:crypto");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const env_1 = require("../config/env");
 function signAuthToken(payload) {
-    return jsonwebtoken_1.default.sign(payload, env_1.env.JWT_SECRET, {
+    return jsonwebtoken_1.default.sign({ ...payload, jti: (0, node_crypto_1.randomUUID)() }, env_1.env.JWT_SECRET, {
         expiresIn: env_1.env.JWT_EXPIRES_IN,
     });
 }

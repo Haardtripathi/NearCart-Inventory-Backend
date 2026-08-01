@@ -7,6 +7,7 @@ const client_1 = require("@prisma/client");
 const prisma_1 = require("../config/prisma");
 const ApiError_1 = require("../utils/ApiError");
 const jwt_1 = require("../utils/jwt");
+const tokenBlacklist_1 = require("../utils/tokenBlacklist");
 async function authenticate(req, _res, next) {
     const authorization = req.headers.authorization;
     if (!authorization?.startsWith("Bearer ")) {
@@ -21,6 +22,12 @@ async function authenticate(req, _res, next) {
         // token can never be mistaken for a user token even if that incidental behavior changes.
         if (!payload || typeof payload.userId !== "string" || !payload.userId) {
             throw ApiError_1.ApiError.unauthorized("Invalid or expired token");
+        }
+        // `jti` only exists on tokens minted after the logout fix (see utils/jwt.ts) — a token
+        // minted before that deploy has no jti to check and simply can't be revoked early, same as
+        // its pre-fix behavior. Nothing to do for those; they just fall through to expiry as before.
+        if (payload.jti && (await (0, tokenBlacklist_1.isTokenBlacklisted)(payload.jti))) {
+            throw ApiError_1.ApiError.unauthorized("Session has been logged out");
         }
         const user = await prisma_1.prisma.user.findUnique({
             where: { id: payload.userId },
@@ -40,6 +47,8 @@ async function authenticate(req, _res, next) {
             role: user.platformRole === client_1.UserRole.SUPER_ADMIN ? client_1.UserRole.SUPER_ADMIN : payload.role,
             userPreferredLanguage: user.preferredLanguage,
             activeOrganizationDefaultLanguage: null,
+            tokenJti: payload.jti ?? "",
+            tokenExpiresAt: payload.exp ?? 0,
         };
         next();
     }

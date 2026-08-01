@@ -484,6 +484,16 @@ async function cancelSalesOrder(organizationId, orderId, actorUserId) {
         });
         return updated;
     }, INTERACTIVE_TRANSACTION_OPTIONS);
+    // Only staff-initiated cancels need to be echoed back — a bridge-initiated cancel (actorUserId
+    // null, "Cancelled via NearCart customer app") originated from NearCart itself, which already
+    // knows its own order was cancelled and doesn't need to be told about it again.
+    if (actorUserId && cancelled.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: cancelled.externalOrderId,
+            status: cancelled.status,
+            eventType: "CANCELLED",
+        });
+    }
     return cancelled;
 }
 async function deliverSalesOrder(organizationId, orderId, actorUserId) {
@@ -548,7 +558,7 @@ function haversineDistanceKm(from, to) {
  * `markSalesOrderReady` below — the existing manual assign-driver dropdown in the Inventory
  * frontend remains available as a fallback when this returns null.
  */
-async function findNearestFreeDriver(branchId) {
+async function findNearestFreeDriver(branchId, excludeDriverId) {
     const branch = await prisma_1.prisma.branch.findUnique({
         where: { id: branchId },
         select: { latitude: true, longitude: true },
@@ -563,6 +573,10 @@ async function findNearestFreeDriver(branchId) {
             status: client_1.DriverStatus.VERIFIED,
             lastKnownLatitude: { not: null },
             lastKnownLongitude: { not: null },
+            // Excludes the driver who just declined this exact order (see driver-orders.service.ts
+            // declineDriverOrder) — without this, a lone available driver would immediately get
+            // re-matched to the same order they just turned down.
+            ...(excludeDriverId ? { id: { not: excludeDriverId } } : {}),
             assignedOrders: {
                 none: {
                     status: { in: ACTIVE_DRIVER_ORDER_STATUSES },

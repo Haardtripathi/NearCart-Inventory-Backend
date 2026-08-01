@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listDriverOrdersController = listDriverOrdersController;
 exports.pickupDriverOrderController = pickupDriverOrderController;
+exports.declineDriverOrderController = declineDriverOrderController;
 exports.deliverDriverOrderController = deliverDriverOrderController;
 exports.updateDriverAvailabilityController = updateDriverAvailabilityController;
 exports.updateDriverLocationController = updateDriverLocationController;
@@ -15,6 +16,10 @@ async function listDriverOrdersController(req, res) {
 async function pickupDriverOrderController(req, res) {
     const data = await (0, driver_orders_service_1.pickupDriverOrder)(req.driverAuth.driverId, req.params.id);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Order picked up successfully", data);
+}
+async function declineDriverOrderController(req, res) {
+    const data = await (0, driver_orders_service_1.declineDriverOrder)(req.driverAuth.driverId, req.params.id);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Order declined successfully", data);
 }
 async function deliverDriverOrderController(req, res) {
     const data = await (0, driver_orders_service_1.deliverDriverOrder)(req.driverAuth.driverId, req.params.id);

@@ -26,6 +26,7 @@ import { marketplaceRouter } from "../modules/marketplace/marketplace.route";
 import { driverAuthRouter } from "../modules/driver-auth/driver-auth.route";
 import { driverOrdersRouter } from "../modules/driver-orders/driver-orders.route";
 import { driversRouter } from "../modules/drivers/drivers.route";
+import { driverVerificationRouter } from "../modules/driver-verification/driver-verification.route";
 
 export const apiRouter = Router();
 
@@ -60,4 +61,5 @@ apiRouter.use("/uploads", uploadsRouter);
 apiRouter.use("/internal/marketplace", marketplaceRouter);
 apiRouter.use("/driver-auth", driverAuthRouter);
 apiRouter.use("/driver", driverOrdersRouter);
+apiRouter.use("/driver", driverVerificationRouter);
 apiRouter.use("/drivers", driversRouter);

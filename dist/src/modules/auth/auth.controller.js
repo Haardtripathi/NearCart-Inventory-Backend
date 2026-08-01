@@ -9,11 +9,13 @@ exports.changePasswordController = changePasswordController;
 exports.updateMyPreferencesController = updateMyPreferencesController;
 exports.sendEmailOtpController = sendEmailOtpController;
 exports.verifyEmailOtpController = verifyEmailOtpController;
+exports.logoutController = logoutController;
 exports.meController = meController;
 const client_1 = require("@prisma/client");
 const ApiResponse_1 = require("../../utils/ApiResponse");
 const localization_1 = require("../../utils/localization");
 const request_1 = require("../../utils/request");
+const tokenBlacklist_1 = require("../../utils/tokenBlacklist");
 const auth_service_1 = require("./auth.service");
 async function bootstrapSuperAdminController(req, res) {
     const user = await (0, auth_service_1.bootstrapSuperAdmin)(req.body, (0, request_1.getRequestMeta)(req));
@@ -57,6 +59,16 @@ async function sendEmailOtpController(req, res) {
 async function verifyEmailOtpController(req, res) {
     const data = await (0, auth_service_1.verifyEmailVerificationOtp)(req.body);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Email verified successfully", data);
+}
+/**
+ * Was a literal no-op (204, nothing else) before this fix — the same access token kept working
+ * immediately after "logout" since nothing server-side was tracking issued tokens at all. Now
+ * revokes this specific token by jti for its remaining lifetime; see utils/tokenBlacklist.ts.
+ */
+async function logoutController(req, res) {
+    const remainingTtlSeconds = req.auth.tokenExpiresAt - Math.floor(Date.now() / 1000);
+    await (0, tokenBlacklist_1.blacklistToken)(req.auth.tokenJti, remainingTtlSeconds);
+    res.status(204).send();
 }
 async function meController(req, res) {
     const localeContext = await (0, localization_1.resolveLocaleContext)(req);

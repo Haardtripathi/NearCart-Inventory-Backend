@@ -25,23 +25,118 @@ function getTransporter() {
                     pass: env_1.env.SMTP_PASS,
                 }
                 : undefined,
+            // Bug found 2026-08-01: with no explicit timeouts, nodemailer's default connectionTimeout
+            // is 2 minutes — confirmed live against prod (a hung SMTP connection to smtp.gmail.com:587,
+            // almost certainly blocked by the hosting provider's egress rules, took exactly ~2 minutes
+            // to fail with 500). That means every OTP send against a blocked/unreachable SMTP endpoint
+            // ties up the request (and whatever else shares that timing budget) for a full 2 minutes
+            // before the client sees anything, which surfaces client-side as a generic "network error"
+            // long before the server ever actually responds. Failing fast doesn't fix SMTP being
+            // blocked, but it stops a single bad send from hanging this long — see mailer usage sites
+            // for the real fix recommendation (switch to an HTTP-based email API).
+            connectionTimeout: 10_000,
+            greetingTimeout: 10_000,
+            socketTimeout: 10_000,
         });
         transporterConfigured = true;
     }
     return cachedTransporter;
 }
+const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 /**
- * Sends an email via the configured SMTP transport.
+ * Parses "Display Name <email@domain>" into separate fields — Brevo's HTTP API wants them
+ * split, unlike nodemailer/Resend which accept the combined string directly.
+ */
+function parseFromAddress(raw) {
+    const match = raw.match(/^(.*)<(.+)>$/);
+    if (!match) {
+        return { email: raw.trim() };
+    }
+    const name = match[1].trim();
+    const email = match[2].trim();
+    return name ? { name, email } : { email };
+}
+/**
+ * Sends via Brevo's HTTP API rather than its own SMTP relay — see BREVO_API_KEY's doc comment in
+ * config/env.ts. Confirmed live 2026-08-01: Brevo's SMTP relay (smtp-relay.brevo.com:587) itself
+ * gets ETIMEDOUT from some Render service instances despite identical credentials working fine
+ * on others — a real per-service network egress restriction. A normal HTTPS POST isn't subject
+ * to that at all.
+ */
+async function sendMailViaBrevo(input) {
+    const response = await fetch(BREVO_API_URL, {
+        method: "POST",
+        headers: {
+            "api-key": env_1.env.BREVO_API_KEY,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+        },
+        body: JSON.stringify({
+            sender: parseFromAddress(env_1.env.BREVO_FROM),
+            to: [{ email: input.to }],
+            subject: input.subject,
+            htmlContent: input.html,
+            textContent: input.text,
+        }),
+        signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`Brevo API request failed with status ${response.status}: ${body}`);
+    }
+    return { delivered: true };
+}
+const RESEND_API_URL = "https://api.resend.com/emails";
+/**
+ * Sends via Resend's HTTP API rather than raw SMTP — see RESEND_API_KEY's doc comment in
+ * config/env.ts for why. A normal HTTPS POST isn't subject to the outbound-SMTP-port blocking
+ * that broke raw SMTP in prod, and it fails in a bounded, ordinary HTTP-timeout way rather than
+ * hanging for minutes.
+ */
+async function sendMailViaResend(input) {
+    const response = await fetch(RESEND_API_URL, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${env_1.env.RESEND_API_KEY}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            from: env_1.env.RESEND_FROM,
+            to: [input.to],
+            subject: input.subject,
+            html: input.html,
+            text: input.text,
+        }),
+        signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`Resend API request failed with status ${response.status}: ${body}`);
+    }
+    return { delivered: true };
+}
+/**
+ * Sends an email via, in priority order: Brevo's HTTP API (most robust — HTTPS, not subject to
+ * any SMTP-port-blocking, works for arbitrary recipients), raw SMTP (Brevo's relay — works on
+ * some hosts, ETIMEDOUT on others per the network-egress issue above), or Resend's HTTP API
+ * (fallback — also HTTPS-based, but its free tier restricts sending to the account's own email
+ * until a domain is verified there).
  *
- * When SMTP_HOST is not configured (e.g. local development without a mail provider), this
- * fails open by logging the email to the console instead of throwing — this keeps local dev
- * working without a mail server while still ensuring production (where SMTP_HOST must be set)
- * never leaks a raw token/link through an API response.
+ * When none are configured (e.g. local development without a mail provider), this fails open
+ * by logging the email to the console instead of throwing — this keeps local dev working without
+ * a mail provider while still ensuring production (where one of these must be set) never leaks
+ * a raw token/link through an API response.
  */
 async function sendMail(input) {
+    if (env_1.env.BREVO_API_KEY) {
+        return sendMailViaBrevo(input);
+    }
     const transporter = getTransporter();
     if (!transporter) {
-        console.warn(`[mailer] SMTP_HOST is not configured — logging email instead of sending it. to=${input.to} subject=${input.subject}`);
+        if (env_1.env.RESEND_API_KEY) {
+            return sendMailViaResend(input);
+        }
+        console.warn(`[mailer] No email provider configured (BREVO_API_KEY / SMTP_HOST / RESEND_API_KEY all unset) — logging email instead of sending it. to=${input.to} subject=${input.subject}`);
         console.warn(`[mailer] body:\n${input.text ?? input.html}`);
         return { delivered: false };
     }

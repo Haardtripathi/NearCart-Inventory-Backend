@@ -167,6 +167,35 @@ enum AuditAction {
   // was previously no API-level way for a driver to decline an assignment at all, only a
   // manager manually re-calling assign-driver with someone else.
   ORDER_DRIVER_DECLINE
+  // Shop-photo verification (POST /branches/:id/verification/photo) and driver
+  // vehicle/license verification (POST /driver/verification/*) — see ShopVerificationStatus /
+  // DriverVerificationStatus below for the persisted result these audit entries summarize.
+  SHOP_PHOTO_VERIFY
+  DRIVER_VEHICLE_VERIFY
+  DRIVER_LICENSE_VERIFY
+}
+
+// Result of the automatic Replicate (image clarity/OCR) + Google Places shop-photo check run by
+// POST /branches/:id/verification/photo. NOT_UPLOADED -> PENDING_VERIFICATION as soon as a photo
+// is stored, even if the AI check itself can't run yet (REPLICATE_API_TOKEN unset, stub mode) —
+// shop onboarding treats "photo uploaded" as sufficient to proceed, and this status is what lets
+// a later automatic re-check (once a token is configured) pick PENDING_VERIFICATION rows back up.
+enum ShopVerificationStatus {
+  NOT_UPLOADED
+  PENDING_VERIFICATION
+  VERIFIED
+  FLAGGED_MISMATCH
+}
+
+// Overall driver onboarding-document status, distinct from Driver.status (the admin
+// manual-review gate) — this tracks the vehicle-photo + license OCR verification flow under
+// POST /driver/verification/*. See PENDING_VERIFICATION comment above on ShopVerificationStatus
+// for the same "uploaded but unverified" rationale when Replicate is in stub mode.
+enum DriverVerificationStatus {
+  NOT_SUBMITTED
+  PENDING_VERIFICATION
+  VERIFIED
+  FLAGGED_MISMATCH
 }
 
 enum DriverStatus {
@@ -343,37 +372,51 @@ model OrganizationIndustryConfig {
 }
 
 model Branch {
-  id               String             @id @default(cuid())
-  organizationId   String
-  code             String? // Optional - auto-generated if not provided
-  name             String
-  type             BranchType
-  phone            String?
-  email            String?
-  addressLine1     String?
-  addressLine2     String?
-  city             String?
-  state            String?
-  country          String?
-  postalCode       String?
-  isActive         Boolean            @default(true)
+  id                           String                 @id @default(cuid())
+  organizationId               String
+  code                         String? // Optional - auto-generated if not provided
+  name                         String
+  type                         BranchType
+  phone                        String?
+  email                        String?
+  addressLine1                 String?
+  addressLine2                 String?
+  city                         String?
+  state                        String?
+  country                      String?
+  postalCode                   String?
+  isActive                     Boolean                @default(true)
   // Pickup-point coordinates for nearest-driver distance matching (see Driver.lastKnownLatitude
   // below) — nullable since existing branches predate this column; backfilled by shop owners
   // editing branch details going forward.
-  latitude         Float?
-  longitude        Float?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  deletedAt        DateTime?
-  organization     Organization       @relation(fields: [organizationId], references: [id])
-  balances         InventoryBalance[]
-  inventoryLedger  InventoryLedger[]
-  inventoryBatches InventoryBatch[]
-  serialNumbers    SerialNumber[]
-  purchaseReceipts PurchaseReceipt[]
-  salesOrders      SalesOrder[]
-  transfersFrom    StockTransfer[]    @relation("TransferFromBranch")
-  transfersTo      StockTransfer[]    @relation("TransferToBranch")
+  latitude                     Float?
+  longitude                    Float?
+  // Compulsory shop-photo verification (POST /branches/:id/verification/photo) — see
+  // ShopVerificationStatus above. shopPhotoUrl is the Cloudinary URL; the rest mirror the
+  // endpoint's response fields 1:1 so the serializer barely has to reshape anything.
+  // shopPhotoMatchedPlaces/shopPhotoVerificationReasons are Json since they're small
+  // arrays never queried on, not separate tables.
+  shopPhotoUrl                 String?
+  shopPhotoVerificationStatus  ShopVerificationStatus @default(NOT_UPLOADED)
+  shopPhotoClarityOk           Boolean?
+  shopPhotoNameDetected        String?
+  shopPhotoNameMatch           Boolean?
+  shopPhotoPlaceLocationMatch  Boolean?
+  shopPhotoMatchedPlaces       Json?
+  shopPhotoVerificationReasons Json?
+  shopPhotoVerifiedAt          DateTime?
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
+  deletedAt                    DateTime?
+  organization                 Organization           @relation(fields: [organizationId], references: [id])
+  balances                     InventoryBalance[]
+  inventoryLedger              InventoryLedger[]
+  inventoryBatches             InventoryBatch[]
+  serialNumbers                SerialNumber[]
+  purchaseReceipts             PurchaseReceipt[]
+  salesOrders                  SalesOrder[]
+  transfersFrom                StockTransfer[]        @relation("TransferFromBranch")
+  transfersTo                  StockTransfer[]        @relation("TransferToBranch")
 
   @@unique([organizationId, code])
   @@index([organizationId, deletedAt])
@@ -1061,33 +1104,55 @@ model SalesOrder {
 // (locked 2026-07-24) and modules/driver-auth, modules/driver-orders, modules/drivers,
 // modules/platform (verify/suspend endpoints).
 model Driver {
-  id                       String               @id @default(cuid())
-  fullName                 String
-  phone                    String               @unique
-  email                    String?              @unique
-  passwordHash             String
-  vehicleType              String
-  vehicleNumber            String
-  status                   DriverStatus         @default(PENDING_VERIFICATION)
+  id                           String                   @id @default(cuid())
+  fullName                     String
+  phone                        String                   @unique
+  email                        String?                  @unique
+  passwordHash                 String
+  vehicleType                  String
+  vehicleNumber                String
+  status                       DriverStatus             @default(PENDING_VERIFICATION)
   // Separate trust signal from `status` (admin review) — proves the driver controls the inbox at
   // `email`, added as an ADDITIONAL gate alongside admin verification, not a replacement for it.
   // A driver can be emailVerified=true while status is still PENDING_VERIFICATION (email OTP is
   // completable before admin review finishes), and login remains blocked until status=VERIFIED
   // regardless of this flag. See modules/driver-auth/driver-auth.service.ts.
-  emailVerified            Boolean              @default(false)
+  emailVerified                Boolean                  @default(false)
   // Nearest-free-driver auto-assignment (see sales-orders driver-matching service): a driver is
   // "free" when isAvailableForAssignment is true AND they have no SalesOrder currently assigned
   // with status READY/OUT_FOR_DELIVERY. lastKnownLatitude/Longitude are updated by a periodic
   // (~60s) foreground location ping from the driver app while online — deliberately NOT
   // continuous background tracking (Phase 1 explicitly defers live tracking).
-  isAvailableForAssignment Boolean              @default(false)
-  lastKnownLatitude        Float?
-  lastKnownLongitude       Float?
-  lastLocationAt           DateTime?
-  createdAt                DateTime             @default(now())
-  updatedAt                DateTime             @updatedAt
-  assignedOrders           SalesOrder[]         @relation("SalesOrderAssignedDriver")
-  refreshTokens            DriverRefreshToken[]
+  isAvailableForAssignment     Boolean                  @default(false)
+  lastKnownLatitude            Float?
+  lastKnownLongitude           Float?
+  lastLocationAt               DateTime?
+  // Vehicle-photo verification (POST /driver/verification/vehicle-photo): Replicate clarity +
+  // number-plate OCR against the photo. vehiclePlateNumber is the OCR'd/detected value; a driver
+  // never types this in directly, unlike license fields below which go through an
+  // extract-then-confirm step.
+  vehiclePhotoUrl              String?
+  vehiclePlateNumber           String?
+  vehiclePlateVerified         Boolean                  @default(false)
+  vehiclePhotoClarityOk        Boolean?
+  // License verification: POST /driver/verification/license runs OCR and returns extracted
+  // fields for the driver to review/correct client-side, then POST /driver/verification/license/
+  // confirm persists the (possibly corrected) final values here and re-verifies against the OCR
+  // read, recorded in licenseMatchScore.
+  licensePhotoUrl              String?
+  licenseNumber                String?
+  licenseHolderName            String?
+  licenseDob                   String?
+  licenseExpiry                String?
+  licenseVerified              Boolean                  @default(false)
+  licenseMatchScore            Float?
+  // Overall onboarding-document status across both vehicle + license checks above — distinct
+  // from `status` (the admin manual-review gate that actually unlocks login/order-assignment).
+  onboardingVerificationStatus DriverVerificationStatus @default(NOT_SUBMITTED)
+  createdAt                    DateTime                 @default(now())
+  updatedAt                    DateTime                 @updatedAt
+  assignedOrders               SalesOrder[]             @relation("SalesOrderAssignedDriver")
+  refreshTokens                DriverRefreshToken[]
 
   @@index([status])
   @@index([isAvailableForAssignment])

@@ -12,6 +12,7 @@ exports.driverOrdersRouter = (0, express_1.Router)();
 exports.driverOrdersRouter.use(driverAuth_middleware_1.authenticateDriver);
 exports.driverOrdersRouter.get("/orders", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.listDriverOrdersController));
 exports.driverOrdersRouter.post("/orders/:id/pickup", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.pickupDriverOrderController));
+exports.driverOrdersRouter.post("/orders/:id/decline", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.declineDriverOrderController));
 exports.driverOrdersRouter.post("/orders/:id/deliver", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.deliverDriverOrderController));
 exports.driverOrdersRouter.patch("/availability", (0, validate_middleware_1.validateRequest)({ body: driver_orders_validation_1.updateDriverAvailabilitySchema }), (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.updateDriverAvailabilityController));
 exports.driverOrdersRouter.patch("/location", (0, validate_middleware_1.validateRequest)({ body: driver_orders_validation_1.updateDriverLocationSchema }), (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.updateDriverLocationController));

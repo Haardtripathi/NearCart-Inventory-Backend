@@ -138,6 +138,15 @@ export interface ConfirmLicenseResult {
 
 const MATCH_SCORE_VERIFIED_THRESHOLD = 0.75;
 
+// name + licenseNumber are the two fields that actually identify *this* license as belonging to
+// *this* driver — dob/expiry matching too is good corroborating signal but must never be enough
+// on its own to offset a wrong name or license number. Without this, 3-of-4 fields matching
+// (score 0.75, clearing the threshold above) would let a wrong name through as long as license
+// number/dob/expiry happened to match, which defeats the point of identity verification. Confirmed
+// live 2026-08-02: before this fix, submitting a fabricated name against someone else's real
+// license photo (correct number/dob/expiry) returned verified:true.
+const REQUIRED_MATCH_FIELDS = ["name", "licenseNumber"];
+
 /**
  * POST /driver/verification/license/confirm — gated by requireReplicateConfigured upstream (the
  * re-verification step still needs a fresh OCR pass to compare against). Re-runs OCR on the same
@@ -173,7 +182,8 @@ export async function confirmDriverLicense(
 
   const mismatches = fieldChecks.filter((check) => !check.matches).map((check) => check.field);
   const matchScore = (fieldChecks.length - mismatches.length) / fieldChecks.length;
-  const verified = ocr.clarityOk && matchScore >= MATCH_SCORE_VERIFIED_THRESHOLD;
+  const requiredFieldsMatch = REQUIRED_MATCH_FIELDS.every((field) => !mismatches.includes(field));
+  const verified = ocr.clarityOk && requiredFieldsMatch && matchScore >= MATCH_SCORE_VERIFIED_THRESHOLD;
 
   const onboardingVerificationStatus =
     verified && driver.vehiclePlateVerified

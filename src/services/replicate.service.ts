@@ -20,12 +20,12 @@ function getClient(): Replicate {
 // strict JSON keeps one small parsing helper (parseJsonFromModelOutput) reusable across all three
 // verification endpoints instead of needing a different model/parser per task.
 //
-// NOT LIVE-TESTED: no REPLICATE_API_TOKEN exists anywhere in this workspace as of this change
-// (see backend/.env.example), so this identifier has never actually been invoked. It's a
-// reasonable, actively-maintained multimodal instruction model on Replicate at the time of
-// writing, but treat it as a placeholder — swap it here (one constant) once a real token is
-// configured and this has been smoke-tested against it.
-const VISION_MODEL = "yorickvp/llava-13b";
+// Live-tested 2026-08-02. yorickvp/llava-13b is a community (non-"official") model, so
+// Replicate's versionless `/models/{owner}/{name}/predictions` endpoint 404s on it — community
+// models must be pinned to a specific version hash. Pulled from
+// `GET /v1/models/yorickvp/llava-13b` -> `latest_version.id` at test time; if this model is ever
+// updated upstream, re-fetch that id rather than assuming this hash stays current.
+const VISION_MODEL = "yorickvp/llava-13b:80537f9eead1a5bfa72d5ac6ea6414379be41d4d4f6679fd776e9535d1eb58bb";
 
 interface ModelJsonResponse {
   [key: string]: unknown;

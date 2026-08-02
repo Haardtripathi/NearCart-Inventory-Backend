@@ -1,6 +1,15 @@
 import "dotenv/config";
 import { z } from "zod";
 
+// `.optional()` alone only allows a var to be ABSENT, not blank — but a `.env` file's `KEY=`
+// line (a common, standard way to document an available-but-unset var) is a present empty
+// string, not undefined. Every `.string().min(1).optional()` field below crashed the whole
+// server at boot on exactly this: RESEND_API_KEY= and REPLICATE_API_TOKEN= being present-but-
+// blank failed min(1) even though they're meant to be optional. Coercing empty string to
+// undefined first fixes the whole class of field, not just the two that happened to be blank
+// tonight.
+const optionalNonEmptyString = z.preprocess((value) => (value === "" ? undefined : value), z.string().trim().min(1).optional());
+
 const booleanFromEnv = z.preprocess((value) => {
   if (typeof value === "boolean") {
     return value;
@@ -35,7 +44,7 @@ const envSchema = z
     CORS_ORIGIN: z.string().min(1).default("http://localhost:5173"),
     REDIS_URL: z.string().trim().optional(),
     UPSTASH_REDIS_REST_URL: z.string().trim().url().optional(),
-    UPSTASH_REDIS_REST_TOKEN: z.string().trim().min(1).optional(),
+    UPSTASH_REDIS_REST_TOKEN: optionalNonEmptyString,
     REDIS_KEY_PREFIX: z.string().trim().min(1).default("nearcart"),
     LIBRETRANSLATE_URL: z.string().trim().url().default("http://127.0.0.1:5000"),
     // Defaults on (2026-07-23 product decision) — requires LIBRETRANSLATE_URL to be reachable;
@@ -43,24 +52,24 @@ const envSchema = z
     AUTO_TRANSLATE_ON_WRITE: booleanFromEnv.default(true),
     AUTO_TRANSLATE_FAIL_OPEN: booleanFromEnv.default(true),
     TRANSLATION_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
-    CLOUDINARY_CLOUD_NAME: z.string().trim().min(1).optional(),
-    CLOUDINARY_API_KEY: z.string().trim().min(1).optional(),
-    CLOUDINARY_API_SECRET: z.string().trim().min(1).optional(),
+    CLOUDINARY_CLOUD_NAME: optionalNonEmptyString,
+    CLOUDINARY_API_KEY: optionalNonEmptyString,
+    CLOUDINARY_API_SECRET: optionalNonEmptyString,
     CLOUDINARY_UPLOAD_FOLDER: z.string().trim().min(1).default("nearcart-inventory"),
     IMAGE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
-    MARKETPLACE_INTERNAL_TOKEN: z.string().trim().min(1).optional(),
+    MARKETPLACE_INTERNAL_TOKEN: optionalNonEmptyString,
     // Outbound reverse notification webhook (this backend -> NearCart) — same shared secret as
     // MARKETPLACE_INTERNAL_TOKEN authenticates NearCart's inbound calls to us, reused here for
     // the reverse direction so no second secret is needed.
     NEARCART_SERVICE_URL: z.string().trim().url().optional(),
-    FIREBASE_PROJECT_ID: z.string().trim().min(1).optional(),
-    FIREBASE_CLIENT_EMAIL: z.string().trim().min(1).optional(),
-    FIREBASE_PRIVATE_KEY: z.string().trim().min(1).optional(),
-    SMTP_HOST: z.string().trim().min(1).optional(),
+    FIREBASE_PROJECT_ID: optionalNonEmptyString,
+    FIREBASE_CLIENT_EMAIL: optionalNonEmptyString,
+    FIREBASE_PRIVATE_KEY: optionalNonEmptyString,
+    SMTP_HOST: optionalNonEmptyString,
     SMTP_PORT: z.coerce.number().int().positive().default(587),
     SMTP_SECURE: booleanFromEnv.default(false),
-    SMTP_USER: z.string().trim().min(1).optional(),
-    SMTP_PASS: z.string().trim().min(1).optional(),
+    SMTP_USER: optionalNonEmptyString,
+    SMTP_PASS: optionalNonEmptyString,
     SMTP_FROM: z.string().trim().min(1).default("NearCart Inventory <no-reply@nearcart.app>"),
     // Highest priority when set — see utils/mailer.ts. Added 2026-08-01 after confirming that
     // even Brevo's own SMTP relay (smtp-relay.brevo.com:587) gets ETIMEDOUT on some Render
@@ -68,12 +77,12 @@ const envSchema = z
     // per-service network egress restriction, not a config issue. Brevo's HTTP API isn't
     // affected since it's a normal HTTPS call, same reasoning as RESEND_API_KEY below but with
     // Brevo's un-restricted-recipient free tier instead of Resend's own-email-only sandbox.
-    BREVO_API_KEY: z.string().trim().min(1).optional(),
+    BREVO_API_KEY: optionalNonEmptyString,
     BREVO_FROM: z.string().trim().min(1).default("NearCart Inventory <no-reply@nearcart.app>"),
     // Preferred over raw SMTP when BREVO_API_KEY is unset — see utils/mailer.ts. Resend's HTTP
     // API isn't affected by SMTP-port blocking either, but its free tier restricts sending to
     // the account's own email until a domain is verified there.
-    RESEND_API_KEY: z.string().trim().min(1).optional(),
+    RESEND_API_KEY: optionalNonEmptyString,
     // "onboarding@resend.dev" is Resend's own shared sending address, usable before you've
     // verified a custom domain with them — fine for getting OTP emails working immediately;
     // swap to a verified domain address once one is set up.
@@ -101,14 +110,14 @@ const envSchema = z
     // reverse-geocode calls fail closed (caller keeps the manual address fields, which are always
     // editable regardless) and placeLocationMatch/matchedPlaceCandidates come back empty with a
     // reason string rather than throwing.
-    GOOGLE_MAPS_API_KEY: z.string().trim().min(1).optional(),
+    GOOGLE_MAPS_API_KEY: optionalNonEmptyString,
     // Shop-photo clarity/name-OCR (POST /branches/:id/verification/photo) and driver
     // vehicle-photo/license OCR (POST /driver/verification/*). Leave unset to run in stub mode —
     // those endpoints return a clear 503 { error: "verification_unavailable" } instead of
     // crashing the server. Mirrors the CLOUDINARY_* stub-mode convention above exactly: the
     // feature is fully wired end-to-end and activates the instant a real token is set here, no
     // further code changes needed.
-    REPLICATE_API_TOKEN: z.string().trim().min(1).optional(),
+    REPLICATE_API_TOKEN: optionalNonEmptyString,
   })
   .refine(
     (values) =>

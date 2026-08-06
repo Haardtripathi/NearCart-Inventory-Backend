@@ -19,6 +19,52 @@ async function getDriverOrThrow(driverId: string) {
   return driver;
 }
 
+export interface DriverVerificationStatusResult {
+  vehicleType: string;
+  vehicleNumber: string;
+  vehiclePhotoUrl: string | null;
+  vehiclePlateNumber: string | null;
+  vehiclePlateVerified: boolean;
+  vehiclePhotoClarityOk: boolean | null;
+  licensePhotoUrl: string | null;
+  licenseNumber: string | null;
+  licenseHolderName: string | null;
+  licenseDob: string | null;
+  licenseExpiry: string | null;
+  licenseVerified: boolean;
+  licenseMatchScore: number | null;
+  onboardingVerificationStatus: DriverVerificationStatus;
+}
+
+/**
+ * GET /driver/verification/status — read-only snapshot of everything the onboarding vehicle/
+ * license steps (VehiclePhotoStep/LicenseVerificationStep) have written to this driver's record so
+ * far. Added for the driver app's "Documents" screen (Round 2 UI overhaul) so a driver can review
+ * what's on file and re-verify a document post-onboarding without re-running the whole onboarding
+ * flow — reuses the exact same upload/verify endpoints below, this just adds the missing "what do
+ * I currently have on file" read.
+ */
+export async function getDriverVerificationStatus(driverId: string): Promise<DriverVerificationStatusResult> {
+  const driver = await getDriverOrThrow(driverId);
+
+  return {
+    vehicleType: driver.vehicleType,
+    vehicleNumber: driver.vehicleNumber,
+    vehiclePhotoUrl: driver.vehiclePhotoUrl,
+    vehiclePlateNumber: driver.vehiclePlateNumber,
+    vehiclePlateVerified: driver.vehiclePlateVerified,
+    vehiclePhotoClarityOk: driver.vehiclePhotoClarityOk,
+    licensePhotoUrl: driver.licensePhotoUrl,
+    licenseNumber: driver.licenseNumber,
+    licenseHolderName: driver.licenseHolderName,
+    licenseDob: driver.licenseDob,
+    licenseExpiry: driver.licenseExpiry,
+    licenseVerified: driver.licenseVerified,
+    licenseMatchScore: driver.licenseMatchScore,
+    onboardingVerificationStatus: driver.onboardingVerificationStatus,
+  };
+}
+
 export interface VehiclePhotoVerificationResult {
   verified: boolean;
   clarityOk: boolean;

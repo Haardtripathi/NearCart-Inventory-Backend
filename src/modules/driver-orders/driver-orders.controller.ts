@@ -4,12 +4,24 @@ import { sendSuccess } from "../../utils/ApiResponse";
 import {
   declineDriverOrder,
   deliverDriverOrder,
+  getDriverEarningsSummary,
+  getDriverPerformanceSummary,
+  listDriverOrderHistory,
   listDriverOrders,
   pickupDriverOrder,
   registerDriverDeviceTokenForDriver,
   updateDriverAvailability,
   updateDriverLocation,
+  type DriverEarningsRange,
 } from "./driver-orders.service";
+
+const EARNINGS_RANGES: DriverEarningsRange[] = ["today", "week", "month", "all"];
+
+function parseEarningsRange(value: unknown): DriverEarningsRange {
+  return typeof value === "string" && (EARNINGS_RANGES as string[]).includes(value)
+    ? (value as DriverEarningsRange)
+    : "today";
+}
 
 export async function listDriverOrdersController(req: Request, res: Response) {
   const data = await listDriverOrders(req.driverAuth!.driverId);
@@ -27,8 +39,27 @@ export async function declineDriverOrderController(req: Request, res: Response) 
 }
 
 export async function deliverDriverOrderController(req: Request, res: Response) {
-  const data = await deliverDriverOrder(req.driverAuth!.driverId, req.params.id!);
+  const photo = req.file ? { buffer: req.file.buffer, originalname: req.file.originalname } : undefined;
+  const data = await deliverDriverOrder(req.driverAuth!.driverId, req.params.id!, photo);
   return sendSuccess(res, 200, "Order delivered successfully", data);
+}
+
+export async function listDriverOrderHistoryController(req: Request, res: Response) {
+  const page = Number.parseInt(String(req.query.page ?? "1"), 10) || 1;
+  const data = await listDriverOrderHistory(req.driverAuth!.driverId, page);
+  return sendSuccess(res, 200, "Delivery history fetched successfully", data);
+}
+
+export async function getDriverEarningsSummaryController(req: Request, res: Response) {
+  const range = parseEarningsRange(req.query.range);
+  const data = await getDriverEarningsSummary(req.driverAuth!.driverId, range);
+  return sendSuccess(res, 200, "Earnings summary fetched successfully", data);
+}
+
+export async function getDriverPerformanceSummaryController(req: Request, res: Response) {
+  const range = parseEarningsRange(req.query.range);
+  const data = await getDriverPerformanceSummary(req.driverAuth!.driverId, range);
+  return sendSuccess(res, 200, "Performance summary fetched successfully", data);
 }
 
 export async function updateDriverAvailabilityController(req: Request, res: Response) {

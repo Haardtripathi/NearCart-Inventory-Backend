@@ -5,6 +5,7 @@ type OrderEventType =
   | "REJECTED"
   | "READY"
   | "DRIVER_ASSIGNED"
+  | "DRIVER_UNASSIGNED"
   | "OUT_FOR_DELIVERY"
   | "DELIVERED"
   | "AUTO_CANCELLED"

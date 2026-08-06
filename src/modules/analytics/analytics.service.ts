@@ -1,0 +1,300 @@
+import { SalesOrderStatus } from "@prisma/client";
+
+import { prisma } from "../../config/prisma";
+import { toDecimal } from "../../utils/decimal";
+import { getAvailableStock, isLowStock } from "../../utils/stock";
+
+// Shop-owner-facing analytics for the mobile dashboard/analytics screens. Deliberately composed
+// from existing SalesOrder/SalesOrderItem/InventoryBalance rows in plain JS (mirrors the mobile
+// dashboard.api.ts's existing "no dedicated backend endpoint, compose client-side" approach, just
+// moved server-side now that the aggregation is more than a couple of cheap list calls) rather
+// than raw SQL date-bucketing — see sales-orders.service.ts's assignDriverToSalesOrder comment for
+// why raw SQL against this SQLite/libSQL setup needs extra care; a 30-day, single-organization
+// row-set is small enough that JS-side aggregation is simpler and safer than getting SQLite's
+// strftime bucketing exactly right.
+const TREND_DAYS = 7;
+const TOP_PRODUCTS_WINDOW_DAYS = 30;
+const TOP_PRODUCTS_LIMIT = 5;
+
+// Orders that actually represent a completed/in-flight sale — PENDING/DRAFT haven't had stock
+// deducted yet (see sales-orders.service.ts confirmSalesOrder) and REJECTED/CANCELLED/RETURNED
+// never will, so none of those should count toward revenue.
+const REVENUE_STATUSES: SalesOrderStatus[] = [
+  SalesOrderStatus.CONFIRMED,
+  SalesOrderStatus.READY,
+  SalesOrderStatus.OUT_FOR_DELIVERY,
+  SalesOrderStatus.DELIVERED,
+];
+
+function startOfDay(date: Date): Date {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+// Deliberately NOT `startOfDay(date).toISOString().slice(0, 10)` — toISOString() always renders
+// in UTC, while startOfDay()'s setHours(0,0,0,0) zeroes out the *local* clock, so for any
+// positive-UTC-offset timezone (Asia/Kolkata — this app's own default org timezone — included)
+// local midnight is still the *previous* UTC calendar day, silently shifting every trend/report
+// date label back by one day (confirmed 2026-08-05: an order created at 21:13 IST today was
+// labelled "yesterday"). Building the key from the local getFullYear/getMonth/getDate instead
+// keeps label generation and order-classification in the same (local) calendar, matching what a
+// shop owner actually means by "today".
+function dayKey(date: Date): string {
+  const local = startOfDay(date);
+  const year = local.getFullYear();
+  const month = String(local.getMonth() + 1).padStart(2, "0");
+  const day = String(local.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 86_400_000);
+}
+
+export async function getAnalyticsOverview(organizationId: string, branchId?: string) {
+  const now = new Date();
+  const trendStart = startOfDay(addDays(now, -(TREND_DAYS - 1)));
+  const topProductsStart = startOfDay(addDays(now, -(TOP_PRODUCTS_WINDOW_DAYS - 1)));
+  const rangeStart = trendStart < topProductsStart ? trendStart : topProductsStart;
+
+  const branchFilter = branchId ? { branchId } : {};
+
+  const [recentOrders, statusGroups, lowStockBalances, totalOrders] = await Promise.all([
+    prisma.salesOrder.findMany({
+      where: {
+        organizationId,
+        ...branchFilter,
+        createdAt: { gte: rangeStart },
+      },
+      select: {
+        status: true,
+        total: true,
+        createdAt: true,
+        items: {
+          select: {
+            productId: true,
+            productNameSnapshot: true,
+            quantity: true,
+            lineTotal: true,
+          },
+        },
+      },
+    }),
+    prisma.salesOrder.groupBy({
+      by: ["status"],
+      where: { organizationId, ...branchFilter },
+      _count: { _all: true },
+    }),
+    prisma.inventoryBalance.findMany({
+      where: { organizationId, ...branchFilter },
+      select: {
+        onHand: true,
+        variant: { select: { reorderLevel: true, minStockLevel: true } },
+      },
+    }),
+    prisma.salesOrder.count({ where: { organizationId, ...branchFilter } }),
+  ]);
+
+  const trendBuckets = new Map<string, { orders: number; revenue: ReturnType<typeof toDecimal> }>();
+  for (let i = 0; i < TREND_DAYS; i += 1) {
+    trendBuckets.set(dayKey(addDays(trendStart, i)), { orders: 0, revenue: toDecimal(0) });
+  }
+
+  const topProducts = new Map<
+    string,
+    { productId: string; name: string; quantitySold: ReturnType<typeof toDecimal>; revenue: ReturnType<typeof toDecimal> }
+  >();
+
+  let revenue7d = toDecimal(0);
+  let revenue30d = toDecimal(0);
+
+  for (const order of recentOrders) {
+    const isRevenue = REVENUE_STATUSES.includes(order.status);
+    const key = dayKey(order.createdAt);
+    const bucket = trendBuckets.get(key);
+    if (bucket) {
+      bucket.orders += 1;
+      if (isRevenue) {
+        bucket.revenue = bucket.revenue.plus(order.total);
+      }
+    }
+
+    if (!isRevenue) continue;
+
+    if (order.createdAt >= topProductsStart) {
+      for (const item of order.items) {
+        const existing = topProducts.get(item.productId);
+        const quantity = toDecimal(item.quantity);
+        const lineTotal = toDecimal(item.lineTotal);
+        if (existing) {
+          existing.quantitySold = existing.quantitySold.plus(quantity);
+          existing.revenue = existing.revenue.plus(lineTotal);
+        } else {
+          topProducts.set(item.productId, {
+            productId: item.productId,
+            name: item.productNameSnapshot,
+            quantitySold: quantity,
+            revenue: lineTotal,
+          });
+        }
+      }
+    }
+
+    if (order.createdAt >= topProductsStart) {
+      revenue30d = revenue30d.plus(order.total);
+    }
+    if (order.createdAt >= trendStart) {
+      revenue7d = revenue7d.plus(order.total);
+    }
+  }
+
+  const salesTrend = Array.from(trendBuckets.entries())
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([date, bucket]) => ({
+      date,
+      orders: bucket.orders,
+      revenue: bucket.revenue.toFixed(2),
+    }));
+
+  const topProductsList = Array.from(topProducts.values())
+    .sort((a, b) => b.revenue.minus(a.revenue).toNumber())
+    .slice(0, TOP_PRODUCTS_LIMIT)
+    .map((item) => ({
+      productId: item.productId,
+      name: item.name,
+      quantitySold: item.quantitySold.toNumber(),
+      revenue: item.revenue.toFixed(2),
+    }));
+
+  const orderStatusCounts = Object.fromEntries(
+    statusGroups.map((group) => [group.status, group._count._all]),
+  ) as Record<string, number>;
+
+  const lowStockCount = lowStockBalances.filter((balance) =>
+    isLowStock(balance.onHand, balance.variant.reorderLevel, balance.variant.minStockLevel),
+  ).length;
+
+  return {
+    salesTrend,
+    topProducts: topProductsList,
+    orderStatusCounts,
+    lowStockCount,
+    totalOrders,
+    pendingOrders: orderStatusCounts[SalesOrderStatus.PENDING] ?? 0,
+    revenue7d: revenue7d.toFixed(2),
+    revenue30d: revenue30d.toFixed(2),
+  };
+}
+
+// Smart reorder suggestions: flags variants likely to stock out soon, computed honestly from real
+// sales velocity (units sold per day over the last REORDER_VELOCITY_WINDOW_DAYS, from confirmed+
+// SalesOrderItem rows — same REVENUE_STATUSES cutoff as the rest of this file, since PENDING/DRAFT
+// haven't actually deducted stock yet and REJECTED/CANCELLED/RETURNED never will) against current
+// InventoryBalance.onHand. No fabricated "AI" scoring — just daysOfStockLeft = onHand / velocity,
+// which is the same arithmetic a shop owner would do by hand, just done for every SKU at once.
+const REORDER_VELOCITY_WINDOW_DAYS = 30;
+// A variant only needs to actually have sold something to have a velocity at all — one with zero
+// sales in the window is excluded rather than reported as "infinite days left" or "0 days left".
+const REORDER_URGENT_DAYS_THRESHOLD = 7;
+const REORDER_SUGGESTIONS_LIMIT = 30;
+
+export async function getReorderSuggestions(organizationId: string, branchId?: string) {
+  const windowStart = startOfDay(addDays(new Date(), -(REORDER_VELOCITY_WINDOW_DAYS - 1)));
+  const branchFilter = branchId ? { branchId } : {};
+
+  const [recentItems, balances] = await Promise.all([
+    prisma.salesOrderItem.findMany({
+      where: {
+        salesOrder: {
+          organizationId,
+          ...branchFilter,
+          status: { in: REVENUE_STATUSES },
+          createdAt: { gte: windowStart },
+        },
+      },
+      select: {
+        variantId: true,
+        productId: true,
+        quantity: true,
+        productNameSnapshot: true,
+        variantNameSnapshot: true,
+        skuSnapshot: true,
+      },
+    }),
+    prisma.inventoryBalance.findMany({
+      where: { organizationId, ...branchFilter },
+      select: {
+        id: true,
+        branchId: true,
+        productId: true,
+        variantId: true,
+        onHand: true,
+        reserved: true,
+        branch: { select: { id: true, name: true } },
+        variant: { select: { reorderLevel: true, minStockLevel: true } },
+      },
+    }),
+  ]);
+
+  const velocityByVariant = new Map<
+    string,
+    { quantitySold: ReturnType<typeof toDecimal>; productName: string; variantName: string; sku: string }
+  >();
+
+  for (const item of recentItems) {
+    const existing = velocityByVariant.get(item.variantId);
+    const quantity = toDecimal(item.quantity);
+    if (existing) {
+      existing.quantitySold = existing.quantitySold.plus(quantity);
+    } else {
+      velocityByVariant.set(item.variantId, {
+        quantitySold: quantity,
+        productName: item.productNameSnapshot,
+        variantName: item.variantNameSnapshot,
+        sku: item.skuSnapshot,
+      });
+    }
+  }
+
+  const suggestions = balances
+    .map((balance) => {
+      const sales = velocityByVariant.get(balance.variantId);
+      if (!sales) return null;
+
+      const velocityPerDay = sales.quantitySold.div(REORDER_VELOCITY_WINDOW_DAYS);
+      if (velocityPerDay.lessThanOrEqualTo(0)) return null;
+
+      const available = getAvailableStock(balance.onHand, balance.reserved);
+      const daysOfStockLeft = available.dividedBy(velocityPerDay);
+
+      const isLow = isLowStock(balance.onHand, balance.variant.reorderLevel, balance.variant.minStockLevel);
+      const isUrgent = daysOfStockLeft.lessThanOrEqualTo(REORDER_URGENT_DAYS_THRESHOLD);
+
+      if (!isLow && !isUrgent) return null;
+
+      return {
+        variantId: balance.variantId,
+        productId: balance.productId,
+        productName: sales.productName,
+        variantName: sales.variantName,
+        sku: sales.sku,
+        branch: balance.branch,
+        onHand: balance.onHand.toString(),
+        available: available.toString(),
+        quantitySoldWindow: sales.quantitySold.toString(),
+        velocityPerDay: velocityPerDay.toFixed(2),
+        daysOfStockLeft: Math.max(0, Math.round(daysOfStockLeft.toNumber())),
+        reorderLevel: balance.variant.reorderLevel.toString(),
+        isLowStock: isLow,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null)
+    .sort((a, b) => a.daysOfStockLeft - b.daysOfStockLeft)
+    .slice(0, REORDER_SUGGESTIONS_LIMIT);
+
+  return {
+    items: suggestions,
+    windowDays: REORDER_VELOCITY_WINDOW_DAYS,
+  };
+}

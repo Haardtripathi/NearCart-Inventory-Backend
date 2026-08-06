@@ -10,6 +10,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { ApiError } from "../../utils/ApiError";
 import {
   confirmDriverLicenseController,
+  getDriverVerificationStatusController,
   ocrDriverLicenseController,
   verifyDriverVehiclePhotoController,
 } from "./driver-verification.controller";
@@ -48,6 +49,10 @@ function handlePhotoUpload(req: Request, res: Response, next: NextFunction) {
 export const driverVerificationRouter = Router();
 
 driverVerificationRouter.use(authenticateDriver);
+
+// Pure read of what's currently on file — not gated by requireReplicateConfigured (no Replicate
+// call involved) unlike the three verify/OCR routes below. Backs the driver app's Documents screen.
+driverVerificationRouter.get("/verification/status", asyncHandler(getDriverVerificationStatusController));
 
 driverVerificationRouter.post(
   "/verification/vehicle-photo",

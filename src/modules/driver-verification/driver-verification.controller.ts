@@ -2,7 +2,12 @@ import type { Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/ApiResponse";
 import { ApiError } from "../../utils/ApiError";
-import { confirmDriverLicense, ocrDriverLicense, verifyDriverVehiclePhoto } from "./driver-verification.service";
+import {
+  confirmDriverLicense,
+  getDriverVerificationStatus,
+  ocrDriverLicense,
+  verifyDriverVehiclePhoto,
+} from "./driver-verification.service";
 
 export async function verifyDriverVehiclePhotoController(req: Request, res: Response) {
   if (!req.file) {
@@ -33,4 +38,9 @@ export async function ocrDriverLicenseController(req: Request, res: Response) {
 export async function confirmDriverLicenseController(req: Request, res: Response) {
   const data = await confirmDriverLicense(req.driverAuth!.driverId, req.body);
   return sendSuccess(res, 200, "License verification completed", data);
+}
+
+export async function getDriverVerificationStatusController(req: Request, res: Response) {
+  const data = await getDriverVerificationStatus(req.driverAuth!.driverId);
+  return sendSuccess(res, 200, "Verification status fetched successfully", data);
 }

@@ -1,6 +1,7 @@
 import {
   AuditAction,
   BatchStatus,
+  NotificationLogType,
   Prisma,
   ReferenceType,
   StockMovementType,
@@ -16,6 +17,8 @@ import { generateDocumentNumber } from "../../utils/numbering";
 import { buildPagination, getPagination } from "../../utils/pagination";
 import { getAvailableStock, isLowStock } from "../../utils/stock";
 import { createAuditLog } from "../audit/audit.service";
+import { recordNotificationLog } from "../notifications/notifications.service";
+import { sendPushToOrgStaff } from "../../services/push-notification.service";
 
 interface ApplyStockMovementInput {
   organizationId: string;
@@ -205,6 +208,44 @@ export async function applyStockMovement(db: DbClient, input: ApplyStockMovement
     entityId: ledger.id,
     fields: [{ fieldKey: "note", value: input.note }],
   });
+
+  // Fire a "crossed into low stock" push to shop staff — deliberately only on the ok -> low
+  // transition (not on every movement while it stays low, which would spam staff on every sale of
+  // an already-low item) and only when stock just decreased. `sendPushToOrgStaff` wraps its own
+  // Expo call in a try/catch, so this is fire-and-forget like every other push call site in this
+  // codebase (see sales-orders.service.ts's sendPushToDriver, marketplace.service.ts's
+  // sendPushToOrgStaff) — a push failure must never fail the stock movement itself.
+  if (quantityDelta.isNegative()) {
+    const wasLowBefore = isLowStock(beforeOnHand, variant.reorderLevel, variant.minStockLevel);
+    const isLowNow = isLowStock(afterOnHand, variant.reorderLevel, variant.minStockLevel);
+    if (!wasLowBefore && isLowNow) {
+      const productLabel = variant.product.name ?? variant.name;
+      const title = "Low stock alert";
+      const body = `${productLabel} (${variant.sku}) is down to ${afterOnHand.toString()} — below its reorder level.`;
+      const notificationData = { type: "low_stock", variantId: variant.id, productId: variant.productId };
+
+      void sendPushToOrgStaff(input.organizationId, {
+        title,
+        body,
+        data: notificationData,
+        channelId: "order_alert",
+      });
+
+      // Persisted alongside the fire-and-forget push above so the mobile app's alerts-history
+      // screen has something to show beyond a transient OS notification — see
+      // notifications.service.ts. Every caller of applyStockMovement runs it inside a
+      // prisma.$transaction and passes that tx as `db`, so — unlike the network push above — this
+      // is awaited on the same client, same as the existing createAuditLog calls elsewhere in
+      // this file.
+      await recordNotificationLog(db, {
+        organizationId: input.organizationId,
+        type: NotificationLogType.LOW_STOCK,
+        title,
+        body,
+        data: notificationData,
+      });
+    }
+  }
 
   return {
     balance: updatedBalance,

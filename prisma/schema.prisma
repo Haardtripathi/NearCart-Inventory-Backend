@@ -215,6 +215,34 @@ enum StockTransferStatus {
   CANCELLED
 }
 
+// Persisted record of the same shop-staff alerts already pushed via sendPushToOrgStaff
+// (low-stock crossing, new bridged order) — see push-notification.service.ts. Pushes themselves
+// stay fire-and-forget/best-effort as before; this table exists purely so the mobile app can show
+// an alerts history screen instead of only ever seeing a fire-and-forget OS notification. Written
+// alongside (not instead of) the push call at both existing call sites (inventory.service.ts's
+// applyStockMovement, marketplace.service.ts's createBridgedSalesOrder). organizationId-scoped,
+// not per-user, since sendPushToOrgStaff itself already fans out to every active member of the
+// org rather than targeting one user.
+enum NotificationLogType {
+  LOW_STOCK
+  NEW_ORDER
+}
+
+model NotificationLog {
+  id             String              @id @default(cuid())
+  organizationId String
+  type           NotificationLogType
+  title          String
+  body           String
+  data           Json?
+  readAt         DateTime?
+  createdAt      DateTime            @default(now())
+  organization   Organization        @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, readAt])
+}
+
 model User {
   id                      String                   @id @default(cuid())
   fullName                String
@@ -289,6 +317,7 @@ model Organization {
   stockTransfers   StockTransfer[]
   auditLogs        AuditLog[]
   userActionTokens UserActionToken[]
+  notificationLogs NotificationLog[]
 
   @@index([deletedAt])
 }
@@ -1073,6 +1102,13 @@ model SalesOrder {
   deliveredAt            DateTime?
   assignedAt             DateTime?
   pickedUpAt             DateTime?
+  // Delivery-proof photo captured by the driver app right before calling POST
+  // /driver/orders/:id/deliver (see driver-orders.service.ts's deliverDriverOrder) — optional
+  // multipart upload on that same call, stored via the existing uploads/uploads.service.ts
+  // Cloudinary helper. Both nullable: pre-existing DELIVERED rows and any deliver call made
+  // without a photo (e.g. a retrying client) simply have no proof on file.
+  deliveryProofPhotoUrl  String?
+  deliveryProofPhotoAt   DateTime?
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
   organization           Organization     @relation(fields: [organizationId], references: [id])

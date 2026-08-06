@@ -96,6 +96,12 @@ const envSchema = z
     // Max distance (km) a driver's last known location may be from a branch's pickup point to be
     // considered for nearest-free-driver auto-assignment (see sales-orders driver-matching logic).
     DRIVER_MATCH_RADIUS_KM: z.coerce.number().positive().default(15),
+    // Flat per-delivery payout used to compute the driver app's earnings dashboard
+    // (modules/driver-orders's earnings-summary endpoint). There's no per-order delivery-fee
+    // column anywhere in the schema yet — deliveries are costed at this single flat rate rather
+    // than inventing a new financial field mid-flight while another agent may be touching
+    // schema.prisma concurrently. Revisit once a real fee model exists.
+    DRIVER_DELIVERY_FEE: z.coerce.number().nonnegative().default(30),
     // Driver access-token lifetime is deliberately short (unlike JWT_EXPIRES_IN's 7d default for
     // org staff) now that DriverRefreshToken (see utils/driverRefreshToken.ts) provides real
     // months-long session longevity via rotation — the access token only needs to bridge the gap

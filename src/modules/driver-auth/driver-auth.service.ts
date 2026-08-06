@@ -63,6 +63,7 @@ function serializeDriver(driver: {
   vehicleNumber: string;
   status: DriverStatus;
   emailVerified: boolean;
+  isAvailableForAssignment: boolean;
 }) {
   return {
     id: driver.id,
@@ -73,6 +74,13 @@ function serializeDriver(driver: {
     vehicleNumber: driver.vehicleNumber,
     status: driver.status,
     emailVerified: driver.emailVerified,
+    // Round 3: the driver app's Home screen used to always initialize its online/offline toggle
+    // to `false` on every app launch regardless of the real PATCH /driver/availability state left
+    // over from the previous session — a driver who force-quit the app while online looked
+    // "offline" in their own UI (while still actually matchable server-side) until they manually
+    // toggled it. Included here (login/refresh/register responses) so the client can initialize
+    // from the real value instead of guessing.
+    isAvailableForAssignment: driver.isAvailableForAssignment,
   };
 }
 

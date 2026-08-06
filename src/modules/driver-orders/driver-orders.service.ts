@@ -1,10 +1,12 @@
 import { AuditAction, SalesOrderStatus } from "@prisma/client";
 
+import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { createAuditLog } from "../audit/audit.service";
 import { notifyOrderEvent } from "../../services/order-event-webhook.service";
 import { upsertDeviceToken } from "../../services/device-tokens.service";
+import { uploadImageToCloudinary } from "../uploads/uploads.service";
 import { assignDriverToSalesOrder, findNearestFreeDriver } from "../sales-orders/sales-orders.service";
 
 const DRIVER_VISIBLE_STATUSES: SalesOrderStatus[] = [SalesOrderStatus.READY, SalesOrderStatus.OUT_FOR_DELIVERY];
@@ -30,6 +32,10 @@ function serializeDriverOrder(order: Awaited<ReturnType<typeof findAssignedOrder
       city: order.branch.city,
       state: order.branch.state,
       postalCode: order.branch.postalCode,
+      // Pickup-point coordinates for the driver app's map screen — see Branch.latitude/longitude
+      // doc comment. Nullable for branches that predate that column / never had it backfilled.
+      latitude: order.branch.latitude,
+      longitude: order.branch.longitude,
     },
     customer: order.customer
       ? {
@@ -53,6 +59,7 @@ function serializeDriverOrder(order: Awaited<ReturnType<typeof findAssignedOrder
     readyAt: order.readyAt,
     pickedUpAt: order.pickedUpAt,
     deliveredAt: order.deliveredAt,
+    deliveryProofPhotoUrl: order.deliveryProofPhotoUrl,
   };
 }
 
@@ -154,11 +161,34 @@ export async function pickupDriverOrder(driverId: string, orderId: string) {
   return serializeDriverOrder(updated);
 }
 
-export async function deliverDriverOrder(driverId: string, orderId: string) {
+/**
+ * `photo`, when provided, is a delivery-proof snapshot captured by the driver app right before
+ * confirming drop-off — uploaded to Cloudinary BEFORE the transaction below (an external network
+ * call has no business holding a DB transaction open), so a failed upload throws and the order
+ * simply stays OUT_FOR_DELIVERY, same as any other pre-transaction failure. Optional: a driver
+ * without a working camera/upload still needs to be able to mark an order delivered, so this
+ * never blocks the status transition itself.
+ */
+export async function deliverDriverOrder(
+  driverId: string,
+  orderId: string,
+  photo?: { buffer: Buffer; originalname: string },
+) {
   const order = await findAssignedOrder(driverId, orderId);
 
   if (order.status !== SalesOrderStatus.OUT_FOR_DELIVERY) {
     throw ApiError.badRequest("Only orders that are OUT_FOR_DELIVERY can be marked delivered");
+  }
+
+  let deliveryProofPhotoUrl: string | undefined;
+  if (photo) {
+    const upload = await uploadImageToCloudinary({
+      fileBuffer: photo.buffer,
+      originalFilename: photo.originalname,
+      scope: "general",
+      ownerId: `driver-${driverId}`,
+    });
+    deliveryProofPhotoUrl = upload.url;
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -169,6 +199,9 @@ export async function deliverDriverOrder(driverId: string, orderId: string) {
       data: {
         status: SalesOrderStatus.DELIVERED,
         deliveredAt: new Date(),
+        ...(deliveryProofPhotoUrl
+          ? { deliveryProofPhotoUrl, deliveryProofPhotoAt: new Date() }
+          : {}),
       },
     });
 
@@ -280,6 +313,19 @@ export async function declineDriverOrder(driverId: string, orderId: string) {
     console.warn(`[driver-orders] Re-assignment after decline failed for order ${updated.id}`, error);
   }
 
+  // No replacement driver found (or re-assignment attempt failed) — the order is back to
+  // unassigned READY. Without this, NearCart never learns the assignment was reversed and keeps
+  // showing the declining driver's stale name/phone on the order until some later event
+  // overwrites it (see the matching DRIVER_UNASSIGNED branch added to NearCart's
+  // applyInventoryOrderEvent). Fire-and-forget, same resilience posture as every other call here.
+  if (updated.externalOrderId) {
+    void notifyOrderEvent({
+      externalOrderId: updated.externalOrderId,
+      status: updated.status,
+      eventType: "DRIVER_UNASSIGNED",
+    });
+  }
+
   return serializeDriverOrder(updated);
 }
 
@@ -320,4 +366,259 @@ export async function registerDriverDeviceTokenForDriver(
   input: { expoPushToken: string; platform?: string },
 ) {
   return upsertDeviceToken("DRIVER", driverId, input);
+}
+
+const DRIVER_HISTORY_PAGE_SIZE = 20;
+
+/**
+ * GET /driver/orders/history — DELIVERED orders assigned to the calling driver, newest first.
+ * A separate call from GET /driver/orders (which only ever returns READY/OUT_FOR_DELIVERY, see
+ * DRIVER_VISIBLE_STATUSES above) rather than widening that one, since the "active deliveries"
+ * list and a "past deliveries" history feed have different UX needs (pagination here, none there).
+ */
+export async function listDriverOrderHistory(driverId: string, page: number) {
+  const safePage = Math.max(1, page);
+  const skip = (safePage - 1) * DRIVER_HISTORY_PAGE_SIZE;
+
+  const [orders, total] = await Promise.all([
+    prisma.salesOrder.findMany({
+      where: { assignedDriverId: driverId, status: SalesOrderStatus.DELIVERED },
+      include: { items: true, branch: true, customer: true, organization: true },
+      orderBy: { deliveredAt: "desc" },
+      skip,
+      take: DRIVER_HISTORY_PAGE_SIZE,
+    }),
+    prisma.salesOrder.count({
+      where: { assignedDriverId: driverId, status: SalesOrderStatus.DELIVERED },
+    }),
+  ]);
+
+  return {
+    orders: orders.map((order) => serializeDriverOrder(order)),
+    page: safePage,
+    pageSize: DRIVER_HISTORY_PAGE_SIZE,
+    total,
+    hasMore: skip + orders.length < total,
+  };
+}
+
+export type DriverEarningsRange = "today" | "week" | "month" | "all";
+
+/** Midnight in the server's local timezone — good enough for a "today so far" cutoff without
+ *  pulling in a timezone library for a single driver-facing dashboard. */
+function startOfLocalDay(reference: Date): Date {
+  const start = new Date(reference);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function rangeStartDate(range: DriverEarningsRange, now: Date): Date | null {
+  const startOfToday = startOfLocalDay(now);
+  switch (range) {
+    case "today":
+      return startOfToday;
+    case "week": {
+      // ISO-ish "last 7 days including today" rather than calendar-week-so-far — simpler and
+      // matches what a driver actually wants to see ("how did the last week go").
+      const start = new Date(startOfToday);
+      start.setDate(start.getDate() - 6);
+      return start;
+    }
+    case "month": {
+      const start = new Date(startOfToday);
+      start.setDate(start.getDate() - 29);
+      return start;
+    }
+    case "all":
+    default:
+      return null;
+  }
+}
+
+/**
+ * GET /driver/earnings/summary?range=today|week|month|all — computed entirely from data already
+ * on hand (DELIVERED SalesOrder rows assigned to this driver) rather than a new ledger/earnings
+ * table: there's no per-order delivery-fee column anywhere in the schema, so each delivery is
+ * costed at the flat `DRIVER_DELIVERY_FEE` env rate (see config/env.ts's doc comment on that var)
+ * — a deliberately simple placeholder rather than a speculative new financial model bolted on
+ * while another agent may be touching schema.prisma concurrently. `perDay` is a small array (at
+ * most 30 entries for `month`) suitable for a sparkline/bar chart on the driver app's earnings
+ * screen.
+ */
+export async function getDriverEarningsSummary(driverId: string, range: DriverEarningsRange) {
+  const now = new Date();
+  const startDate = rangeStartDate(range, now);
+
+  const deliveredOrders = await prisma.salesOrder.findMany({
+    where: {
+      assignedDriverId: driverId,
+      status: SalesOrderStatus.DELIVERED,
+      ...(startDate ? { deliveredAt: { gte: startDate } } : {}),
+    },
+    select: { id: true, orderNumber: true, deliveredAt: true, branch: { select: { name: true } } },
+    orderBy: { deliveredAt: "desc" },
+  });
+
+  const feePerDelivery = env.DRIVER_DELIVERY_FEE;
+
+  const perDayMap = new Map<string, { date: string; deliveries: number; earnings: number }>();
+  for (const order of deliveredOrders) {
+    if (!order.deliveredAt) continue;
+    const dateKey = order.deliveredAt.toISOString().slice(0, 10);
+    const existing = perDayMap.get(dateKey) ?? { date: dateKey, deliveries: 0, earnings: 0 };
+    existing.deliveries += 1;
+    existing.earnings += feePerDelivery;
+    perDayMap.set(dateKey, existing);
+  }
+
+  const perDay = Array.from(perDayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  const [lifetimeDeliveries] = await Promise.all([
+    prisma.salesOrder.count({
+      where: { assignedDriverId: driverId, status: SalesOrderStatus.DELIVERED },
+    }),
+  ]);
+
+  return {
+    range,
+    feePerDelivery,
+    totalDeliveries: deliveredOrders.length,
+    totalEarnings: deliveredOrders.length * feePerDelivery,
+    perDay,
+    recentDeliveries: deliveredOrders.slice(0, 10).map((order) => ({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      branchName: order.branch.name,
+      deliveredAt: order.deliveredAt,
+      earning: feePerDelivery,
+    })),
+    lifetime: {
+      totalDeliveries: lifetimeDeliveries,
+      totalEarnings: lifetimeDeliveries * feePerDelivery,
+    },
+  };
+}
+
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * GET /driver/performance/summary?range=today|week|month|all — added for the driver app's Round 2
+ * "weekly/monthly performance" screen. Deliberately does NOT report a rating: confirmed by reading
+ * this file's schema (Driver/SalesOrder) that no rating field exists anywhere yet, so this sticks
+ * to metrics derivable from timestamps already on SalesOrder (assignedAt/pickedUpAt/deliveredAt) —
+ * average pickup-to-drop-off duration, a weekday breakdown, and a "days with at least one delivery"
+ * streak — rather than inventing a fake rating number.
+ *
+ * `avgDeliveryMinutes`/`fastestDeliveryMinutes` are computed only from orders that have both
+ * pickedUpAt and deliveredAt set (true for every order delivered through the normal pickup->deliver
+ * flow; excludes any pre-migration or manually-edited row missing one of those). Streaks are
+ * intentionally computed over the driver's ENTIRE delivery history, not clipped to `range` — a
+ * "your current streak" stat that resets to 0 just because you picked "This week" would be
+ * confusing, not useful.
+ */
+export async function getDriverPerformanceSummary(driverId: string, range: DriverEarningsRange) {
+  const now = new Date();
+  const startDate = rangeStartDate(range, now);
+
+  const [rangeOrders, allDeliveredDates] = await Promise.all([
+    prisma.salesOrder.findMany({
+      where: {
+        assignedDriverId: driverId,
+        status: SalesOrderStatus.DELIVERED,
+        ...(startDate ? { deliveredAt: { gte: startDate } } : {}),
+      },
+      select: { pickedUpAt: true, deliveredAt: true },
+    }),
+    prisma.salesOrder.findMany({
+      where: { assignedDriverId: driverId, status: SalesOrderStatus.DELIVERED, deliveredAt: { not: null } },
+      select: { deliveredAt: true },
+      orderBy: { deliveredAt: "desc" },
+    }),
+  ]);
+
+  const durationsMinutes: number[] = [];
+  const perWeekdayCounts = new Array(7).fill(0) as number[];
+
+  for (const order of rangeOrders) {
+    if (order.deliveredAt) {
+      const weekdayIndex = order.deliveredAt.getDay();
+      perWeekdayCounts[weekdayIndex] = (perWeekdayCounts[weekdayIndex] ?? 0) + 1;
+    }
+    if (order.pickedUpAt && order.deliveredAt) {
+      const minutes = (order.deliveredAt.getTime() - order.pickedUpAt.getTime()) / 60_000;
+      if (minutes >= 0) {
+        durationsMinutes.push(minutes);
+      }
+    }
+  }
+
+  const avgDeliveryMinutes =
+    durationsMinutes.length > 0
+      ? Math.round(durationsMinutes.reduce((sum, value) => sum + value, 0) / durationsMinutes.length)
+      : null;
+  const fastestDeliveryMinutes = durationsMinutes.length > 0 ? Math.round(Math.min(...durationsMinutes)) : null;
+
+  const perWeekday = WEEKDAY_LABELS.map((label, index) => ({
+    weekday: index,
+    label,
+    deliveries: perWeekdayCounts[index] ?? 0,
+  }));
+
+  // Distinct local-day keys (YYYY-MM-DD) with >=1 delivery, across all-time history, newest first —
+  // used to walk backward day-by-day for both streak stats below.
+  const deliveryDayKeys = new Set(
+    allDeliveredDates
+      .map((order) => order.deliveredAt)
+      .filter((date): date is Date => date !== null)
+      .map((date) => date.toISOString().slice(0, 10)),
+  );
+  const sortedDayKeys = Array.from(deliveryDayKeys).sort((a, b) => b.localeCompare(a));
+
+  function dayKey(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  let currentStreakDays = 0;
+  {
+    const cursor = new Date(now);
+    cursor.setHours(0, 0, 0, 0);
+    // A streak "counts" today even with zero deliveries yet today (a driver checking mid-shift
+    // shouldn't see their streak drop to 0 before the day is over) — only walks back from
+    // yesterday if today itself has no delivery on file.
+    if (!deliveryDayKeys.has(dayKey(cursor))) {
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    while (deliveryDayKeys.has(dayKey(cursor))) {
+      currentStreakDays += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+  }
+
+  let bestStreakDays = 0;
+  {
+    let running = 0;
+    let previousKey: string | null = null;
+    for (let i = sortedDayKeys.length - 1; i >= 0; i -= 1) {
+      const key = sortedDayKeys[i]!;
+      if (previousKey === null) {
+        running = 1;
+      } else {
+        const previousDate = new Date(`${previousKey}T00:00:00`);
+        previousDate.setDate(previousDate.getDate() + 1);
+        running = dayKey(previousDate) === key ? running + 1 : 1;
+      }
+      bestStreakDays = Math.max(bestStreakDays, running);
+      previousKey = key;
+    }
+  }
+
+  return {
+    range,
+    totalDeliveries: rangeOrders.length,
+    avgDeliveryMinutes,
+    fastestDeliveryMinutes,
+    perWeekday,
+    currentStreakDays,
+    bestStreakDays,
+  };
 }

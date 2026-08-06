@@ -1,4 +1,12 @@
-import { AuditAction, LanguageCode, OrderSource, ProductStatus, Prisma, SalesOrderStatus } from "@prisma/client";
+import {
+  AuditAction,
+  LanguageCode,
+  NotificationLogType,
+  OrderSource,
+  ProductStatus,
+  Prisma,
+  SalesOrderStatus,
+} from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
 import { env } from "../../config/env";
@@ -17,6 +25,7 @@ import { getAvailableStock, isLowStock } from "../../utils/stock";
 import { isUniqueConstraintError } from "../../utils/prismaErrors";
 import { createAuditLog } from "../audit/audit.service";
 import { cancelSalesOrder } from "../sales-orders/sales-orders.service";
+import { recordNotificationLog } from "../notifications/notifications.service";
 import { sendPushToOrgStaff } from "../../services/push-notification.service";
 
 type RequestedLocaleOptions = {
@@ -979,13 +988,33 @@ export async function createBridgedSalesOrder(
     // leading `organizationMembership`/`deviceToken` lookups are not guarded, so a transient DB
     // error there would otherwise become an unhandled promise rejection on this fire-and-forget
     // call and crash the process (same bug class documented elsewhere this session).
+    const pushTitle = "New order received";
+    const pushBody = `Order #${created.orderNumber} — ${preparedItems.length} item(s), ${created.total.toString()} total.`;
+    const pushData = { salesOrderId: created.id };
+
     void sendPushToOrgStaff(organizationId, {
-      title: "New order received",
-      body: `Order #${created.orderNumber} — ${preparedItems.length} item(s), ${created.total.toString()} total.`,
-      data: { salesOrderId: created.id },
+      title: pushTitle,
+      body: pushBody,
+      data: pushData,
       channelId: "order_alert",
     }).catch((error) => {
       console.warn(`[marketplace] Failed to notify org staff of new order ${created.id}`, error);
+    });
+
+    // Persisted alongside the push above so the mobile app's alerts-history screen has something
+    // to show beyond a transient OS notification — see notifications.service.ts. Runs after the
+    // creating transaction has already committed (this whole block is outside the
+    // prisma.$transaction above), so this uses the plain `prisma` client, not a tx — and is
+    // fire-and-forget for the same reason as the push it accompanies: a failure here must never
+    // fail order creation, which has already succeeded by this point regardless.
+    void recordNotificationLog(prisma, {
+      organizationId,
+      type: NotificationLogType.NEW_ORDER,
+      title: pushTitle,
+      body: pushBody,
+      data: pushData,
+    }).catch((error) => {
+      console.warn(`[marketplace] Failed to record new-order notification log for order ${created.id}`, error);
     });
 
     return { ...summarizeSalesOrder(created), created: true as const };

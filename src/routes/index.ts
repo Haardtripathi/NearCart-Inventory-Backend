@@ -27,6 +27,8 @@ import { driverAuthRouter } from "../modules/driver-auth/driver-auth.route";
 import { driverOrdersRouter } from "../modules/driver-orders/driver-orders.route";
 import { driversRouter } from "../modules/drivers/drivers.route";
 import { driverVerificationRouter } from "../modules/driver-verification/driver-verification.route";
+import { analyticsRouter } from "../modules/analytics/analytics.route";
+import { notificationsRouter } from "../modules/notifications/notifications.route";
 
 export const apiRouter = Router();
 
@@ -63,3 +65,5 @@ apiRouter.use("/driver-auth", driverAuthRouter);
 apiRouter.use("/driver", driverOrdersRouter);
 apiRouter.use("/driver", driverVerificationRouter);
 apiRouter.use("/drivers", driversRouter);
+apiRouter.use("/analytics", analyticsRouter);
+apiRouter.use("/notifications", notificationsRouter);

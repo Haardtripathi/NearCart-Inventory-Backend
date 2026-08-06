@@ -1,6 +1,7 @@
 import Replicate from "replicate";
 
 import { env } from "../config/env";
+import { ApiError } from "../utils/ApiError";
 
 export function isReplicateConfigured(): boolean {
   return Boolean(env.REPLICATE_API_TOKEN);
@@ -55,13 +56,27 @@ function parseJsonFromModelOutput(output: unknown): ModelJsonResponse | null {
 }
 
 async function runVisionPrompt(imageUrl: string, prompt: string): Promise<ModelJsonResponse | null> {
-  const output = await getClient().run(VISION_MODEL, {
-    input: {
-      image: imageUrl,
-      prompt,
-      max_tokens: 512,
-    },
-  });
+  let output: unknown;
+
+  try {
+    output = await getClient().run(VISION_MODEL, {
+      input: {
+        image: imageUrl,
+        prompt,
+        max_tokens: 512,
+      },
+    });
+  } catch (error) {
+    // A raw Replicate/model failure (rate limit, model-side error, transient outage) previously
+    // bubbled up as an uncaught 500 with the third-party error string forwarded straight to the
+    // client (e.g. "Prediction failed: mean must have 1 elements...") — the wrong status code (this
+    // isn't our bug) and a message no driver/shop-owner could act on. Log the real cause
+    // server-side, surface a clean 503 instead.
+    console.error("[replicate] Vision prediction failed:", error);
+    throw ApiError.serviceUnavailable(
+      "Photo verification service is temporarily unavailable. Please try again in a moment.",
+    );
+  }
 
   return parseJsonFromModelOutput(output);
 }

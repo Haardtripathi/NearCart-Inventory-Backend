@@ -110,6 +110,23 @@ async function upsertBatch(db: DbClient, input: {
   });
 }
 
+// Two concurrent applyStockMovement calls against the SAME organizationId+branchId+variantId
+// (e.g. two staff members confirming two different sales orders for the same product at the same
+// branch, or a sale confirm racing a manual adjustment) previously read `InventoryBalance` once,
+// computed the new onHand/reserved in JS, and wrote it back unconditionally. That's a classic
+// read-modify-write race: both transactions can read the same "before" row, both pass the
+// negative-stock guard against that same stale snapshot, and whichever `update` commits last wins
+// — silently discarding the other's delta (a lost update) while BOTH still get an
+// `InventoryLedger` row claiming a successful movement with a `beforeOnHand` that was only true
+// for one of them. Net effect: onHand drifts from the true sum of its own ledger, and the
+// negative-stock guard can be defeated in practice (e.g. onHand=5, two concurrent SALEs of 4 each
+// can both pass the guard against the same stale beforeOnHand=5, even though combined demand of 8
+// exceeds the 5 actually on hand). Fixed the same way this module's own sales-orders.service.ts
+// already fixes analogous races (confirmSalesOrder/markSalesOrderReady/assignDriverToSalesOrder):
+// an atomic compare-and-swap `updateMany` guarded on the exact row values just read, retried with
+// a fresh read on conflict instead of trusting the earlier read to still be current.
+const BALANCE_CAS_MAX_ATTEMPTS = 5;
+
 export async function applyStockMovement(db: DbClient, input: ApplyStockMovementInput) {
   await assertBranchInOrg(db, input.organizationId, input.branchId);
   const variant = await assertVariantInOrg(db, input.organizationId, input.variantId);
@@ -121,51 +138,89 @@ export async function applyStockMovement(db: DbClient, input: ApplyStockMovement
   const quantityDelta = toDecimal(input.quantityDelta);
   const reservedDelta = toDecimal(input.reservedDelta);
 
-  const balance = await db.inventoryBalance.findUnique({
-    where: {
-      organizationId_branchId_variantId: {
-        organizationId: input.organizationId,
-        branchId: input.branchId,
-        variantId: input.variantId,
-      },
-    },
-  });
+  // Initialized (rather than left definitely-unassigned) purely to satisfy TS's definite-
+  // assignment analysis across the loop below — always overwritten on the first iteration since
+  // BALANCE_CAS_MAX_ATTEMPTS > 0, these placeholder values are never actually read.
+  let beforeOnHand: Prisma.Decimal = toDecimal(0);
+  let beforeReserved: Prisma.Decimal = toDecimal(0);
+  let afterOnHand: Prisma.Decimal = toDecimal(0);
+  let afterReserved: Prisma.Decimal = toDecimal(0);
+  let updatedBalance: Awaited<ReturnType<typeof db.inventoryBalance.findUniqueOrThrow>> | null = null;
 
-  const beforeOnHand = toDecimal(balance?.onHand);
-  const beforeReserved = toDecimal(balance?.reserved);
-  const afterOnHand = beforeOnHand.plus(quantityDelta);
-  const afterReserved = beforeReserved.plus(reservedDelta);
-  const availableAfter = getAvailableStock(afterOnHand, afterReserved);
-
-  if (afterReserved.isNegative()) {
-    throw ApiError.badRequest("Reserved stock cannot become negative");
-  }
-
-  if ((afterOnHand.isNegative() || availableAfter.isNegative()) && !variant.product.allowNegativeStock) {
-    throw ApiError.badRequest("Insufficient stock available for this movement");
-  }
-
-  const updatedBalance = balance
-    ? await db.inventoryBalance.update({
-        where: {
-          id: balance.id,
-        },
-        data: {
-          onHand: afterOnHand,
-          reserved: afterReserved,
-        },
-      })
-    : await db.inventoryBalance.create({
-        data: {
+  for (let attempt = 0; attempt < BALANCE_CAS_MAX_ATTEMPTS && !updatedBalance; attempt++) {
+    const balance = await db.inventoryBalance.findUnique({
+      where: {
+        organizationId_branchId_variantId: {
           organizationId: input.organizationId,
           branchId: input.branchId,
-          productId: variant.productId,
           variantId: input.variantId,
-          onHand: afterOnHand,
-          reserved: afterReserved,
-          incoming: 0,
         },
-      });
+      },
+    });
+
+    beforeOnHand = toDecimal(balance?.onHand);
+    beforeReserved = toDecimal(balance?.reserved);
+    afterOnHand = beforeOnHand.plus(quantityDelta);
+    afterReserved = beforeReserved.plus(reservedDelta);
+    const availableAfter = getAvailableStock(afterOnHand, afterReserved);
+
+    if (afterReserved.isNegative()) {
+      throw ApiError.badRequest("Reserved stock cannot become negative");
+    }
+
+    if ((afterOnHand.isNegative() || availableAfter.isNegative()) && !variant.product.allowNegativeStock) {
+      throw ApiError.badRequest("Insufficient stock available for this movement");
+    }
+
+    if (!balance) {
+      try {
+        updatedBalance = await db.inventoryBalance.create({
+          data: {
+            organizationId: input.organizationId,
+            branchId: input.branchId,
+            productId: variant.productId,
+            variantId: input.variantId,
+            onHand: afterOnHand,
+            reserved: afterReserved,
+            incoming: 0,
+          },
+        });
+      } catch (error) {
+        // Another concurrent movement created the balance row between our findUnique and this
+        // create (unique constraint on organizationId+branchId+variantId) — loop again, the next
+        // iteration's findUnique will see it and take the update-CAS branch below instead.
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) {
+          throw error;
+        }
+      }
+      continue;
+    }
+
+    // Compare-and-swap: only apply if onHand/reserved still match what we just read. If another
+    // transaction committed a movement in between, `count` is 0 and we retry with a fresh read
+    // instead of blindly overwriting with a value computed from stale data.
+    const { count } = await db.inventoryBalance.updateMany({
+      where: {
+        id: balance.id,
+        onHand: balance.onHand,
+        reserved: balance.reserved,
+      },
+      data: {
+        onHand: afterOnHand,
+        reserved: afterReserved,
+      },
+    });
+
+    if (count > 0) {
+      updatedBalance = await db.inventoryBalance.findUniqueOrThrow({ where: { id: balance.id } });
+    }
+  }
+
+  if (!updatedBalance) {
+    throw ApiError.conflict(
+      "Stock balance is being updated concurrently — please retry this movement",
+    );
+  }
 
   const batch = input.batchNumber
     ? await upsertBatch(db, {

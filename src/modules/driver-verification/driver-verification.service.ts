@@ -1,14 +1,65 @@
 import { AuditAction, DriverVerificationStatus } from "@prisma/client";
 
 import { prisma } from "../../config/prisma";
+import { getRedisClient } from "../../config/redis";
 import { ApiError } from "../../utils/ApiError";
 import { createAuditLog } from "../audit/audit.service";
 import { uploadImageToCloudinary } from "../uploads/uploads.service";
 import { nameSimilarity } from "../../services/google-places.service";
-import { assessVehiclePhoto, extractLicenseFields } from "../../services/replicate.service";
+import { assessVehiclePhoto, extractLicenseFields, type LicenseOcrResult } from "../../services/replicate.service";
 
 function normalizeForCompare(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// Vision-model OCR reads are not perfectly deterministic — two independent calls on the exact
+// same license photo can disagree on a field (confirmed live: dob/licenseNumber differed across
+// consecutive calls on the same test image). Re-running OCR from scratch in /license/confirm to
+// diff against it meant a driver could submit exactly what /license told them and still get
+// spuriously FLAGGED_MISMATCH from the *second* call's different reading. Fix: cache the first
+// call's extraction in Redis (short TTL, one-time use, keyed by driver+photoUrl so a stale/
+// mismatched cache entry is never used) and diff /confirm against that instead of a fresh call.
+// This doesn't weaken the identity check — it's still a genuine independent extraction from the
+// real photo, just the first one instead of a flakier second one — and it saves a Replicate call.
+// Redis is optional infra here (unlike OTP codes, which fail closed without it): if it's
+// unavailable or the cache entry is missing/expired/mismatched, /confirm falls back to running
+// OCR fresh, exactly like before this fix.
+const LICENSE_OCR_DRAFT_TTL_SECONDS = 30 * 60;
+
+function licenseOcrDraftKey(driverId: string) {
+  return `driver-license-ocr-draft:${driverId}`;
+}
+
+interface LicenseOcrDraft {
+  photoUrl: string;
+  extracted: LicenseOcrResult["extracted"];
+  clarityOk: boolean;
+}
+
+async function cacheLicenseOcrDraft(driverId: string, draft: LicenseOcrDraft) {
+  const redis = getRedisClient();
+  if (!redis) return;
+
+  await redis.set(licenseOcrDraftKey(driverId), JSON.stringify(draft), "EX", LICENSE_OCR_DRAFT_TTL_SECONDS);
+}
+
+/** Returns the cached first-pass OCR draft only if it matches the photo being confirmed; consumes it (one-time use) either way it's found. */
+async function takeLicenseOcrDraft(driverId: string, photoUrl: string): Promise<LicenseOcrDraft | null> {
+  const redis = getRedisClient();
+  if (!redis) return null;
+
+  const key = licenseOcrDraftKey(driverId);
+  const raw = await redis.get(key);
+  if (!raw) return null;
+
+  await redis.del(key);
+
+  try {
+    const draft = JSON.parse(raw) as LicenseOcrDraft;
+    return draft.photoUrl === photoUrl ? draft : null;
+  } catch {
+    return null;
+  }
 }
 
 async function getDriverOrThrow(driverId: string) {
@@ -168,6 +219,10 @@ export async function ocrDriverLicense(
     data: { licensePhotoUrl: upload.url },
   });
 
+  // Cache this extraction so /license/confirm can diff against it instead of re-running OCR
+  // (which isn't deterministic across calls — see LICENSE_OCR_DRAFT_TTL_SECONDS comment above).
+  await cacheLicenseOcrDraft(driverId, { photoUrl: upload.url, extracted: ocr.extracted, clarityOk: ocr.clarityOk });
+
   return {
     extracted: ocr.extracted,
     clarityOk: ocr.clarityOk,
@@ -194,10 +249,14 @@ const MATCH_SCORE_VERIFIED_THRESHOLD = 0.75;
 const REQUIRED_MATCH_FIELDS = ["name", "licenseNumber"];
 
 /**
- * POST /driver/verification/license/confirm — gated by requireReplicateConfigured upstream (the
- * re-verification step still needs a fresh OCR pass to compare against). Re-runs OCR on the same
- * photoUrl the driver is confirming against, diffs it field-by-field against the (possibly
- * corrected) submitted values, and persists the final result.
+ * POST /driver/verification/license/confirm — gated by requireReplicateConfigured upstream.
+ * Diffs the (possibly corrected) submitted values field-by-field against an independent OCR
+ * extraction of the same photo, and persists the final result. Prefers the extraction already
+ * cached from the driver's own /license call (see takeLicenseOcrDraft above) over running OCR
+ * again — a second fresh call on the same image isn't guaranteed to agree with the first
+ * (vision-model nondeterminism), which previously could flag a truthful resubmission as a
+ * mismatch. Falls back to a fresh OCR call if no matching cached draft exists (expired, Redis
+ * unavailable, or the driver is confirming a different photoUrl than they last ran /license on).
  */
 export async function confirmDriverLicense(
   driverId: string,
@@ -205,7 +264,8 @@ export async function confirmDriverLicense(
 ): Promise<ConfirmLicenseResult> {
   const driver = await getDriverOrThrow(driverId);
 
-  const ocr = await extractLicenseFields(input.photoUrl);
+  const cachedDraft = await takeLicenseOcrDraft(driverId, input.photoUrl);
+  const ocr = cachedDraft ?? (await extractLicenseFields(input.photoUrl));
 
   const fieldChecks: Array<{ field: string; matches: boolean }> = [
     {

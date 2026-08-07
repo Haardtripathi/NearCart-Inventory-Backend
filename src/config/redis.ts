@@ -7,7 +7,17 @@ type RedisCallArg = string | number;
 export interface AppRedisClient {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, mode?: "EX", ttlSeconds?: number): Promise<"OK" | null>;
+  // `call()` is for passing arbitrary/opaque commands straight through (e.g. rate-limit-redis's
+  // EVALSHA scripts, whose first arg is a script hash, not a key) — it deliberately does NOT key-
+  // prefix its arguments, since it has no way to know which args (if any) are keys. `del`/`ttl`
+  // exist as separate, properly key-prefixed methods for the common case of operating on a single
+  // known key (see the bug this fixed: otp.ts and driver-verification.service.ts were calling
+  // `call("DEL"/"TTL", key)` expecting prefixing, which silently no-op'd under the Upstash REST
+  // backend — the real prefixed key was never touched, so e.g. verified OTP codes stayed valid/
+  // reusable until natural TTL expiry instead of being invalidated on use).
   call(command: string, ...args: RedisCallArg[]): Promise<unknown>;
+  del(key: string): Promise<number>;
+  ttl(key: string): Promise<number>;
   status: "ready" | "connecting" | "end";
   connect(): Promise<void>;
   quit(): Promise<void>;
@@ -81,6 +91,16 @@ class UpstashRestRedisClient implements AppRedisClient {
     return this.runCommand(command, args);
   }
 
+  async del(key: string) {
+    const result = await this.runCommand("DEL", [this.normalizeKey(key)]);
+    return Number(result) || 0;
+  }
+
+  async ttl(key: string) {
+    const result = await this.runCommand("TTL", [this.normalizeKey(key)]);
+    return Number(result);
+  }
+
   async connect() {
     this.status = "connecting";
     await this.runCommand("PING");
@@ -121,6 +141,14 @@ class IoredisClientAdapter implements AppRedisClient {
 
   async call(command: string, ...args: RedisCallArg[]) {
     return this.client.call(command, ...args.map((value) => String(value)));
+  }
+
+  async del(key: string) {
+    return this.client.del(key);
+  }
+
+  async ttl(key: string) {
+    return this.client.ttl(key);
   }
 
   async connect() {

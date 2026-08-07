@@ -93,8 +93,14 @@ export const optionalLongitudeSchema = z.preprocess(
 // Shared by both the shop-staff (`/api/users/device-token`) and driver
 // (`/api/driver/device-token`) registration endpoints — same payload shape either side of the
 // polymorphic DeviceToken model (see prisma schema: ownerType discriminates 'USER' vs 'DRIVER').
+// The prefix check isn't load-bearing (send-time code already filters non-Expo-format tokens
+// before calling Expo's API) but rejecting junk at registration gives the client immediate,
+// actionable feedback instead of a silent no-op days later when a push never arrives.
 export const deviceTokenSchema = z.object({
-  expoPushToken: trimmedString,
+  expoPushToken: trimmedString.regex(
+    /^ExponentPushToken\[.+\]$/,
+    "expoPushToken must be a valid Expo push token (ExponentPushToken[...])",
+  ),
   platform: z.enum(["android", "ios"]).optional(),
 });
 

@@ -334,6 +334,24 @@ export async function postPurchase(organizationId: string, purchaseId: string, a
   }
 
   const posted = await prisma.$transaction(async (tx) => {
+    // Bug fixed: same TOCTOU race already fixed in this session's sales-orders/stock-transfers
+    // work — this used to apply every item's stock movement FIRST and only write DRAFT -> POSTED
+    // at the end, guarded only by a pre-transaction status snapshot. Two concurrent posts of the
+    // same DRAFT receipt (double-click, or two staff members) would both pass that stale check and
+    // both apply PURCHASE movements — double-crediting the incoming stock. Claim the transition
+    // atomically first via `updateMany` so a second concurrent caller gets a conflict instead.
+    const { count } = await tx.purchaseReceipt.updateMany({
+      where: { id: purchaseId, organizationId, status: PurchaseReceiptStatus.DRAFT },
+      data: {
+        status: PurchaseReceiptStatus.POSTED,
+        receivedAt: purchase.receivedAt ?? new Date(),
+      },
+    });
+
+    if (count === 0) {
+      throw ApiError.conflict("Purchase receipt is no longer draft — it may have already been posted");
+    }
+
     for (const item of purchase.items) {
       await applyStockMovement(tx, {
         organizationId,
@@ -351,12 +369,8 @@ export async function postPurchase(organizationId: string, purchaseId: string, a
       });
     }
 
-    const updated = await tx.purchaseReceipt.update({
+    const updated = await tx.purchaseReceipt.findUniqueOrThrow({
       where: { id: purchaseId },
-      data: {
-        status: PurchaseReceiptStatus.POSTED,
-        receivedAt: purchase.receivedAt ?? new Date(),
-      },
       include: {
         supplier: true,
         branch: true,

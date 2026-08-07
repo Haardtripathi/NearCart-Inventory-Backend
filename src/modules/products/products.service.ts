@@ -788,18 +788,42 @@ export async function updateProduct(
   localeContext: LocaleContext,
 ) {
   const existing = await getProductRecordById(organizationId, productId);
+  const mergedTranslations = mergeTranslationsForUpdate(
+    existing.translations.map((translation) => ({
+      language: translation.language,
+      name: translation.name,
+      description: translation.description ?? undefined,
+    })),
+    input.translations,
+  );
+
+  // A name/description-only PATCH (no `translations` array) previously left the EN translation
+  // row stale forever: enrichWithAutoTranslations only fills in languages *missing* from the
+  // merged list, and EN already has a row from creation, so it never got regenerated. Since
+  // `getDisplayName()` (frontend) prefers the translation over the base column, this silently
+  // showed users the OLD name everywhere after a rename. EN is always an enabled language (see
+  // parseEnabledLanguages in autoTranslate.ts), so keep it in sync with the base name/description
+  // whenever the caller changed those without also supplying their own explicit EN override.
+  const callerOverrodeEnTranslation = (input.translations ?? []).some(
+    (translation) => translation.language === LanguageCode.EN,
+  );
+  const baseSyncedTranslations = callerOverrodeEnTranslation
+    ? mergedTranslations
+    : mergedTranslations.map((translation) =>
+        translation.language === LanguageCode.EN
+          ? {
+              ...translation,
+              ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+              ...(input.description !== undefined ? { description: input.description || undefined } : {}),
+            }
+          : translation,
+      );
+
   const translations = await enrichWithAutoTranslations<ProductTranslationInput>({
     organizationId,
     baseName: input.name ?? existing.name,
     baseDescription: input.description ?? existing.description ?? undefined,
-    existingTranslations: mergeTranslationsForUpdate(
-      existing.translations.map((translation) => ({
-        language: translation.language,
-        name: translation.name,
-        description: translation.description ?? undefined,
-      })),
-      input.translations,
-    ),
+    existingTranslations: baseSyncedTranslations,
   });
   await validateProductReferences(organizationId, input);
 

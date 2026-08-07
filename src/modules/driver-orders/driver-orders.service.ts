@@ -114,7 +114,10 @@ export async function pickupDriverOrder(driverId: string, orderId: string) {
   const updated = await prisma.$transaction(async (tx) => {
     // Guard against two concurrent pickup calls for the same order (e.g. a flaky mobile client
     // retrying the request): the WHERE clause's status + assignedDriverId checks are evaluated
-    // atomically by Postgres as part of the UPDATE, so only the first caller can win.
+    // atomically as part of the single UPDATE statement (true on SQLite/libSQL just as it was on
+    // Postgres pre-migration — see sales-orders.service.ts's assignDriverToSalesOrder for the
+    // fuller writeup of why a single atomic UPDATE, not a row lock, is what actually closes this
+    // race on this engine), so only the first caller can win.
     const { count } = await tx.salesOrder.updateMany({
       where: { id: orderId, assignedDriverId: driverId, status: SalesOrderStatus.READY },
       data: {

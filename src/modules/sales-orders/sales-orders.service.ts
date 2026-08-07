@@ -500,13 +500,29 @@ export async function rejectSalesOrder(
     throw ApiError.badRequest("Only draft or pending orders can be rejected");
   }
 
-  const updated = await prisma.salesOrder.update({
-    where: { id: orderId },
+  // Bug fixed: this used to be a plain `prisma.salesOrder.update` after the status checks above,
+  // with no re-check of status at write time — a classic TOCTOU race against `confirmSalesOrder`
+  // (which DOES atomically compare-and-swap). Two concurrent requests — a staff member clicking
+  // Confirm while another clicks Reject, or the order-confirmation-sweep cron auto-rejecting the
+  // same order a staff member is confirming — could both pass their own status check against the
+  // same stale read, then confirm decrements stock and this unconditional update would overwrite
+  // status back to REJECTED afterward, leaving a REJECTED order with stock already deducted and no
+  // reversal (REJECTED is defined as "nothing was ever deducted, no reversal needed"). Guarded the
+  // same way `confirmSalesOrder`/`markSalesOrderReady` already are: an atomic `updateMany` that
+  // only succeeds if the row is still in an editable status at the moment of the write itself.
+  const { count } = await prisma.salesOrder.updateMany({
+    where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
     data: {
       status: SalesOrderStatus.REJECTED,
       rejectionReason,
     },
   });
+
+  if (count === 0) {
+    throw ApiError.conflict("Order is no longer draft/pending — it may have already been confirmed or rejected");
+  }
+
+  const updated = await prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
 
   await syncEntityFieldTranslations(prisma, {
     organizationId,
@@ -559,7 +575,41 @@ export async function cancelSalesOrder(organizationId: string, orderId: string, 
   }
 
   const cancelled = await prisma.$transaction(async (tx) => {
-    if (CANCELLABLE_STOCK_REVERSAL_STATUSES.includes(order.status)) {
+    // Bug fixed: this previously decided whether to reverse stock, and then whether to write
+    // CANCELLED at all, purely from the `order` snapshot read by `getSalesOrderById` BEFORE this
+    // transaction started — with no re-check of status at write time. That's a TOCTOU race against
+    // every other transition (confirm/reject/mark-ready/deliver), all of which DO atomically
+    // compare-and-swap their own status change. Concretely: if this order was CONFIRMED (stock
+    // already deducted) at read time but gets DELIVERED by someone else before this transaction's
+    // final `update` runs, the stale `order.status` still says CONFIRMED, so this code reverses
+    // stock for an order that was actually delivered (double-dipping the ledger) and then
+    // unconditionally overwrites DELIVERED back to CANCELLED — corrupting both the order status
+    // and the stock count for an item that was physically handed to the customer.
+    //
+    // Fixed by claiming the row atomically FIRST via `updateMany`, split into the two disjoint
+    // status sets that determine whether a reversal is owed (mirrors the same "atomic UPDATE...
+    // WHERE decides the transition" pattern already used by confirmSalesOrder/markSalesOrderReady/
+    // assignDriverToSalesOrder). Only the branch whose `updateMany` actually matched a row tells us
+    // which prior state we truly claimed — not the pre-transaction snapshot.
+    const deductedClaim = await tx.salesOrder.updateMany({
+      where: { id: orderId, organizationId, status: { in: CANCELLABLE_STOCK_REVERSAL_STATUSES } },
+      data: { status: SalesOrderStatus.CANCELLED },
+    });
+
+    const stockWasDeducted = deductedClaim.count > 0;
+
+    if (!stockWasDeducted) {
+      const undeductedClaim = await tx.salesOrder.updateMany({
+        where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
+        data: { status: SalesOrderStatus.CANCELLED },
+      });
+
+      if (undeductedClaim.count === 0) {
+        throw ApiError.conflict("Order can no longer be cancelled — its status changed concurrently");
+      }
+    }
+
+    if (stockWasDeducted) {
       for (const item of order.items) {
         await applyStockMovement(tx, {
           organizationId,
@@ -576,12 +626,7 @@ export async function cancelSalesOrder(organizationId: string, orderId: string, 
       }
     }
 
-    const updated = await tx.salesOrder.update({
-      where: { id: orderId },
-      data: {
-        status: SalesOrderStatus.CANCELLED,
-      },
-    });
+    const updated = await tx.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
 
     await createAuditLog(tx, {
       organizationId,
@@ -626,14 +671,26 @@ export async function deliverSalesOrder(organizationId: string, orderId: string,
     throw ApiError.badRequest("Only confirmed orders can be delivered");
   }
 
-  const updated = await prisma.salesOrder.update({
-    where: { id: orderId },
+  // Bug fixed: same TOCTOU class as reject/cancel above — this used to be an unconditional
+  // `prisma.salesOrder.update` after the status checks, so e.g. a concurrent cancel racing this
+  // deliver (both reading the same pre-transition status) could overwrite each other's terminal
+  // state depending on write order, or two concurrent deliver calls could both "succeed" past the
+  // already-delivered guard. Guarded with the same atomic-`updateMany`-then-conflict pattern used
+  // throughout this file.
+  const { count } = await prisma.salesOrder.updateMany({
+    where: { id: orderId, organizationId, status: { in: DELIVERABLE_ORDER_STATUSES } },
     data: {
       status: SalesOrderStatus.DELIVERED,
       deliveredAt: new Date(),
       deliveredById: actorUserId,
     },
   });
+
+  if (count === 0) {
+    throw ApiError.conflict("Order is no longer in a deliverable state — it may have already been delivered or cancelled");
+  }
+
+  const updated = await prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
 
   await createAuditLog(prisma, {
     organizationId,

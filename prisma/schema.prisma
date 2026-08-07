@@ -173,6 +173,14 @@ enum AuditAction {
   SHOP_PHOTO_VERIFY
   DRIVER_VEHICLE_VERIFY
   DRIVER_LICENSE_VERIFY
+  // Added for the cross-app fix round (2026-08-07): markSalesOrderReady's best-effort auto-assign
+  // sub-step previously left zero trace when it no-op'd (see NotificationLogType's matching entry
+  // below for the human-facing side of this fix) — now always writes one of these on a failed
+  // auto-match, `meta.reason` distinguishing NO_BRANCH_COORDINATES vs NO_DRIVER_AVAILABLE.
+  ORDER_AUTOASSIGN_FAILED
+  // POST /driver/orders/:id/arrived (driver-orders.service.ts) — driver confirms they've reached
+  // the branch/pickup point, before pickup.
+  ORDER_DRIVER_ARRIVED
 }
 
 // Result of the automatic Replicate (image clarity/OCR) + Google Places shop-photo check run by
@@ -226,6 +234,15 @@ enum StockTransferStatus {
 enum NotificationLogType {
   LOW_STOCK
   NEW_ORDER
+  // Cross-app fix round (2026-08-07): org-staff-facing alert for an order that's READY but
+  // couldn't be auto-assigned a driver (see AuditAction.ORDER_AUTOASSIGN_FAILED for the matching
+  // audit entry — same event, this is the human-visible/pushed side of it) — reuses the same
+  // record+push pattern as NEW_ORDER (see marketplace.service.ts createBridgedSalesOrder) rather
+  // than inventing a new notification mechanism.
+  ORDER_AUTOASSIGN_FAILED
+  // Org-staff-facing alert that the assigned driver has arrived at the branch for pickup — see
+  // AuditAction.ORDER_DRIVER_ARRIVED.
+  ORDER_DRIVER_ARRIVED
 }
 
 model NotificationLog {
@@ -1109,6 +1126,20 @@ model SalesOrder {
   // without a photo (e.g. a retrying client) simply have no proof on file.
   deliveryProofPhotoUrl  String?
   deliveryProofPhotoAt   DateTime?
+  // Set by POST /driver/orders/:id/arrived (driver-orders.service.ts) when the assigned driver
+  // confirms they've physically reached the branch/pickup point, before pickup — a distinct
+  // moment from pickedUpAt (goods actually handed over). Nullable: most existing rows predate
+  // this column, and not every driver necessarily calls it before pickup once client apps adopt
+  // it gradually.
+  arrivedForPickupAt     DateTime?
+  // Persistent per-order decline history for nearest-free-driver matching (see
+  // findNearestFreeDriver/declineDriverOrder in sales-orders.service.ts /
+  // driver-orders.service.ts). JSON array of Driver.id strings who have ever declined THIS order.
+  // Fixes a bug where only the single most-recent decliner was excluded from re-matching, so two
+  // drivers could ping-pong an order back and forth after each declining it once. Scoped to one
+  // order's lifecycle only — never copied/reset onto a different order (a cancelled-then-recreated
+  // order is a brand new SalesOrder row and starts with declinedByDriverIds: null).
+  declinedByDriverIds    Json?
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
   organization           Organization     @relation(fields: [organizationId], references: [id])

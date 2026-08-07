@@ -9,6 +9,7 @@ import { asyncHandler } from "../../utils/asyncHandler";
 import { ApiError } from "../../utils/ApiError";
 import { deviceTokenSchema } from "../../utils/validation";
 import {
+  arriveDriverOrderController,
   declineDriverOrderController,
   deliverDriverOrderController,
   getDriverEarningsSummaryController,
@@ -59,6 +60,7 @@ function handleOptionalDeliveryProofUpload(req: Request, res: Response, next: Ne
 
 driverOrdersRouter.get("/orders", asyncHandler(listDriverOrdersController));
 driverOrdersRouter.get("/orders/history", asyncHandler(listDriverOrderHistoryController));
+driverOrdersRouter.post("/orders/:id/arrived", asyncHandler(arriveDriverOrderController));
 driverOrdersRouter.post("/orders/:id/pickup", asyncHandler(pickupDriverOrderController));
 driverOrdersRouter.post("/orders/:id/decline", asyncHandler(declineDriverOrderController));
 driverOrdersRouter.post(

@@ -765,6 +765,15 @@ function summarizeSalesOrder(order: {
   rejectionReason: string | null;
   confirmedAt: Date | null;
   deliveredAt: Date | null;
+  // Delivery-proof photo captured by the driver app (see driver-orders.service.ts's
+  // deliverDriverOrder) — added 2026-08-07 so the poll path (GET
+  // /sales-orders/by-external/:externalOrderId, read by NearCart's
+  // refreshOrderStatusFromInventory) carries the same field the DELIVERED push webhook now does
+  // (see order-event-webhook.service.ts's NotifyOrderEventInput), matching the existing pattern
+  // of surfacing synced fields like driver name/phone on this bridge. Optional on the input type
+  // since not every caller of this function selects it (kept optional rather than widening every
+  // call site's Prisma `select`).
+  deliveryProofPhotoUrl?: string | null;
 }) {
   return {
     salesOrderId: order.id,
@@ -773,6 +782,7 @@ function summarizeSalesOrder(order: {
     rejectionReason: order.rejectionReason ?? undefined,
     confirmedAt: order.confirmedAt?.toISOString(),
     deliveredAt: order.deliveredAt?.toISOString(),
+    deliveryProofPhotoUrl: order.deliveryProofPhotoUrl ?? undefined,
   };
 }
 

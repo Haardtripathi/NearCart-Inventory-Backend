@@ -16,6 +16,14 @@ interface NotifyOrderEventInput {
   status: string;
   eventType: OrderEventType;
   assignedDriver?: { fullName: string; phone: string; vehicleType: string } | null;
+  // Delivery-proof photo URL captured by the driver app right before calling
+  // POST /driver/orders/:id/deliver (see driver-orders.service.ts's deliverDriverOrder /
+  // SalesOrder.deliveryProofPhotoUrl) — only meaningful on a DELIVERED event, and only present
+  // when the driver actually attached a photo (optional on that call). Added 2026-08-07 so
+  // NearCart's customer-facing delivery confirmation can show the same proof photo the shop staff
+  // see, matching the existing pattern of carrying synced fields like driver name/phone on this
+  // same webhook.
+  deliveryProofPhotoUrl?: string | null;
 }
 
 /**

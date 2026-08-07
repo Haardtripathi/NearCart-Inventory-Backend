@@ -1,6 +1,7 @@
 import {
   AuditAction,
   DriverStatus,
+  NotificationLogType,
   OrderSource,
   PaymentStatus,
   ReferenceType,
@@ -20,7 +21,8 @@ import { buildPagination, getPagination } from "../../utils/pagination";
 import { createAuditLog } from "../audit/audit.service";
 import { applyStockMovement } from "../inventory/inventory.service";
 import { notifyOrderEvent } from "../../services/order-event-webhook.service";
-import { sendPushToDriver } from "../../services/push-notification.service";
+import { sendPushToDriver, sendPushToOrgStaff } from "../../services/push-notification.service";
+import { recordNotificationLog } from "../notifications/notifications.service";
 
 interface SalesOrderItemInput {
   productId: string;
@@ -707,6 +709,11 @@ export async function deliverSalesOrder(organizationId: string, orderId: string,
       externalOrderId: updated.externalOrderId,
       status: updated.status,
       eventType: "DELIVERED",
+      // Staff-initiated deliver (as opposed to the driver-app flow in
+      // driver-orders.service.ts's deliverDriverOrder) never captures a new photo itself, but
+      // carries whatever's already on the row for consistency with that other DELIVERED sender —
+      // see NotifyOrderEventInput's doc comment.
+      deliveryProofPhotoUrl: updated.deliveryProofPhotoUrl,
     });
   }
 
@@ -743,6 +750,20 @@ function haversineDistanceKm(
 }
 
 /**
+ * Parses `SalesOrder.declinedByDriverIds` (a `Json?` column storing a plain string array of
+ * `Driver.id`s who have ever declined that specific order) back into a string array. Tolerant of
+ * null/malformed values (pre-migration rows, or any future manual DB edit) — falls back to an
+ * empty array rather than throwing, since a decline-history read should never be able to break
+ * order-matching.
+ */
+export function parseDeclinedDriverIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+/**
  * Ranks currently-free, VERIFIED drivers by distance from a branch's pickup-point coordinates and
  * returns the closest one within `DRIVER_MATCH_RADIUS_KM`, or `null` if the branch has no
  * coordinates set, no driver is free, or no free driver is within radius. "Free" = a driver has
@@ -750,10 +771,18 @@ function haversineDistanceKm(
  * READY/OUT_FOR_DELIVERY (see the `Driver.assignedOrders` relation). Called automatically from
  * `markSalesOrderReady` below — the existing manual assign-driver dropdown in the Inventory
  * frontend remains available as a fallback when this returns null.
+ *
+ * `excludeDriverIds` — bug fixed 2026-08-07: this used to be a single `excludeDriverId?: string`,
+ * only ever excluding whichever driver had JUST declined THIS SPECIFIC call. That let two drivers
+ * ping-pong an order back and forth: driver A declines (excluded, reassigned to B) -> driver B
+ * also declines (only B is excluded this time, A is free again) -> A gets re-matched to the exact
+ * order they already turned down, with no memory of it. Callers should now pass the FULL
+ * accumulated decline history for the order (see `parseDeclinedDriverIds` +
+ * `SalesOrder.declinedByDriverIds`), not just the latest decliner.
  */
 export async function findNearestFreeDriver(
   branchId: string,
-  excludeDriverId?: string,
+  excludeDriverIds: string[] = [],
 ): Promise<{ id: string } | null> {
   const branch = await prisma.branch.findUnique({
     where: { id: branchId },
@@ -772,10 +801,11 @@ export async function findNearestFreeDriver(
       status: DriverStatus.VERIFIED,
       lastKnownLatitude: { not: null },
       lastKnownLongitude: { not: null },
-      // Excludes the driver who just declined this exact order (see driver-orders.service.ts
-      // declineDriverOrder) — without this, a lone available driver would immediately get
-      // re-matched to the same order they just turned down.
-      ...(excludeDriverId ? { id: { not: excludeDriverId } } : {}),
+      // Excludes every driver who has ever declined this exact order (see
+      // driver-orders.service.ts declineDriverOrder + SalesOrder.declinedByDriverIds) — not just
+      // the single most recent decliner, so a small pool of drivers can't get bounced the same
+      // order back and forth indefinitely.
+      ...(excludeDriverIds.length > 0 ? { id: { notIn: excludeDriverIds } } : {}),
       assignedOrders: {
         none: {
           status: { in: ACTIVE_DRIVER_ORDER_STATUSES },
@@ -807,6 +837,151 @@ export async function findNearestFreeDriver(
   }
 
   return nearest ? { id: nearest.id } : null;
+}
+
+/**
+ * Fix (2026-08-07, E2E_SCENARIOS_FAILURE_EDGECASES.md C4): the inverse of `findNearestFreeDriver`
+ * above — instead of "given a READY order, find the nearest free driver", this is "given a driver
+ * who just came online, find the nearest READY-and-unassigned order they could take". Called from
+ * `updateDriverAvailability` below right after a driver flips online, since previously nothing
+ * ever re-ran matching when a driver became available again — an order that went READY while 0
+ * drivers were online would sit unassigned forever unless a manager manually intervened.
+ *
+ * Deliberately narrow in scope per the fix's own instructions: matches AT MOST ONE order (the
+ * nearest eligible one) to this one driver — not a full re-balancing sweep across every
+ * READY-unassigned order and every online driver, which is a materially bigger feature. Reuses the
+ * same radius/distance/eligibility rules as the forward path: branch must have coordinates, order
+ * must be within `DRIVER_MATCH_RADIUS_KM` of the driver's last known location, and this driver
+ * must not be in that specific order's `declinedByDriverIds` history (mirrors
+ * `findNearestFreeDriver`'s exclusion — a driver coming back online shouldn't be immediately
+ * handed an order they already turned down).
+ */
+export async function findNearestUnassignedOrderForDriver(
+  driverId: string,
+  driverLocation: { latitude: number; longitude: number },
+): Promise<{ id: string } | null> {
+  const candidates = await prisma.salesOrder.findMany({
+    where: {
+      status: SalesOrderStatus.READY,
+      assignedDriverId: null,
+      branch: {
+        latitude: { not: null },
+        longitude: { not: null },
+      },
+    },
+    select: {
+      id: true,
+      declinedByDriverIds: true,
+      branch: { select: { latitude: true, longitude: true } },
+    },
+  });
+
+  let nearest: { id: string; distanceKm: number } | null = null;
+
+  for (const candidate of candidates) {
+    if (candidate.branch.latitude == null || candidate.branch.longitude == null) {
+      continue;
+    }
+
+    if (parseDeclinedDriverIds(candidate.declinedByDriverIds).includes(driverId)) {
+      continue;
+    }
+
+    const distanceKm = haversineDistanceKm(driverLocation, {
+      latitude: candidate.branch.latitude,
+      longitude: candidate.branch.longitude,
+    });
+
+    if (distanceKm > env.DRIVER_MATCH_RADIUS_KM) {
+      continue;
+    }
+
+    if (!nearest || distanceKm < nearest.distanceKm) {
+      nearest = { id: candidate.id, distanceKm };
+    }
+  }
+
+  return nearest ? { id: nearest.id } : null;
+}
+
+type AutoAssignFailureReason = "NO_BRANCH_COORDINATES" | "NO_DRIVER_AVAILABLE";
+
+/**
+ * Re-derives WHY `findNearestFreeDriver` came back empty, for the human-facing notification below
+ * — `findNearestFreeDriver` itself just returns `null` either way, which is fine for the
+ * auto-assign control flow but not descriptive enough for a staff-facing alert. Cheap (single
+ * indexed row lookup), only ever called on the rare failure path, so re-checking branch
+ * coordinates here rather than threading a reason code through `findNearestFreeDriver`'s return
+ * type (which every other caller would then have to unpack) is the simpler tradeoff.
+ */
+async function determineAutoAssignFailureReason(branchId: string): Promise<AutoAssignFailureReason> {
+  const branch = await prisma.branch.findUnique({
+    where: { id: branchId },
+    select: { latitude: true, longitude: true },
+  });
+
+  if (!branch || branch.latitude == null || branch.longitude == null) {
+    return "NO_BRANCH_COORDINATES";
+  }
+
+  return "NO_DRIVER_AVAILABLE";
+}
+
+/**
+ * Fix (2026-08-07, E2E_SCENARIOS_CONTEXTUAL.md B6 / FAILURE_EDGECASES.md C4): previously, when
+ * auto-assignment found no match, a READY order was left completely invisible — no audit log
+ * entry beyond the unremarkable ORDER_READY transition, no notification, nothing. A human could
+ * only discover the gap by opening that exact order's detail page. This writes an
+ * ORDER_AUTOASSIGN_FAILED audit entry AND a NEW_ORDER-style NotificationLog + push to org staff,
+ * reusing the exact same record+push pattern `createBridgedSalesOrder` already uses for new-order
+ * alerts (see marketplace.service.ts) rather than inventing a second alerting mechanism.
+ * Best-effort/never-throws: called from a context where auto-assignment has already failed, so a
+ * failure here must not turn that into a harder error.
+ */
+async function notifyStaffOfAutoAssignFailure(
+  organizationId: string,
+  order: { id: string; orderNumber: string; branchId: string },
+): Promise<void> {
+  try {
+    const reason = await determineAutoAssignFailureReason(order.branchId);
+
+    await createAuditLog(prisma, {
+      organizationId,
+      action: AuditAction.ORDER_AUTOASSIGN_FAILED,
+      entityType: "SalesOrder",
+      entityId: order.id,
+      meta: { reason },
+    });
+
+    const title = "Driver auto-assignment failed";
+    const body = `Order #${order.orderNumber} is ready but no driver could be auto-assigned — assign manually.`;
+    const data = { salesOrderId: order.id, reason };
+
+    void sendPushToOrgStaff(organizationId, {
+      title,
+      body,
+      data,
+      channelId: "order_alert",
+    }).catch((error) => {
+      console.warn(
+        `[sales-orders] Failed to push auto-assign-failure alert to org staff for order ${order.id}`,
+        error,
+      );
+    });
+
+    await recordNotificationLog(prisma, {
+      organizationId,
+      type: NotificationLogType.ORDER_AUTOASSIGN_FAILED,
+      title,
+      body,
+      data,
+    });
+  } catch (error) {
+    console.warn(
+      `[sales-orders] Failed to record auto-assign-failure notification for order ${order.id}`,
+      error,
+    );
+  }
 }
 
 /**
@@ -886,6 +1061,12 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
       error,
     );
   }
+
+  // No driver got assigned — either findNearestFreeDriver came back empty (no branch coordinates
+  // or no free driver in range) or assignDriverToSalesOrder itself threw (e.g. a race against
+  // another concurrent assignment). Either way the order is READY-and-unassigned with nothing
+  // else pointing a human at it — see notifyStaffOfAutoAssignFailure's doc comment.
+  void notifyStaffOfAutoAssignFailure(organizationId, updated);
 
   return updated;
 }

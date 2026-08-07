@@ -1,13 +1,20 @@
-import { AuditAction, SalesOrderStatus } from "@prisma/client";
+import { AuditAction, NotificationLogType, SalesOrderStatus } from "@prisma/client";
 
 import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
 import { createAuditLog } from "../audit/audit.service";
 import { notifyOrderEvent } from "../../services/order-event-webhook.service";
+import { sendPushToOrgStaff } from "../../services/push-notification.service";
 import { upsertDeviceToken } from "../../services/device-tokens.service";
 import { uploadImageToCloudinary } from "../uploads/uploads.service";
-import { assignDriverToSalesOrder, findNearestFreeDriver } from "../sales-orders/sales-orders.service";
+import { recordNotificationLog } from "../notifications/notifications.service";
+import {
+  assignDriverToSalesOrder,
+  findNearestFreeDriver,
+  findNearestUnassignedOrderForDriver,
+  parseDeclinedDriverIds,
+} from "../sales-orders/sales-orders.service";
 
 const DRIVER_VISIBLE_STATUSES: SalesOrderStatus[] = [SalesOrderStatus.READY, SalesOrderStatus.OUT_FOR_DELIVERY];
 
@@ -57,6 +64,7 @@ function serializeDriverOrder(order: Awaited<ReturnType<typeof findAssignedOrder
     })),
     assignedAt: order.assignedAt,
     readyAt: order.readyAt,
+    arrivedForPickupAt: order.arrivedForPickupAt,
     pickedUpAt: order.pickedUpAt,
     deliveredAt: order.deliveredAt,
     deliveryProofPhotoUrl: order.deliveryProofPhotoUrl,
@@ -102,6 +110,109 @@ export async function listDriverOrders(driverId: string) {
   });
 
   return orders.map((order) => serializeDriverOrder(order));
+}
+
+/**
+ * POST /driver/orders/:id/arrived — new feature (2026-08-07 cross-app fix round, contract locked
+ * against a client agent building the corresponding driver-app UI in parallel): the assigned
+ * driver confirms they've physically reached the branch/pickup point, before pickup. Only valid
+ * from READY (assigned, not yet picked up) and only once per order — a second call (or a call
+ * before pickup precondition is met) is a clean 400, not silently ignored, so a retrying client
+ * gets an unambiguous signal rather than looking like it worked twice.
+ */
+export async function arriveDriverOrder(driverId: string, orderId: string) {
+  const order = await findAssignedOrder(driverId, orderId);
+
+  if (order.status !== SalesOrderStatus.READY) {
+    throw ApiError.badRequest(
+      "Only orders that are READY (assigned but not yet picked up) can be marked arrived",
+    );
+  }
+
+  if (order.arrivedForPickupAt) {
+    throw ApiError.badRequest("Arrival for this order has already been recorded");
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    // Same atomic-updateMany-then-conflict pattern as pickupDriverOrder/deliverDriverOrder above —
+    // closes the same "two concurrent calls" race, plus doubles as the re-check against a
+    // just-recorded arrival (arrivedForPickupAt: null in the WHERE) so two racing calls can't both
+    // "succeed".
+    const { count } = await tx.salesOrder.updateMany({
+      where: {
+        id: orderId,
+        assignedDriverId: driverId,
+        status: SalesOrderStatus.READY,
+        arrivedForPickupAt: null,
+      },
+      data: {
+        arrivedForPickupAt: new Date(),
+      },
+    });
+
+    if (count === 0) {
+      throw ApiError.conflict(
+        "Order is no longer eligible for an arrival update — it may have changed state or already been marked arrived",
+      );
+    }
+
+    const result = await tx.salesOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      include: {
+        items: true,
+        branch: true,
+        customer: true,
+        organization: true,
+      },
+    });
+
+    await createAuditLog(tx, {
+      organizationId: order.organizationId,
+      action: AuditAction.ORDER_DRIVER_ARRIVED,
+      entityType: "SalesOrder",
+      entityId: order.id,
+      before: { arrivedForPickupAt: null },
+      after: { arrivedForPickupAt: result.arrivedForPickupAt },
+      meta: { driverId },
+    });
+
+    return result;
+  });
+
+  // Staff-facing alert, same record+push pattern as every other org-staff notification in this
+  // codebase (see marketplace.service.ts's NEW_ORDER handling / sales-orders.service.ts's
+  // notifyStaffOfAutoAssignFailure) — fire-and-forget, a failure here must never fail the arrival
+  // update itself, which has already committed by this point.
+  const title = "Driver arrived for pickup";
+  const body = `Driver has arrived for pickup — Order #${updated.orderNumber}.`;
+  const notificationData = { salesOrderId: updated.id, driverId };
+
+  void sendPushToOrgStaff(updated.organizationId, {
+    title,
+    body,
+    data: notificationData,
+    channelId: "order_alert",
+  }).catch((error) => {
+    console.warn(
+      `[driver-orders] Failed to push driver-arrived alert to org staff for order ${updated.id}`,
+      error,
+    );
+  });
+
+  void recordNotificationLog(prisma, {
+    organizationId: updated.organizationId,
+    type: NotificationLogType.ORDER_DRIVER_ARRIVED,
+    title,
+    body,
+    data: notificationData,
+  }).catch((error) => {
+    console.warn(
+      `[driver-orders] Failed to record driver-arrived notification log for order ${updated.id}`,
+      error,
+    );
+  });
+
+  return serializeDriverOrder(updated);
 }
 
 export async function pickupDriverOrder(driverId: string, orderId: string) {
@@ -240,6 +351,9 @@ export async function deliverDriverOrder(
       externalOrderId: updated.externalOrderId,
       status: updated.status,
       eventType: "DELIVERED",
+      // See NotifyOrderEventInput's doc comment — lets NearCart show the same delivery-proof
+      // photo shop staff see, when the driver attached one.
+      deliveryProofPhotoUrl: updated.deliveryProofPhotoUrl,
     });
   }
 
@@ -257,6 +371,14 @@ export async function deliverDriverOrder(
  * order doesn't just sit unassigned until a manager notices — same fire-and-forget posture as
  * that auto-assign call: a failure here must never turn a successful decline into an error
  * response.
+ *
+ * Bug fixed 2026-08-07 (E2E_SCENARIOS_FAILURE_EDGECASES.md C5): this used to only exclude the
+ * CURRENT decliner from the immediate re-match (`findNearestFreeDriver(branchId, driverId)`), with
+ * no memory of anyone who'd declined this order previously. With 2+ drivers online, that let an
+ * order ping-pong indefinitely between them (A declines -> B; B declines -> A is free again, gets
+ * re-matched to the exact order they already turned down). Now appends `driverId` to the order's
+ * persisted `declinedByDriverIds` (see schema.prisma) and excludes the FULL accumulated set on
+ * every re-match attempt, not just the latest decliner.
  */
 export async function declineDriverOrder(driverId: string, orderId: string) {
   const order = await findAssignedOrder(driverId, orderId);
@@ -265,6 +387,10 @@ export async function declineDriverOrder(driverId: string, orderId: string) {
     throw ApiError.badRequest("Only orders that are READY (not yet picked up) can be declined");
   }
 
+  const declinedByDriverIds = Array.from(
+    new Set([...parseDeclinedDriverIds(order.declinedByDriverIds), driverId]),
+  );
+
   const updated = await prisma.$transaction(async (tx) => {
     const { count } = await tx.salesOrder.updateMany({
       where: { id: orderId, assignedDriverId: driverId, status: SalesOrderStatus.READY },
@@ -272,6 +398,7 @@ export async function declineDriverOrder(driverId: string, orderId: string) {
         assignedDriverId: null,
         assignedById: null,
         assignedAt: null,
+        declinedByDriverIds,
       },
     });
 
@@ -291,14 +418,17 @@ export async function declineDriverOrder(driverId: string, orderId: string) {
       entityId: order.id,
       before: { status: order.status, assignedDriverId: driverId },
       after: { status: result.status, assignedDriverId: null },
-      meta: { driverId },
+      meta: { driverId, declinedByDriverIds },
     });
 
     return result;
   });
 
   try {
-    const nearestDriver = await findNearestFreeDriver(updated.branchId, driverId);
+    const nearestDriver = await findNearestFreeDriver(
+      updated.branchId,
+      parseDeclinedDriverIds(updated.declinedByDriverIds),
+    );
 
     if (nearestDriver) {
       await assignDriverToSalesOrder(updated.organizationId, updated.id, null, nearestDriver.id);
@@ -337,13 +467,54 @@ export async function declineDriverOrder(driverId: string, orderId: string) {
  * (see sales-orders.service.ts's findNearestFreeDriver). Going offline does NOT unassign any
  * order already in progress — it only takes the driver out of consideration for *future*
  * auto-matches.
+ *
+ * Fix (2026-08-07, E2E_SCENARIOS_FAILURE_EDGECASES.md C4): coming back online used to be a pure
+ * no-op beyond the flag flip itself — any order that went READY while this driver (and every
+ * other driver) was offline stayed unassigned forever unless a manager manually intervened, even
+ * after a driver who could have taken it came back online. Now, on a false -> true transition
+ * only, best-effort tries to match this driver to the single nearest eligible unassigned READY
+ * order (see `findNearestUnassignedOrderForDriver`) — same fire-and-forget resilience posture as
+ * every other auto-assign call site in this file: a failure here must never turn a successful
+ * availability update into an error response.
  */
 export async function updateDriverAvailability(driverId: string, isAvailableForAssignment: boolean) {
-  return prisma.driver.update({
+  const updated = await prisma.driver.update({
     where: { id: driverId },
     data: { isAvailableForAssignment },
-    select: { id: true, isAvailableForAssignment: true },
+    select: {
+      id: true,
+      isAvailableForAssignment: true,
+      lastKnownLatitude: true,
+      lastKnownLongitude: true,
+    },
   });
+
+  if (isAvailableForAssignment && updated.lastKnownLatitude != null && updated.lastKnownLongitude != null) {
+    try {
+      const nearestOrder = await findNearestUnassignedOrderForDriver(driverId, {
+        latitude: updated.lastKnownLatitude,
+        longitude: updated.lastKnownLongitude,
+      });
+
+      if (nearestOrder) {
+        const order = await prisma.salesOrder.findUnique({
+          where: { id: nearestOrder.id },
+          select: { organizationId: true },
+        });
+
+        if (order) {
+          await assignDriverToSalesOrder(order.organizationId, nearestOrder.id, null, driverId);
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `[driver-orders] Auto-match on driver ${driverId} coming back online failed`,
+        error,
+      );
+    }
+  }
+
+  return { id: updated.id, isAvailableForAssignment: updated.isAvailableForAssignment };
 }
 
 /**

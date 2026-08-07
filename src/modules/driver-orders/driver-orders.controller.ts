@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 
 import { sendSuccess } from "../../utils/ApiResponse";
 import {
+  arriveDriverOrder,
   declineDriverOrder,
   deliverDriverOrder,
   getDriverEarningsSummary,
@@ -31,6 +32,11 @@ export async function listDriverOrdersController(req: Request, res: Response) {
 export async function pickupDriverOrderController(req: Request, res: Response) {
   const data = await pickupDriverOrder(req.driverAuth!.driverId, req.params.id!);
   return sendSuccess(res, 200, "Order picked up successfully", data);
+}
+
+export async function arriveDriverOrderController(req: Request, res: Response) {
+  const data = await arriveDriverOrder(req.driverAuth!.driverId, req.params.id!);
+  return sendSuccess(res, 200, "Arrival recorded successfully", data);
 }
 
 export async function declineDriverOrderController(req: Request, res: Response) {

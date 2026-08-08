@@ -324,6 +324,13 @@ export async function listBalances(
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
     organizationId,
+    // Unlike every other product-facing list in this codebase (see products.service.ts's
+    // pervasive `deletedAt: null` filters), this query never excluded soft-deleted products/
+    // variants — an archived product's stale InventoryBalance row kept showing up in
+    // `/api/inventory/balances` (and, via `?lowStock=true`, in the dashboard's low-stock
+    // preview/count and the mobile app's low-stock badges) forever. Confirmed live 2026-08-08.
+    product: { deletedAt: null },
+    variant: { deletedAt: null },
     ...(query.branchId ? { branchId: query.branchId } : {}),
     ...(query.productId ? { productId: query.productId } : {}),
     ...(query.variantId ? { variantId: query.variantId } : {}),

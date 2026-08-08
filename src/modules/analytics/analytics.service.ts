@@ -60,7 +60,19 @@ export async function getAnalyticsOverview(organizationId: string, branchId?: st
 
   const branchFilter = branchId ? { branchId } : {};
 
-  const [recentOrders, statusGroups, lowStockBalances, totalOrders] = await Promise.all([
+  // `totalOrders`/`orderStatusCounts` used to come from separate, unscoped (all-time) queries
+  // while everything else on this endpoint — and the mobile/web screens that render it — is
+  // explicitly framed as a 30-day window (`SummaryCard label="Orders (30d)"`, the Analytics
+  // screen's "Last 30 days, all branches" subtitle, the "Order status breakdown" section sitting
+  // directly under that same header). Confirmed by direct test 2026-08-08: backdating one
+  // DELIVERED order to 60 days ago left `totalOrders` and `orderStatusCounts.DELIVERED` completely
+  // unchanged while `revenue30d`/`topProducts` correctly dropped it — i.e. a shop owner with any
+  // order history older than 30 days was shown an inflated, mislabeled "Orders (30d)" figure and a
+  // status breakdown that silently included ancient orders. Since `rangeStart` already equals
+  // `topProductsStart` (30 days back, the wider of the two windows) whenever
+  // TOP_PRODUCTS_WINDOW_DAYS >= TREND_DAYS, `recentOrders` below already holds exactly the rows
+  // both figures need — derive them from it instead of running two additional unscoped queries.
+  const [recentOrders, lowStockBalances] = await Promise.all([
     prisma.salesOrder.findMany({
       where: {
         organizationId,
@@ -81,19 +93,17 @@ export async function getAnalyticsOverview(organizationId: string, branchId?: st
         },
       },
     }),
-    prisma.salesOrder.groupBy({
-      by: ["status"],
-      where: { organizationId, ...branchFilter },
-      _count: { _all: true },
-    }),
     prisma.inventoryBalance.findMany({
-      where: { organizationId, ...branchFilter },
+      // Every other product query in this codebase filters `deletedAt: null` (see
+      // products.service.ts); this one didn't, so a soft-deleted/archived product's stale
+      // InventoryBalance row kept inflating `lowStockCount` forever — confirmed live 2026-08-08:
+      // archiving 5 low-stock test products left the count unchanged until this filter was added.
+      where: { organizationId, ...branchFilter, product: { deletedAt: null }, variant: { deletedAt: null } },
       select: {
         onHand: true,
         variant: { select: { reorderLevel: true, minStockLevel: true } },
       },
     }),
-    prisma.salesOrder.count({ where: { organizationId, ...branchFilter } }),
   ]);
 
   const trendBuckets = new Map<string, { orders: number; revenue: ReturnType<typeof toDecimal> }>();
@@ -167,9 +177,10 @@ export async function getAnalyticsOverview(organizationId: string, branchId?: st
       revenue: item.revenue.toFixed(2),
     }));
 
-  const orderStatusCounts = Object.fromEntries(
-    statusGroups.map((group) => [group.status, group._count._all]),
-  ) as Record<string, number>;
+  const orderStatusCounts: Record<string, number> = {};
+  for (const order of recentOrders) {
+    orderStatusCounts[order.status] = (orderStatusCounts[order.status] ?? 0) + 1;
+  }
 
   const lowStockCount = lowStockBalances.filter((balance) =>
     isLowStock(balance.onHand, balance.variant.reorderLevel, balance.variant.minStockLevel),
@@ -180,7 +191,7 @@ export async function getAnalyticsOverview(organizationId: string, branchId?: st
     topProducts: topProductsList,
     orderStatusCounts,
     lowStockCount,
-    totalOrders,
+    totalOrders: recentOrders.length,
     pendingOrders: orderStatusCounts[SalesOrderStatus.PENDING] ?? 0,
     revenue7d: revenue7d.toFixed(2),
     revenue30d: revenue30d.toFixed(2),
@@ -223,7 +234,10 @@ export async function getReorderSuggestions(organizationId: string, branchId?: s
       },
     }),
     prisma.inventoryBalance.findMany({
-      where: { organizationId, ...branchFilter },
+      // Same soft-delete gap as getAnalyticsOverview above — without this, a variant sold before
+      // being archived could keep surfacing as a "reorder" suggestion for a product the shop no
+      // longer carries.
+      where: { organizationId, ...branchFilter, product: { deletedAt: null }, variant: { deletedAt: null } },
       select: {
         id: true,
         branchId: true,

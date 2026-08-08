@@ -1,7 +1,23 @@
 import { LanguageCode } from "@prisma/client";
 import { z } from "zod";
 
-export const trimmedString = z.string().trim().min(1);
+// Every one of these (name, description, notes, rejectionReason, address lines, legalName, ...)
+// can end up passed straight into LibreTranslate via `enrichWithAutoTranslations` /
+// `syncEntityFieldTranslations` (see `utils/libreTranslate.ts`) whenever AUTO_TRANSLATE_ON_WRITE
+// is true (it is in this repo's `.env`). Unlike `POST /api/translate-item`, which already caps
+// its `text` field at 1000 chars specifically to bound this cost (see
+// `modules/translation/translation.validation.ts`), these generic field schemas had no cap at
+// all — confirmed by directly creating a product with a ~26,600-char description: the request
+// took over 60 seconds (bumping into libreTranslate.ts's own 60s AbortSignal.timeout) because it
+// blocked on two real synchronous translation calls (en + hi) with no length limit. Any
+// authenticated user able to write a product/category/customer/sales-order/etc. could use this to
+// hang a request handler for a minute+ per call, and concurrent large submissions could starve the
+// shared 2-thread self-hosted LibreTranslate instance for every organization at once. 1000 chars
+// mirrors the existing translate-item cap and comfortably covers real name/description/notes/
+// address/reason values.
+const TRIMMED_STRING_MAX_LENGTH = 1000;
+
+export const trimmedString = z.string().trim().min(1).max(TRIMMED_STRING_MAX_LENGTH);
 
 export const optionalTrimmedString = z.preprocess((value) => {
   if (typeof value !== "string") {
@@ -10,7 +26,7 @@ export const optionalTrimmedString = z.preprocess((value) => {
 
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : trimmed;
-}, z.string().trim().min(1).optional());
+}, z.string().trim().min(1).max(TRIMMED_STRING_MAX_LENGTH).optional());
 
 export const nullableTrimmedString = z.preprocess((value) => {
   if (typeof value !== "string") {
@@ -19,7 +35,7 @@ export const nullableTrimmedString = z.preprocess((value) => {
 
   const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
-}, z.string().trim().min(1).nullable().optional());
+}, z.string().trim().min(1).max(TRIMMED_STRING_MAX_LENGTH).nullable().optional());
 
 // `z.coerce.boolean()` is a common Zod footgun for query params: it does `Boolean(value)`, so the
 // literal string "false" (any non-empty string) coerces to `true` instead of `false`. Use this for

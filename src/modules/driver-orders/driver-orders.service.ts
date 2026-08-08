@@ -13,6 +13,7 @@ import {
   assignDriverToSalesOrder,
   findNearestFreeDriver,
   findNearestUnassignedOrderForDriver,
+  notifyStaffOfAutoAssignFailure,
   parseDeclinedDriverIds,
 } from "../sales-orders/sales-orders.service";
 
@@ -458,6 +459,15 @@ export async function declineDriverOrder(driverId: string, orderId: string) {
       eventType: "DRIVER_UNASSIGNED",
     });
   }
+
+  // Bug fixed 2026-08-08 (bug-hunt sweep): this fallthrough — a decline whose re-match also found
+  // no replacement driver — used to leave the order READY-and-unassigned with zero staff-facing
+  // trace, same blind spot `notifyStaffOfAutoAssignFailure` was written to close for
+  // `markSalesOrderReady`'s auto-assign path (see sales-orders.service.ts). That fix never got
+  // wired up here even though a decline landing an order back in this exact state is arguably more
+  // common in practice than the ready-time case. Same best-effort/never-throws posture as every
+  // other call site — this must never turn a successful decline into an error response.
+  void notifyStaffOfAutoAssignFailure(updated.organizationId, updated);
 
   return serializeDriverOrder(updated);
 }

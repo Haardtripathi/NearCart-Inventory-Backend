@@ -937,8 +937,14 @@ async function determineAutoAssignFailureReason(branchId: string): Promise<AutoA
  * alerts (see marketplace.service.ts) rather than inventing a second alerting mechanism.
  * Best-effort/never-throws: called from a context where auto-assignment has already failed, so a
  * failure here must not turn that into a harder error.
+ *
+ * Exported (2026-08-08 bug-hunt sweep): originally only called from `markSalesOrderReady` below,
+ * but `declineDriverOrder`'s own failed-rematch path (driver-orders.service.ts) left the exact
+ * same READY-and-unassigned state with zero trace — arguably the MORE common way an order ends up
+ * stuck, since it requires an active decline rather than just an empty driver pool at ready-time.
+ * Exporting so both call sites share one alerting path instead of drifting into two.
  */
-async function notifyStaffOfAutoAssignFailure(
+export async function notifyStaffOfAutoAssignFailure(
   organizationId: string,
   order: { id: string; orderNumber: string; branchId: string },
 ): Promise<void> {

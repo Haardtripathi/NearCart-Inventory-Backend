@@ -1,4 +1,4 @@
-import { AuditAction, NotificationLogType, SalesOrderStatus } from "@prisma/client";
+import { AuditAction, NotificationLogType, Prisma, SalesOrderStatus } from "@prisma/client";
 
 import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
@@ -26,6 +26,12 @@ function serializeDriverOrder(order: Awaited<ReturnType<typeof findAssignedOrder
     status: order.status,
     notes: order.notes,
     total: order.total,
+    // Distance-based driver fare for this specific delivery, computed at mark-ready time (see
+    // computeDriverFare/markSalesOrderReady in sales-orders.service.ts). Both null for orders that
+    // predate the feature or whose branch/deliveryAddress coordinates were missing — client apps
+    // should treat a null driverDeliveryFee as "fare unavailable for this order", not zero.
+    estimatedDistanceKm: order.estimatedDistanceKm,
+    driverDeliveryFee: order.driverDeliveryFee != null ? Number(order.driverDeliveryFee) : null,
     organization: {
       id: order.organization.id,
       name: order.organization.name,
@@ -636,14 +642,23 @@ function rangeStartDate(range: DriverEarningsRange, now: Date): Date | null {
 }
 
 /**
+ * Resolves a delivered order's actual driver payout: the real per-order `driverDeliveryFee`
+ * persisted at mark-ready time (see computeDriverFare/markSalesOrderReady in
+ * sales-orders.service.ts) when present, falling back to the flat `DRIVER_DELIVERY_FEE` env rate
+ * for orders that predate that column or whose branch/deliveryAddress coordinates were missing so
+ * no distance-based fare could be computed. Preserves historical earnings for those rows instead
+ * of silently costing them at 0.
+ */
+function resolveDeliveryEarning(driverDeliveryFee: Prisma.Decimal | number | null): number {
+  return driverDeliveryFee != null ? Number(driverDeliveryFee) : env.DRIVER_DELIVERY_FEE;
+}
+
+/**
  * GET /driver/earnings/summary?range=today|week|month|all — computed entirely from data already
- * on hand (DELIVERED SalesOrder rows assigned to this driver) rather than a new ledger/earnings
- * table: there's no per-order delivery-fee column anywhere in the schema, so each delivery is
- * costed at the flat `DRIVER_DELIVERY_FEE` env rate (see config/env.ts's doc comment on that var)
- * — a deliberately simple placeholder rather than a speculative new financial model bolted on
- * while another agent may be touching schema.prisma concurrently. `perDay` is a small array (at
- * most 30 entries for `month`) suitable for a sparkline/bar chart on the driver app's earnings
- * screen.
+ * on hand (DELIVERED SalesOrder rows assigned to this driver), now using each order's real
+ * persisted `driverDeliveryFee` (see resolveDeliveryEarning above) rather than a single flat rate
+ * for every delivery. `perDay` is a small array (at most 30 entries for `month`) suitable for a
+ * sparkline/bar chart on the driver app's earnings screen.
  */
 export async function getDriverEarningsSummary(driverId: string, range: DriverEarningsRange) {
   const now = new Date();
@@ -655,46 +670,64 @@ export async function getDriverEarningsSummary(driverId: string, range: DriverEa
       status: SalesOrderStatus.DELIVERED,
       ...(startDate ? { deliveredAt: { gte: startDate } } : {}),
     },
-    select: { id: true, orderNumber: true, deliveredAt: true, branch: { select: { name: true } } },
+    select: {
+      id: true,
+      orderNumber: true,
+      deliveredAt: true,
+      driverDeliveryFee: true,
+      branch: { select: { name: true } },
+    },
     orderBy: { deliveredAt: "desc" },
   });
 
-  const feePerDelivery = env.DRIVER_DELIVERY_FEE;
-
   const perDayMap = new Map<string, { date: string; deliveries: number; earnings: number }>();
+  let totalEarnings = 0;
   for (const order of deliveredOrders) {
     if (!order.deliveredAt) continue;
+    const earning = resolveDeliveryEarning(order.driverDeliveryFee);
+    totalEarnings += earning;
     const dateKey = order.deliveredAt.toISOString().slice(0, 10);
     const existing = perDayMap.get(dateKey) ?? { date: dateKey, deliveries: 0, earnings: 0 };
     existing.deliveries += 1;
-    existing.earnings += feePerDelivery;
+    existing.earnings += earning;
     perDayMap.set(dateKey, existing);
   }
 
   const perDay = Array.from(perDayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-  const [lifetimeDeliveries] = await Promise.all([
-    prisma.salesOrder.count({
-      where: { assignedDriverId: driverId, status: SalesOrderStatus.DELIVERED },
-    }),
-  ]);
+  // Lifetime totals are summed from each order's real fee (same as the range totals above) rather
+  // than kept as a lighter `count * flat-rate` query — the entire point of this feature is that
+  // earnings reflect real per-order fares, and a lifetime figure that silently reverted to the old
+  // flat-rate approximation would be a confusing inconsistency on the same screen as the accurate
+  // range totals right above it. A driver's lifetime delivered-order count is small enough (one
+  // person's real-world delivery history) that this findMany is not a performance concern; if that
+  // ever changes, a raw-SQL `SUM(COALESCE(driverDeliveryFee, :fallback))` aggregate would be the
+  // next step rather than reverting to the inaccurate count*constant shortcut.
+  const lifetimeOrders = await prisma.salesOrder.findMany({
+    where: { assignedDriverId: driverId, status: SalesOrderStatus.DELIVERED },
+    select: { driverDeliveryFee: true },
+  });
+  const lifetimeTotalEarnings = lifetimeOrders.reduce(
+    (sum, order) => sum + resolveDeliveryEarning(order.driverDeliveryFee),
+    0,
+  );
 
   return {
     range,
-    feePerDelivery,
+    averageFeePerDelivery: deliveredOrders.length > 0 ? totalEarnings / deliveredOrders.length : 0,
     totalDeliveries: deliveredOrders.length,
-    totalEarnings: deliveredOrders.length * feePerDelivery,
+    totalEarnings,
     perDay,
     recentDeliveries: deliveredOrders.slice(0, 10).map((order) => ({
       id: order.id,
       orderNumber: order.orderNumber,
       branchName: order.branch.name,
       deliveredAt: order.deliveredAt,
-      earning: feePerDelivery,
+      earning: resolveDeliveryEarning(order.driverDeliveryFee),
     })),
     lifetime: {
-      totalDeliveries: lifetimeDeliveries,
-      totalEarnings: lifetimeDeliveries * feePerDelivery,
+      totalDeliveries: lifetimeOrders.length,
+      totalEarnings: lifetimeTotalEarnings,
     },
   };
 }

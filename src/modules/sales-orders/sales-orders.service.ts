@@ -754,6 +754,40 @@ function haversineDistanceKm(
 }
 
 /**
+ * Clamps a linear base+per-km driver fare between DRIVER_FARE_MIN/MAX (see config/env.ts's doc
+ * comment on those four DRIVER_FARE_* vars). Called once from `markSalesOrderReady` at mark-ready
+ * time using the branch↔delivery-address distance — NOT the same distance
+ * `findNearestFreeDriver` computes (branch↔candidate-driver, for matching purposes only). Rounded
+ * to 2 decimal places since this feeds a `Decimal` money column (`SalesOrder.driverDeliveryFee`).
+ */
+function computeDriverFare(distanceKm: number): number {
+  const raw = env.DRIVER_FARE_BASE + env.DRIVER_FARE_PER_KM * distanceKm;
+  const clamped = Math.min(Math.max(raw, env.DRIVER_FARE_MIN), env.DRIVER_FARE_MAX);
+  return Math.round(clamped * 100) / 100;
+}
+
+/**
+ * Parses `SalesOrder.deliveryAddress` (a `Json?` column shaped `{ addressLine, latitude,
+ * longitude }`, see the doc comment on that column in schema.prisma) back into just the
+ * coordinates needed for fare calculation. Tolerant of null/malformed values (pre-migration rows
+ * with no deliveryAddress at all, or a row where latitude/longitude were never supplied) — returns
+ * null rather than throwing, mirroring `parseDeclinedDriverIds` below: a fare-calculation read
+ * should never be able to break the mark-ready transition itself.
+ */
+function parseDeliveryAddressCoords(
+  deliveryAddress: unknown,
+): { latitude: number; longitude: number } | null {
+  if (typeof deliveryAddress !== "object" || deliveryAddress === null) {
+    return null;
+  }
+  const { latitude, longitude } = deliveryAddress as Record<string, unknown>;
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return null;
+  }
+  return { latitude, longitude };
+}
+
+/**
  * Parses `SalesOrder.declinedByDriverIds` (a `Json?` column storing a plain string array of
  * `Driver.id`s who have ever declined that specific order) back into a string array. Tolerant of
  * null/malformed values (pre-migration rows, or any future manual DB edit) — falls back to an
@@ -1015,6 +1049,22 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
     throw ApiError.badRequest("Only confirmed orders can be marked ready");
   }
 
+  // Distance-based driver fare (branch pickup-point <-> delivery address), computed here — before
+  // entering the transaction — so it can be written as literal data in the same atomic
+  // `updateMany` below rather than a separate round-trip. Both null when either coordinate set is
+  // missing (see doc comments on SalesOrder.estimatedDistanceKm/driverDeliveryFee in
+  // schema.prisma); the earnings summary falls back to the flat DRIVER_DELIVERY_FEE rate for those
+  // rows. Deliberately distinct from findNearestFreeDriver's branch<->candidate-driver distance —
+  // do not conflate the two.
+  const branchCoords =
+    order.branch?.latitude != null && order.branch?.longitude != null
+      ? { latitude: order.branch.latitude, longitude: order.branch.longitude }
+      : null;
+  const deliveryCoords = parseDeliveryAddressCoords(order.deliveryAddress);
+  const estimatedDistanceKm =
+    branchCoords && deliveryCoords ? haversineDistanceKm(branchCoords, deliveryCoords) : null;
+  const driverDeliveryFee = estimatedDistanceKm != null ? computeDriverFare(estimatedDistanceKm) : null;
+
   const updated = await prisma.$transaction(async (tx) => {
     // Guard against a concurrent request racing this same transition: `updateMany` compiles to a
     // single atomic `UPDATE ... WHERE` statement on any engine, so only one concurrent caller can
@@ -1025,6 +1075,8 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
         status: SalesOrderStatus.READY,
         readyAt: new Date(),
         readyById: actorUserId,
+        estimatedDistanceKm,
+        driverDeliveryFee: driverDeliveryFee != null ? toDecimal(driverDeliveryFee) : null,
       },
     });
 

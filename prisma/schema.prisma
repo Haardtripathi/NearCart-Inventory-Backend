@@ -1132,6 +1132,15 @@ model SalesOrder {
   // this column, and not every driver necessarily calls it before pickup once client apps adopt
   // it gradually.
   arrivedForPickupAt     DateTime?
+  // Per-order distance-based driver fare, computed and persisted at mark-ready time (see
+  // computeDriverFare/markSalesOrderReady in sales-orders.service.ts) from the branch's pickup
+  // coordinates and the order's deliveryAddress coordinates. Both nullable: orders created before
+  // this feature existed, and any order whose branch or deliveryAddress is missing lat/lng, simply
+  // never get a computed fare — the driver-earnings summary falls back to the flat
+  // DRIVER_DELIVERY_FEE env rate for those rows (see driver-orders.service.ts
+  // getDriverEarningsSummary) rather than treating a missing value as zero.
+  estimatedDistanceKm    Float?
+  driverDeliveryFee      Decimal?
   // Persistent per-order decline history for nearest-free-driver matching (see
   // findNearestFreeDriver/declineDriverOrder in sales-orders.service.ts /
   // driver-orders.service.ts). JSON array of Driver.id strings who have ever declined THIS order.

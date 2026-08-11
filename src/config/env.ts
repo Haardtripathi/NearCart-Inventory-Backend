@@ -10,6 +10,16 @@ import { z } from "zod";
 // tonight.
 const optionalNonEmptyString = z.preprocess((value) => (value === "" ? undefined : value), z.string().trim().min(1).optional());
 
+// Same fix, applied to `.url()` fields: `UPSTASH_REDIS_REST_URL=` and `NEARCART_SERVICE_URL=`
+// (present-but-blank, same as any optional var documented-but-unset in a `.env` file) previously
+// crashed the whole server at boot the exact same way `optionalNonEmptyString`'s doc comment
+// above describes for RESEND_API_KEY/REPLICATE_API_TOKEN — `.url().optional()` alone only allows
+// the key to be ABSENT, not blank, and Zod's `.url()` check rejects an empty string before
+// `.optional()` ever gets a chance to apply. Found while wiring up the automated test suite's
+// `.env.test` (which documents every optional var as `KEY=`, same convention as `.env.example`)
+// — reproducible against the real `.env.example` template too, not test-only.
+const optionalUrlString = z.preprocess((value) => (value === "" ? undefined : value), z.string().trim().url().optional());
+
 const booleanFromEnv = z.preprocess((value) => {
   if (typeof value === "boolean") {
     return value;
@@ -43,7 +53,7 @@ const envSchema = z
     ADMIN_BOOTSTRAP_SECRET: z.string().min(1, "ADMIN_BOOTSTRAP_SECRET is required"),
     CORS_ORIGIN: z.string().min(1).default("http://localhost:5173"),
     REDIS_URL: z.string().trim().optional(),
-    UPSTASH_REDIS_REST_URL: z.string().trim().url().optional(),
+    UPSTASH_REDIS_REST_URL: optionalUrlString,
     UPSTASH_REDIS_REST_TOKEN: optionalNonEmptyString,
     REDIS_KEY_PREFIX: z.string().trim().min(1).default("nearcart"),
     LIBRETRANSLATE_URL: z.string().trim().url().default("http://127.0.0.1:5000"),
@@ -61,7 +71,7 @@ const envSchema = z
     // Outbound reverse notification webhook (this backend -> NearCart) — same shared secret as
     // MARKETPLACE_INTERNAL_TOKEN authenticates NearCart's inbound calls to us, reused here for
     // the reverse direction so no second secret is needed.
-    NEARCART_SERVICE_URL: z.string().trim().url().optional(),
+    NEARCART_SERVICE_URL: optionalUrlString,
     FIREBASE_PROJECT_ID: optionalNonEmptyString,
     FIREBASE_CLIENT_EMAIL: optionalNonEmptyString,
     FIREBASE_PRIVATE_KEY: optionalNonEmptyString,
@@ -110,12 +120,21 @@ const envSchema = z
     // dispatch/the customer see, and should it auto-flag or auto-reassign?) intentionally left
     // unaddressed here.
     DRIVER_LOCATION_STALE_MINUTES: z.coerce.number().positive().default(10),
-    // Flat per-delivery payout used to compute the driver app's earnings dashboard
-    // (modules/driver-orders's earnings-summary endpoint). There's no per-order delivery-fee
-    // column anywhere in the schema yet — deliveries are costed at this single flat rate rather
-    // than inventing a new financial field mid-flight while another agent may be touching
-    // schema.prisma concurrently. Revisit once a real fee model exists.
+    // Fallback/legacy flat per-delivery payout — no longer the primary pricing mechanism. Now that
+    // `SalesOrder.driverDeliveryFee` is computed and persisted per order at mark-ready time (see
+    // computeDriverFare in sales-orders.service.ts), this rate is only used for orders whose
+    // `driverDeliveryFee` is null — i.e. rows created before this column existed, or where
+    // branch/deliveryAddress coordinates were missing so no distance-based fare could be computed.
+    // See getDriverEarningsSummary in driver-orders.service.ts for the fallback logic.
     DRIVER_DELIVERY_FEE: z.coerce.number().nonnegative().default(30),
+    // Distance-based driver fare model: computeDriverFare(distanceKm) in sales-orders.service.ts
+    // clamps `DRIVER_FARE_BASE + DRIVER_FARE_PER_KM * distanceKm` between DRIVER_FARE_MIN and
+    // DRIVER_FARE_MAX, computed once at mark-ready time and persisted on the order (see
+    // SalesOrder.driverDeliveryFee / estimatedDistanceKm doc comments in schema.prisma).
+    DRIVER_FARE_BASE: z.coerce.number().nonnegative().default(20),
+    DRIVER_FARE_PER_KM: z.coerce.number().nonnegative().default(8),
+    DRIVER_FARE_MIN: z.coerce.number().nonnegative().default(20),
+    DRIVER_FARE_MAX: z.coerce.number().positive().default(150),
     // Driver access-token lifetime is deliberately short (unlike JWT_EXPIRES_IN's 7d default for
     // org staff) now that DriverRefreshToken (see utils/driverRefreshToken.ts) provides real
     // months-long session longevity via rotation — the access token only needs to bridge the gap

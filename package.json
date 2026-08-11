@@ -17,7 +17,8 @@
     "catalog:backfill": "node --import tsx src/scripts/backfill-industry-defaults.ts",
     "translate:start": "bash ../python/libretranslate/start-local.sh",
     "translate:check": "curl -sS -m 5 http://127.0.0.1:5000/languages > /dev/null && echo 'LibreTranslate is reachable at http://127.0.0.1:5000' || (echo 'LibreTranslate is NOT reachable. Auto-translate/translate-item calls will fail-open (return source text unchanged) until you run: npm run translate:start' && exit 1)",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "vitest run"
   },
   "dependencies": {
     "@libsql/client": "^0.15.15",
@@ -52,9 +53,12 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^22.13.10",
     "@types/nodemailer": "^8.0.1",
+    "@types/supertest": "^7.2.1",
     "nodemon": "^3.1.14",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.10"
   },
   "allowScripts": {
     "@firebase/util@1.15.1": true,

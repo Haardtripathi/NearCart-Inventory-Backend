@@ -97,7 +97,7 @@ export async function listPurchases(
     page: number;
     limit: number;
     search?: string;
-    branchId?: string;
+    branchId?: string | string[];
     supplierId?: string;
     status?: PurchaseReceiptStatus;
   },
@@ -105,7 +105,11 @@ export async function listPurchases(
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
     organizationId,
-    ...(query.branchId ? { branchId: query.branchId } : {}),
+    // branchId may be a single explicit filter or a branch-scoped caller's allowed-set array —
+    // see resolveBranchFilter in utils/branchAccess.ts, wired in from the controller.
+    ...(query.branchId
+      ? { branchId: Array.isArray(query.branchId) ? { in: query.branchId } : query.branchId }
+      : {}),
     ...(query.supplierId ? { supplierId: query.supplierId } : {}),
     ...(query.status ? { status: query.status } : {}),
     ...(query.search

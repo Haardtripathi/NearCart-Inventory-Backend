@@ -28,6 +28,10 @@ export async function listBranches(
     limit: number;
     search?: string;
     isActive?: boolean;
+    // Set by the controller for a branch-scoped (SELECTED) caller — see
+    // utils/branchAccess.ts. A branch's own `id` is what's restricted here, since branches
+    // have no separate `branchId` foreign key the way sales orders/purchases/etc. do.
+    accessibleBranchIds?: string[];
   },
   localeContext: LocaleContext,
 ) {
@@ -35,6 +39,7 @@ export async function listBranches(
   const where = {
     organizationId,
     deletedAt: null,
+    ...(query.accessibleBranchIds ? { id: { in: query.accessibleBranchIds } } : {}),
     ...(query.isActive !== undefined ? { isActive: query.isActive } : {}),
     ...(query.search
       ? {

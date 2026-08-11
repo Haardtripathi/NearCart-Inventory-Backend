@@ -314,7 +314,7 @@ export async function listBalances(
   query: {
     page: number;
     limit: number;
-    branchId?: string;
+    branchId?: string | string[];
     productId?: string;
     variantId?: string;
     lowStock?: boolean;
@@ -331,7 +331,13 @@ export async function listBalances(
     // preview/count and the mobile app's low-stock badges) forever. Confirmed live 2026-08-08.
     product: { deletedAt: null },
     variant: { deletedAt: null },
-    ...(query.branchId ? { branchId: query.branchId } : {}),
+    // branchId may be a single id (explicit ?branchId= filter) or an array (a branch-scoped
+    // caller with no explicit filter — see resolveBranchFilter in utils/branchAccess.ts, wired in
+    // from the controller) — narrow to `{ in: [...] }` for the latter so the response only ever
+    // includes branches the caller actually has access to.
+    ...(query.branchId
+      ? { branchId: Array.isArray(query.branchId) ? { in: query.branchId } : query.branchId }
+      : {}),
     ...(query.productId ? { productId: query.productId } : {}),
     ...(query.variantId ? { variantId: query.variantId } : {}),
     ...(query.search
@@ -396,7 +402,7 @@ export async function listLedger(
   query: {
     page: number;
     limit: number;
-    branchId?: string;
+    branchId?: string | string[];
     productId?: string;
     variantId?: string;
     movementType?: StockMovementType;
@@ -408,7 +414,11 @@ export async function listLedger(
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
     organizationId,
-    ...(query.branchId ? { branchId: query.branchId } : {}),
+    // See listBalances above — branchId may be a single explicit filter or a branch-scoped
+    // caller's allowed-set array.
+    ...(query.branchId
+      ? { branchId: Array.isArray(query.branchId) ? { in: query.branchId } : query.branchId }
+      : {}),
     ...(query.productId ? { productId: query.productId } : {}),
     ...(query.variantId ? { variantId: query.variantId } : {}),
     ...(query.movementType ? { movementType: query.movementType } : {}),

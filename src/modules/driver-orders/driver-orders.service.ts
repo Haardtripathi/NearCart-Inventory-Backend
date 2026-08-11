@@ -496,10 +496,26 @@ export async function updateDriverAvailability(driverId: string, isAvailableForA
       isAvailableForAssignment: true,
       lastKnownLatitude: true,
       lastKnownLongitude: true,
+      lastLocationAt: true,
     },
   });
 
-  if (isAvailableForAssignment && updated.lastKnownLatitude != null && updated.lastKnownLongitude != null) {
+  // Bug found live 2026-08-09 (companion to the same fix in findNearestFreeDriver): a driver
+  // toggling back online after their location ping went stale (app was dead/backgrounded for a
+  // while, then they flip the switch without a fresh GPS fix landing first) used to still get
+  // matched here off whatever coordinates were last recorded, however old. Skip the auto-match
+  // attempt entirely when the location itself is stale — the driver stays online and eligible for
+  // ordinary matching the moment their next location ping lands, same as any other online driver.
+  const isLocationFresh =
+    updated.lastLocationAt != null &&
+    updated.lastLocationAt.getTime() >= Date.now() - env.DRIVER_LOCATION_STALE_MINUTES * 60_000;
+
+  if (
+    isAvailableForAssignment &&
+    isLocationFresh &&
+    updated.lastKnownLatitude != null &&
+    updated.lastKnownLongitude != null
+  ) {
     try {
       const nearestOrder = await findNearestUnassignedOrderForDriver(driverId, {
         latitude: updated.lastKnownLatitude,

@@ -63,6 +63,10 @@ export async function listStockTransfers(
     fromBranchId?: string;
     toBranchId?: string;
     status?: StockTransferStatus;
+    // Set by the controller for a branch-scoped caller who didn't pass an explicit
+    // fromBranchId/toBranchId filter (see resolveBranchFilter in utils/branchAccess.ts) — narrows
+    // to transfers touching any of the caller's allowed branches, on either side.
+    accessibleBranchIds?: string[];
   },
 ) {
   const { page, limit, skip } = getPagination(query.page, query.limit);
@@ -70,6 +74,14 @@ export async function listStockTransfers(
     organizationId,
     ...(query.fromBranchId ? { fromBranchId: query.fromBranchId } : {}),
     ...(query.toBranchId ? { toBranchId: query.toBranchId } : {}),
+    ...(query.accessibleBranchIds && !query.fromBranchId && !query.toBranchId
+      ? {
+          OR: [
+            { fromBranchId: { in: query.accessibleBranchIds } },
+            { toBranchId: { in: query.accessibleBranchIds } },
+          ],
+        }
+      : {}),
     ...(query.status ? { status: query.status } : {}),
     ...(query.search
       ? {

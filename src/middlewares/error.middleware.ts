@@ -80,6 +80,14 @@ export const errorMiddleware: ErrorRequestHandler = (error, _req, res, _next) =>
     }
   }
 
+  // Unlike the branches above (known, expected error shapes), reaching here means something
+  // genuinely unanticipated blew up mid-request. Previously this branch logged nothing at all,
+  // so a real 500 was a silent black hole server-side — confirmed live during the 2026-08-09
+  // regression sweep: the browser saw several real 500s from concurrent request load, but
+  // nothing appeared anywhere in the server log to investigate. Always log stack traces
+  // server-side (never sent to the client either way) so this stops being invisible.
+  console.error("[errorMiddleware] Unhandled error", error);
+
   return res.status(500).json({
     success: false,
     message: "Internal server error",

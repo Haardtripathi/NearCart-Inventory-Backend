@@ -132,7 +132,7 @@ export async function listSalesOrders(
     page: number;
     limit: number;
     search?: string;
-    branchId?: string;
+    branchId?: string | string[];
     customerId?: string;
     status?: SalesOrderStatus;
     paymentStatus?: PaymentStatus;
@@ -142,7 +142,11 @@ export async function listSalesOrders(
   const { page, limit, skip } = getPagination(query.page, query.limit);
   const where = {
     organizationId,
-    ...(query.branchId ? { branchId: query.branchId } : {}),
+    // branchId may be a single explicit filter or a branch-scoped caller's allowed-set array —
+    // see resolveBranchFilter in utils/branchAccess.ts, wired in from the controller.
+    ...(query.branchId
+      ? { branchId: Array.isArray(query.branchId) ? { in: query.branchId } : query.branchId }
+      : {}),
     ...(query.customerId ? { customerId: query.customerId } : {}),
     ...(query.status ? { status: query.status } : {}),
     ...(query.paymentStatus ? { paymentStatus: query.paymentStatus } : {}),
@@ -801,6 +805,13 @@ export async function findNearestFreeDriver(
       status: DriverStatus.VERIFIED,
       lastKnownLatitude: { not: null },
       lastKnownLongitude: { not: null },
+      // Bug found live 2026-08-09: a driver whose location ping went silent (app killed, dead
+      // phone, no network) while still toggled "available" used to keep matching here forever on
+      // whatever coordinates it last reported, however old. The app pings ~once/minute while
+      // online (see updateDriverLocation), so anything older than DRIVER_LOCATION_STALE_MINUTES
+      // means the driver has effectively gone dark — treat them the same as "no location" rather
+      // than trusting a stale fix.
+      lastLocationAt: { gte: new Date(Date.now() - env.DRIVER_LOCATION_STALE_MINUTES * 60_000) },
       // Excludes every driver who has ever declined this exact order (see
       // driver-orders.service.ts declineDriverOrder + SalesOrder.declinedByDriverIds) — not just
       // the single most recent decliner, so a small pool of drivers can't get bounced the same

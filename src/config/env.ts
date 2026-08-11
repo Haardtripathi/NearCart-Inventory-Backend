@@ -96,6 +96,20 @@ const envSchema = z
     // Max distance (km) a driver's last known location may be from a branch's pickup point to be
     // considered for nearest-free-driver auto-assignment (see sales-orders driver-matching logic).
     DRIVER_MATCH_RADIUS_KM: z.coerce.number().positive().default(15),
+    // Bug found live during the 2026-08-09 scenario sweep ("driver location stops updating
+    // mid-delivery"): `Driver.lastLocationAt` is written on every location ping (see
+    // driver-orders.service.ts updateDriverLocation) but was never read anywhere — a driver whose
+    // app died/lost network hours ago while still toggled "available" kept matching as the
+    // "nearest" free driver for new orders using coordinates that were no longer anywhere close to
+    // true. The app pings roughly once a minute while online (see updateDriverLocation's own
+    // comment), so anything past a few missed pings is a real signal something's wrong, not just
+    // normal jitter. Only guards the auto-match query (see findNearestFreeDriver/
+    // findNearestUnassignedOrderForDriver in sales-orders.service.ts /
+    // driver-orders.service.ts) — a live "this driver's tracked location is stale" indicator on
+    // the staff/customer delivery-tracking UI is a separate, larger product decision (what should
+    // dispatch/the customer see, and should it auto-flag or auto-reassign?) intentionally left
+    // unaddressed here.
+    DRIVER_LOCATION_STALE_MINUTES: z.coerce.number().positive().default(10),
     // Flat per-delivery payout used to compute the driver app's earnings dashboard
     // (modules/driver-orders's earnings-summary endpoint). There's no per-order delivery-fee
     // column anywhere in the schema yet — deliveries are costed at this single flat rate rather

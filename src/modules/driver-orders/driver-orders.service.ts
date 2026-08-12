@@ -50,6 +50,12 @@ function serializeDriverOrder(order: Awaited<ReturnType<typeof findAssignedOrder
       // doc comment. Nullable for branches that predate that column / never had it backfilled.
       latitude: order.branch.latitude,
       longitude: order.branch.longitude,
+      // Cloudinary URL from the branch's compulsory shop-photo verification (see
+      // Branch.shopPhotoUrl doc comment) — was captured on the shop-owner side but never
+      // forwarded to either driver client, so both apps fell back to a generic building icon
+      // regardless of whether a real photo existed. Nullable for branches that predate/skipped
+      // verification.
+      shopPhotoUrl: order.branch.shopPhotoUrl,
     },
     customer: order.customer
       ? {

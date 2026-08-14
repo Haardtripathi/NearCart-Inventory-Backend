@@ -1087,8 +1087,20 @@ export async function backfillOrganizationIndustryCatalogDefaults() {
  * throwing on `undefined`.
  */
 function mergeEnabledPages(stored: unknown): Record<string, boolean> {
+  // Same defensive JSON-string handling as parseDeliveryAddressCoords/parseDeclinedDriverIds in
+  // sales-orders.service.ts (bug found live 2026-08-15) — this codebase's Prisma+libSQL/Turso
+  // setup can return a `Json?` column as a raw string rather than an already-parsed value, which
+  // silently reset every org's saved sidebar preferences back to defaults on every read.
+  let value = stored;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      value = undefined;
+    }
+  }
   const storedRecord =
-    stored && typeof stored === "object" && !Array.isArray(stored) ? (stored as Record<string, unknown>) : {};
+    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
   const merged: Record<string, boolean> = { ...DEFAULT_ENABLED_PAGES };
   for (const moduleKey of Object.keys(DEFAULT_ENABLED_PAGES)) {

@@ -773,14 +773,32 @@ function computeDriverFare(distanceKm: number): number {
  * with no deliveryAddress at all, or a row where latitude/longitude were never supplied) — returns
  * null rather than throwing, mirroring `parseDeclinedDriverIds` below: a fare-calculation read
  * should never be able to break the mark-ready transition itself.
+ *
+ * Bug found live 2026-08-15: this always returned null in production, confirmed by direct repro
+ * (fresh order, valid deliveryAddress and branch coordinates both present, fare fields still
+ * came back null). Root cause: `typeof deliveryAddress !== "object"` was tripping because the
+ * value read back through this codebase's Prisma+libSQL/Turso adapter setup was a raw JSON
+ * *string*, not an already-parsed object, in at least some cases — the exact conditions weren't
+ * fully pinned down, so this now handles the string case defensively via JSON.parse rather than
+ * assuming Prisma always deserializes `Json?` columns before this function sees them.
  */
 function parseDeliveryAddressCoords(
   deliveryAddress: unknown,
 ): { latitude: number; longitude: number } | null {
-  if (typeof deliveryAddress !== "object" || deliveryAddress === null) {
+  let value = deliveryAddress;
+
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof value !== "object" || value === null) {
     return null;
   }
-  const { latitude, longitude } = deliveryAddress as Record<string, unknown>;
+  const { latitude, longitude } = value as Record<string, unknown>;
   if (typeof latitude !== "number" || typeof longitude !== "number") {
     return null;
   }
@@ -793,12 +811,29 @@ function parseDeliveryAddressCoords(
  * null/malformed values (pre-migration rows, or any future manual DB edit) — falls back to an
  * empty array rather than throwing, since a decline-history read should never be able to break
  * order-matching.
+ *
+ * Bug found live 2026-08-15 (same root cause as parseDeliveryAddressCoords above): this silently
+ * returned `[]` in production even for orders with a real, previously-written decline history,
+ * because the value read back through this codebase's Prisma+libSQL/Turso setup was a raw JSON
+ * *string* in at least some cases, and `Array.isArray("...")` is always false on a string. That
+ * broke the "never re-offer to a driver who already declined" guarantee — a declined order could
+ * bounce right back to the same driver. Now handles the string case via JSON.parse first.
  */
 export function parseDeclinedDriverIds(value: unknown): string[] {
-  if (!Array.isArray(value)) {
+  let parsed = value;
+
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(parsed)) {
     return [];
   }
-  return value.filter((entry): entry is string => typeof entry === "string");
+  return parsed.filter((entry): entry is string => typeof entry === "string");
 }
 
 /**

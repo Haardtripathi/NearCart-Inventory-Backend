@@ -193,6 +193,22 @@ function serializeDriver(driver: {
   status: DriverStatus;
   createdAt: Date;
   updatedAt: Date;
+  // Bug found live 2026-08-15: this function silently dropped every onboarding-verification
+  // field (vehicle photo/plate, license photo/number/holder/expiry, match score, overall
+  // onboarding status) even though `prisma.driver.findMany()` (no `select`) already returns them
+  // — a platform admin verifying a driver had no way to actually see the uploaded documents.
+  vehiclePhotoUrl: string | null;
+  vehiclePlateNumber: string | null;
+  vehiclePlateVerified: boolean;
+  vehiclePhotoClarityOk: boolean | null;
+  licensePhotoUrl: string | null;
+  licenseNumber: string | null;
+  licenseHolderName: string | null;
+  licenseDob: string | null;
+  licenseExpiry: string | null;
+  licenseVerified: boolean;
+  licenseMatchScore: number | null;
+  onboardingVerificationStatus: string;
 }) {
   return {
     id: driver.id,
@@ -204,6 +220,18 @@ function serializeDriver(driver: {
     status: driver.status,
     createdAt: driver.createdAt,
     updatedAt: driver.updatedAt,
+    vehiclePhotoUrl: driver.vehiclePhotoUrl,
+    vehiclePlateNumber: driver.vehiclePlateNumber,
+    vehiclePlateVerified: driver.vehiclePlateVerified,
+    vehiclePhotoClarityOk: driver.vehiclePhotoClarityOk,
+    licensePhotoUrl: driver.licensePhotoUrl,
+    licenseNumber: driver.licenseNumber,
+    licenseHolderName: driver.licenseHolderName,
+    licenseDob: driver.licenseDob,
+    licenseExpiry: driver.licenseExpiry,
+    licenseVerified: driver.licenseVerified,
+    licenseMatchScore: driver.licenseMatchScore,
+    onboardingVerificationStatus: driver.onboardingVerificationStatus,
   };
 }
 

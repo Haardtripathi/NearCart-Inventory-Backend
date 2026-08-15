@@ -22,6 +22,7 @@ async function listBranches(organizationId, query, localeContext) {
     const where = {
         organizationId,
         deletedAt: null,
+        ...(query.accessibleBranchIds ? { id: { in: query.accessibleBranchIds } } : {}),
         ...(query.isActive !== undefined ? { isActive: query.isActive } : {}),
         ...(query.search
             ? {

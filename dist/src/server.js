@@ -5,12 +5,14 @@ const env_1 = require("./config/env");
 const prisma_1 = require("./config/prisma");
 const redis_1 = require("./config/redis");
 const order_confirmation_sweep_1 = require("./jobs/order-confirmation-sweep");
+const keep_alive_1 = require("./jobs/keep-alive");
 void (0, redis_1.connectRedis)().catch((error) => {
     console.error("Redis connection failed, running without Redis", error);
 });
 const server = app_1.app.listen(env_1.env.PORT, () => {
     console.log(`NearCart Inventory backend running on port ${env_1.env.PORT}`);
     (0, order_confirmation_sweep_1.registerOrderConfirmationSweep)();
+    (0, keep_alive_1.registerKeepAlivePing)();
 });
 server.on("error", (error) => {
     if (error.code === "EADDRINUSE") {

@@ -44,6 +44,9 @@ function handlePhotoUpload(req, res, next) {
 // repos; do not rename these paths without coordinating there.
 exports.driverVerificationRouter = (0, express_1.Router)();
 exports.driverVerificationRouter.use(driverAuth_middleware_1.authenticateDriver);
+// Pure read of what's currently on file — not gated by requireReplicateConfigured (no Replicate
+// call involved) unlike the three verify/OCR routes below. Backs the driver app's Documents screen.
+exports.driverVerificationRouter.get("/verification/status", (0, asyncHandler_1.asyncHandler)(driver_verification_controller_1.getDriverVerificationStatusController));
 exports.driverVerificationRouter.post("/verification/vehicle-photo", requireReplicate_middleware_1.requireReplicateConfigured, handlePhotoUpload, (0, asyncHandler_1.asyncHandler)(driver_verification_controller_1.verifyDriverVehiclePhotoController));
 exports.driverVerificationRouter.post("/verification/license", requireReplicate_middleware_1.requireReplicateConfigured, handlePhotoUpload, (0, asyncHandler_1.asyncHandler)(driver_verification_controller_1.ocrDriverLicenseController));
 exports.driverVerificationRouter.post("/verification/license/confirm", requireReplicate_middleware_1.requireReplicateConfigured, (0, validate_middleware_1.validateRequest)({ body: driver_verification_validation_1.confirmLicenseSchema }), (0, asyncHandler_1.asyncHandler)(driver_verification_controller_1.confirmDriverLicenseController));

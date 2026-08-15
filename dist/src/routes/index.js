@@ -29,6 +29,8 @@ const driver_auth_route_1 = require("../modules/driver-auth/driver-auth.route");
 const driver_orders_route_1 = require("../modules/driver-orders/driver-orders.route");
 const drivers_route_1 = require("../modules/drivers/drivers.route");
 const driver_verification_route_1 = require("../modules/driver-verification/driver-verification.route");
+const analytics_route_1 = require("../modules/analytics/analytics.route");
+const notifications_route_1 = require("../modules/notifications/notifications.route");
 exports.apiRouter = (0, express_1.Router)();
 exports.apiRouter.get("/health", (_req, res) => {
     return (0, ApiResponse_1.sendSuccess)(res, 200, "NearCart Inventory backend is healthy", {
@@ -62,3 +64,5 @@ exports.apiRouter.use("/driver-auth", driver_auth_route_1.driverAuthRouter);
 exports.apiRouter.use("/driver", driver_orders_route_1.driverOrdersRouter);
 exports.apiRouter.use("/driver", driver_verification_route_1.driverVerificationRouter);
 exports.apiRouter.use("/drivers", drivers_route_1.driversRouter);
+exports.apiRouter.use("/analytics", analytics_route_1.analyticsRouter);
+exports.apiRouter.use("/notifications", notifications_route_1.notificationsRouter);

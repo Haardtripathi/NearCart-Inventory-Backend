@@ -9,6 +9,7 @@ exports.assessVehiclePhoto = assessVehiclePhoto;
 exports.extractLicenseFields = extractLicenseFields;
 const replicate_1 = __importDefault(require("replicate"));
 const env_1 = require("../config/env");
+const ApiError_1 = require("../utils/ApiError");
 function isReplicateConfigured() {
     return Boolean(env_1.env.REPLICATE_API_TOKEN);
 }
@@ -24,12 +25,12 @@ function getClient() {
 // strict JSON keeps one small parsing helper (parseJsonFromModelOutput) reusable across all three
 // verification endpoints instead of needing a different model/parser per task.
 //
-// NOT LIVE-TESTED: no REPLICATE_API_TOKEN exists anywhere in this workspace as of this change
-// (see backend/.env.example), so this identifier has never actually been invoked. It's a
-// reasonable, actively-maintained multimodal instruction model on Replicate at the time of
-// writing, but treat it as a placeholder — swap it here (one constant) once a real token is
-// configured and this has been smoke-tested against it.
-const VISION_MODEL = "yorickvp/llava-13b";
+// Live-tested 2026-08-02. yorickvp/llava-13b is a community (non-"official") model, so
+// Replicate's versionless `/models/{owner}/{name}/predictions` endpoint 404s on it — community
+// models must be pinned to a specific version hash. Pulled from
+// `GET /v1/models/yorickvp/llava-13b` -> `latest_version.id` at test time; if this model is ever
+// updated upstream, re-fetch that id rather than assuming this hash stays current.
+const VISION_MODEL = "yorickvp/llava-13b:80537f9eead1a5bfa72d5ac6ea6414379be41d4d4f6679fd776e9535d1eb58bb";
 // Replicate's `run()` resolves to whatever the model's output schema declares — often a string
 // for LLM-shaped models, sometimes an array of string chunks that need joining (matches Replicate
 // LLM streaming-style outputs). Normalize to one string, then pull the first {...} block out of
@@ -55,13 +56,25 @@ function parseJsonFromModelOutput(output) {
     }
 }
 async function runVisionPrompt(imageUrl, prompt) {
-    const output = await getClient().run(VISION_MODEL, {
-        input: {
-            image: imageUrl,
-            prompt,
-            max_tokens: 512,
-        },
-    });
+    let output;
+    try {
+        output = await getClient().run(VISION_MODEL, {
+            input: {
+                image: imageUrl,
+                prompt,
+                max_tokens: 512,
+            },
+        });
+    }
+    catch (error) {
+        // A raw Replicate/model failure (rate limit, model-side error, transient outage) previously
+        // bubbled up as an uncaught 500 with the third-party error string forwarded straight to the
+        // client (e.g. "Prediction failed: mean must have 1 elements...") — the wrong status code (this
+        // isn't our bug) and a message no driver/shop-owner could act on. Log the real cause
+        // server-side, surface a clean 503 instead.
+        console.error("[replicate] Vision prediction failed:", error);
+        throw ApiError_1.ApiError.serviceUnavailable("Photo verification service is temporarily unavailable. Please try again in a moment.");
+    }
     return parseJsonFromModelOutput(output);
 }
 /**

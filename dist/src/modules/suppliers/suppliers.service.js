@@ -150,13 +150,25 @@ async function updateSupplier(organizationId, supplierId, actorUserId, input, lo
             throw ApiError_1.ApiError.conflict("A supplier with this code already exists in this organization");
         }
     }
+    const mergedTranslations = (0, translations_1.mergeTranslationsForUpdate)(existing.translations.map((translation) => ({
+        language: translation.language,
+        name: translation.name,
+    })), input.translations);
+    // See the identical fix + comment in products.service.ts's updateProduct: a name-only PATCH
+    // (no `translations` array) previously left the EN translation row stale forever, silently
+    // showing users the OLD name everywhere (displayName prefers the translation over the base
+    // column). Keep EN in sync with the base name whenever the caller changed it without also
+    // supplying their own explicit EN override.
+    const callerOverrodeEnTranslation = (input.translations ?? []).some((translation) => translation.language === client_1.LanguageCode.EN);
+    const baseSyncedTranslations = callerOverrodeEnTranslation
+        ? mergedTranslations
+        : mergedTranslations.map((translation) => translation.language === client_1.LanguageCode.EN && input.name !== undefined
+            ? { ...translation, name: input.name.trim() }
+            : translation);
     const translations = await (0, autoTranslate_1.enrichWithAutoTranslations)({
         organizationId,
         baseName: input.name ?? existing.name,
-        existingTranslations: (0, translations_1.mergeTranslationsForUpdate)(existing.translations.map((translation) => ({
-            language: translation.language,
-            name: translation.name,
-        })), input.translations),
+        existingTranslations: baseSyncedTranslations,
     });
     const updated = await prisma_1.prisma.$transaction(async (tx) => {
         const nextSupplier = await tx.supplier.update({

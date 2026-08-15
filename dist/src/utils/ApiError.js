@@ -24,5 +24,8 @@ class ApiError extends Error {
     static conflict(message, errors) {
         return new ApiError(409, message, errors);
     }
+    static serviceUnavailable(message) {
+        return new ApiError(503, message);
+    }
 }
 exports.ApiError = ApiError;

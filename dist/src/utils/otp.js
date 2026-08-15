@@ -68,19 +68,19 @@ async function verifyOtp(purpose, subjectId, code) {
         record = JSON.parse(raw);
     }
     catch {
-        await redis.call("DEL", key);
+        await redis.del(key);
         throw ApiError_1.ApiError.badRequest("This code has expired or was not requested. Please request a new one.");
     }
     if (record.attempts >= env_1.env.OTP_MAX_ATTEMPTS) {
-        await redis.call("DEL", key);
+        await redis.del(key);
         throw ApiError_1.ApiError.badRequest("Too many incorrect attempts. Please request a new code.");
     }
     const matches = record.codeHash === hashCode(purpose, subjectId, code);
     if (!matches) {
-        const ttl = Number(await redis.call("TTL", key));
+        const ttl = await redis.ttl(key);
         record.attempts += 1;
         await redis.set(key, JSON.stringify(record), "EX", ttl > 0 ? ttl : env_1.env.OTP_TTL_MINUTES * 60);
         throw ApiError_1.ApiError.badRequest("Incorrect code. Please try again.");
     }
-    await redis.call("DEL", key);
+    await redis.del(key);
 }

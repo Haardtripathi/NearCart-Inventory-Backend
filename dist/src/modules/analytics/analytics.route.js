@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.analyticsRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const analytics_controller_1 = require("./analytics.controller");
+const analytics_validation_1 = require("./analytics.validation");
+exports.analyticsRouter = (0, express_1.Router)();
+exports.analyticsRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext);
+exports.analyticsRouter.get("/overview", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: analytics_validation_1.analyticsOverviewQuerySchema }), (0, asyncHandler_1.asyncHandler)(analytics_controller_1.getAnalyticsOverviewController));
+exports.analyticsRouter.get("/reorder-suggestions", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ query: analytics_validation_1.analyticsOverviewQuerySchema }), (0, asyncHandler_1.asyncHandler)(analytics_controller_1.getReorderSuggestionsController));

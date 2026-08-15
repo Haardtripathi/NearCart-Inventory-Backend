@@ -76,7 +76,11 @@ async function listPurchases(organizationId, query) {
     const { page, limit, skip } = (0, pagination_1.getPagination)(query.page, query.limit);
     const where = {
         organizationId,
-        ...(query.branchId ? { branchId: query.branchId } : {}),
+        // branchId may be a single explicit filter or a branch-scoped caller's allowed-set array —
+        // see resolveBranchFilter in utils/branchAccess.ts, wired in from the controller.
+        ...(query.branchId
+            ? { branchId: Array.isArray(query.branchId) ? { in: query.branchId } : query.branchId }
+            : {}),
         ...(query.supplierId ? { supplierId: query.supplierId } : {}),
         ...(query.status ? { status: query.status } : {}),
         ...(query.search
@@ -252,6 +256,22 @@ async function postPurchase(organizationId, purchaseId, actorUserId) {
         throw ApiError_1.ApiError.badRequest("Only draft purchase receipts can be posted");
     }
     const posted = await prisma_1.prisma.$transaction(async (tx) => {
+        // Bug fixed: same TOCTOU race already fixed in this session's sales-orders/stock-transfers
+        // work — this used to apply every item's stock movement FIRST and only write DRAFT -> POSTED
+        // at the end, guarded only by a pre-transaction status snapshot. Two concurrent posts of the
+        // same DRAFT receipt (double-click, or two staff members) would both pass that stale check and
+        // both apply PURCHASE movements — double-crediting the incoming stock. Claim the transition
+        // atomically first via `updateMany` so a second concurrent caller gets a conflict instead.
+        const { count } = await tx.purchaseReceipt.updateMany({
+            where: { id: purchaseId, organizationId, status: client_1.PurchaseReceiptStatus.DRAFT },
+            data: {
+                status: client_1.PurchaseReceiptStatus.POSTED,
+                receivedAt: purchase.receivedAt ?? new Date(),
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Purchase receipt is no longer draft — it may have already been posted");
+        }
         for (const item of purchase.items) {
             await (0, inventory_service_1.applyStockMovement)(tx, {
                 organizationId,
@@ -268,12 +288,8 @@ async function postPurchase(organizationId, purchaseId, actorUserId) {
                 createdById: actorUserId,
             });
         }
-        const updated = await tx.purchaseReceipt.update({
+        const updated = await tx.purchaseReceipt.findUniqueOrThrow({
             where: { id: purchaseId },
-            data: {
-                status: client_1.PurchaseReceiptStatus.POSTED,
-                receivedAt: purchase.receivedAt ?? new Date(),
-            },
             include: {
                 supplier: true,
                 branch: true,

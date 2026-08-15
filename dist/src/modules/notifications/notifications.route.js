@@ -1,0 +1,17 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.notificationsRouter = void 0;
+const express_1 = require("express");
+const roles_1 = require("../../constants/roles");
+const auth_middleware_1 = require("../../middlewares/auth.middleware");
+const org_middleware_1 = require("../../middlewares/org.middleware");
+const validate_middleware_1 = require("../../middlewares/validate.middleware");
+const validation_1 = require("../../utils/validation");
+const asyncHandler_1 = require("../../utils/asyncHandler");
+const notifications_controller_1 = require("./notifications.controller");
+const notifications_validation_1 = require("./notifications.validation");
+exports.notificationsRouter = (0, express_1.Router)();
+exports.notificationsRouter.use(auth_middleware_1.authenticate, org_middleware_1.requireOrganizationContext, (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES));
+exports.notificationsRouter.get("/", (0, validate_middleware_1.validateRequest)({ query: notifications_validation_1.notificationLogQuerySchema }), (0, asyncHandler_1.asyncHandler)(notifications_controller_1.listNotificationLogsController));
+exports.notificationsRouter.patch("/read-all", (0, asyncHandler_1.asyncHandler)(notifications_controller_1.markAllNotificationsReadController));
+exports.notificationsRouter.patch("/:id/read", (0, validate_middleware_1.validateRequest)({ params: validation_1.idParamSchema }), (0, asyncHandler_1.asyncHandler)(notifications_controller_1.markNotificationReadController));

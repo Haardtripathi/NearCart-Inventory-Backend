@@ -46,6 +46,14 @@ async function listStockTransfers(organizationId, query) {
         organizationId,
         ...(query.fromBranchId ? { fromBranchId: query.fromBranchId } : {}),
         ...(query.toBranchId ? { toBranchId: query.toBranchId } : {}),
+        ...(query.accessibleBranchIds && !query.fromBranchId && !query.toBranchId
+            ? {
+                OR: [
+                    { fromBranchId: { in: query.accessibleBranchIds } },
+                    { toBranchId: { in: query.accessibleBranchIds } },
+                ],
+            }
+            : {}),
         ...(query.status ? { status: query.status } : {}),
         ...(query.search
             ? {
@@ -205,6 +213,27 @@ async function approveStockTransfer(organizationId, transferId, actorUserId) {
         throw ApiError_1.ApiError.badRequest("Source and destination branch cannot be same");
     }
     const approved = await prisma_1.prisma.$transaction(async (tx) => {
+        // Bug fixed: this used to apply both stock movements per item FIRST and only write the
+        // DRAFT -> APPROVED status change at the very end, with no re-check of status at write time
+        // (the guard above only checked a snapshot read before the transaction even opened). Two
+        // concurrent approve calls on the same DRAFT transfer (e.g. a staff member double-clicking
+        // Approve, or two staff members approving the same transfer at once) would both pass that
+        // stale check and both apply TRANSFER_OUT/TRANSFER_IN movements — physically moving the stock
+        // TWICE for what the UI shows as a single transfer. Fixed the same way this module's sibling
+        // sales-orders.service.ts already fixes the identical race for confirm/mark-ready/deliver: an
+        // atomic `updateMany` claims the DRAFT -> APPROVED transition FIRST, so a second concurrent
+        // caller's `updateMany` matches 0 rows and gets a conflict instead of also moving stock.
+        const { count } = await tx.stockTransfer.updateMany({
+            where: { id: transferId, organizationId, status: client_1.StockTransferStatus.DRAFT },
+            data: {
+                status: client_1.StockTransferStatus.APPROVED,
+                approvedAt: new Date(),
+                approvedById: actorUserId,
+            },
+        });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Stock transfer is no longer draft — it may have already been approved or cancelled");
+        }
         for (const item of transfer.items) {
             await (0, inventory_service_1.applyStockMovement)(tx, {
                 organizationId,
@@ -231,14 +260,7 @@ async function approveStockTransfer(organizationId, transferId, actorUserId) {
                 createdById: actorUserId,
             });
         }
-        const updated = await tx.stockTransfer.update({
-            where: { id: transferId },
-            data: {
-                status: client_1.StockTransferStatus.APPROVED,
-                approvedAt: new Date(),
-                approvedById: actorUserId,
-            },
-        });
+        const updated = await tx.stockTransfer.findUniqueOrThrow({ where: { id: transferId } });
         await (0, audit_service_1.createAuditLog)(tx, {
             organizationId,
             actorUserId,
@@ -257,12 +279,22 @@ async function cancelStockTransfer(organizationId, transferId, actorUserId) {
     if (transfer.status !== client_1.StockTransferStatus.DRAFT) {
         throw ApiError_1.ApiError.badRequest("Only draft transfers can be cancelled");
     }
-    const cancelled = await prisma_1.prisma.stockTransfer.update({
-        where: { id: transferId },
+    // Bug fixed: same TOCTOU race as approveStockTransfer above — this used to be an unconditional
+    // update after only a pre-transaction status check. A cancel racing an approve (both reading
+    // DRAFT before either write lands) could have this unconditional update overwrite an
+    // already-APPROVED transfer — whose stock has already been physically moved between branches —
+    // back to CANCELLED, leaving the record permanently misrepresenting a transfer that did happen.
+    // Guarded with the same atomic-`updateMany`-then-conflict pattern used throughout this codebase.
+    const { count } = await prisma_1.prisma.stockTransfer.updateMany({
+        where: { id: transferId, organizationId, status: client_1.StockTransferStatus.DRAFT },
         data: {
             status: client_1.StockTransferStatus.CANCELLED,
         },
     });
+    if (count === 0) {
+        throw ApiError_1.ApiError.conflict("Stock transfer is no longer draft — it may have already been approved or cancelled");
+    }
+    const cancelled = await prisma_1.prisma.stockTransfer.findUniqueOrThrow({ where: { id: transferId } });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,

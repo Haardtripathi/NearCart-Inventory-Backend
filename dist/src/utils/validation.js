@@ -4,21 +4,36 @@ exports.deviceTokenSchema = exports.optionalLongitudeSchema = exports.optionalLa
 exports.uniqueLanguageArraySchema = uniqueLanguageArraySchema;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
-exports.trimmedString = zod_1.z.string().trim().min(1);
+// Every one of these (name, description, notes, rejectionReason, address lines, legalName, ...)
+// can end up passed straight into LibreTranslate via `enrichWithAutoTranslations` /
+// `syncEntityFieldTranslations` (see `utils/libreTranslate.ts`) whenever AUTO_TRANSLATE_ON_WRITE
+// is true (it is in this repo's `.env`). Unlike `POST /api/translate-item`, which already caps
+// its `text` field at 1000 chars specifically to bound this cost (see
+// `modules/translation/translation.validation.ts`), these generic field schemas had no cap at
+// all — confirmed by directly creating a product with a ~26,600-char description: the request
+// took over 60 seconds (bumping into libreTranslate.ts's own 60s AbortSignal.timeout) because it
+// blocked on two real synchronous translation calls (en + hi) with no length limit. Any
+// authenticated user able to write a product/category/customer/sales-order/etc. could use this to
+// hang a request handler for a minute+ per call, and concurrent large submissions could starve the
+// shared 2-thread self-hosted LibreTranslate instance for every organization at once. 1000 chars
+// mirrors the existing translate-item cap and comfortably covers real name/description/notes/
+// address/reason values.
+const TRIMMED_STRING_MAX_LENGTH = 1000;
+exports.trimmedString = zod_1.z.string().trim().min(1).max(TRIMMED_STRING_MAX_LENGTH);
 exports.optionalTrimmedString = zod_1.z.preprocess((value) => {
     if (typeof value !== "string") {
         return value;
     }
     const trimmed = value.trim();
     return trimmed.length === 0 ? undefined : trimmed;
-}, zod_1.z.string().trim().min(1).optional());
+}, zod_1.z.string().trim().min(1).max(TRIMMED_STRING_MAX_LENGTH).optional());
 exports.nullableTrimmedString = zod_1.z.preprocess((value) => {
     if (typeof value !== "string") {
         return value;
     }
     const trimmed = value.trim();
     return trimmed.length === 0 ? null : trimmed;
-}, zod_1.z.string().trim().min(1).nullable().optional());
+}, zod_1.z.string().trim().min(1).max(TRIMMED_STRING_MAX_LENGTH).nullable().optional());
 // `z.coerce.boolean()` is a common Zod footgun for query params: it does `Boolean(value)`, so the
 // literal string "false" (any non-empty string) coerces to `true` instead of `false`. Use this for
 // any boolean query/body field where a caller might legitimately send an explicit `false`.
@@ -68,8 +83,11 @@ exports.optionalLongitudeSchema = zod_1.z.preprocess((value) => (value === "" ? 
 // Shared by both the shop-staff (`/api/users/device-token`) and driver
 // (`/api/driver/device-token`) registration endpoints — same payload shape either side of the
 // polymorphic DeviceToken model (see prisma schema: ownerType discriminates 'USER' vs 'DRIVER').
+// The prefix check isn't load-bearing (send-time code already filters non-Expo-format tokens
+// before calling Expo's API) but rejecting junk at registration gives the client immediate,
+// actionable feedback instead of a silent no-op days later when a push never arrives.
 exports.deviceTokenSchema = zod_1.z.object({
-    expoPushToken: exports.trimmedString,
+    expoPushToken: exports.trimmedString.regex(/^ExponentPushToken\[.+\]$/, "expoPushToken must be a valid Expo push token (ExponentPushToken[...])"),
     platform: zod_1.z.enum(["android", "ios"]).optional(),
 });
 function uniqueLanguageArraySchema(itemSchema) {

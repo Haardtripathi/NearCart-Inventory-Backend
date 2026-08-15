@@ -4,6 +4,8 @@ exports.BRANCH_ACCESS_SCOPES = void 0;
 exports.normalizeBranchAccess = normalizeBranchAccess;
 exports.assertBranchAccessInOrganization = assertBranchAccessInOrganization;
 exports.hasBranchAccess = hasBranchAccess;
+exports.assertBranchAccessOrThrow = assertBranchAccessOrThrow;
+exports.resolveBranchFilter = resolveBranchFilter;
 const ApiError_1 = require("./ApiError");
 exports.BRANCH_ACCESS_SCOPES = ["ALL", "SELECTED"];
 function normalizeBranchAccess(input) {
@@ -57,4 +59,46 @@ async function assertBranchAccessInOrganization(db, organizationId, branchAccess
 function hasBranchAccess(branchAccess, branchId) {
     const normalized = normalizeBranchAccess(branchAccess);
     return normalized.scope === "ALL" || normalized.branchIds.includes(branchId);
+}
+// Bug found live during the 2026-08-09 scenario sweep: `hasBranchAccess` above and
+// `OrganizationMembership.branchAccess` (SELECTED scope + a branchIds allowlist) have existed
+// since the Users module was built, but until now NOTHING outside users.service.ts/auth.service.ts
+// ever called `hasBranchAccess` — confirmed by grep, zero call sites anywhere in
+// inventory/sales-orders/purchases/stock-transfers. A STAFF/MANAGER member limited to one branch
+// could read and, where their role allowed it, write every OTHER branch's inventory, sales
+// orders, purchases, and transfers in the same org just by passing a different branchId —
+// reproduced live: a STAFF user scoped to "Main Branch" only could GET
+// /api/inventory/balances?branchId=<Warehouse> and get a 200 with that branch's real stock. The
+// two helpers below are the actual enforcement, wired into each module's controller.
+/**
+ * Throws 403 if the given branchId isn't in the caller's allowed set. No-op (always allowed) when
+ * `membershipBranchAccess` is `undefined` — that's the SUPER_ADMIN case (org.middleware.ts only
+ * populates `req.membership` for non-SUPER_ADMIN callers), consistent with every other
+ * SUPER_ADMIN bypass in this codebase.
+ */
+function assertBranchAccessOrThrow(membershipBranchAccess, branchId) {
+    if (membershipBranchAccess === undefined) {
+        return;
+    }
+    if (!hasBranchAccess(membershipBranchAccess, branchId)) {
+        throw ApiError_1.ApiError.forbidden("You do not have access to this branch");
+    }
+}
+/**
+ * Resolves the effective branch filter for a LIST endpoint: validates an explicit branchId the
+ * caller asked for (throws 403 if it's outside their access), or — when no explicit branchId was
+ * requested and the caller is SELECTED-scoped — returns their allowed branchIds so the caller can
+ * build a `branchId: { in: [...] }` filter instead of silently returning every branch in the org.
+ * Returns `undefined` for "no filter needed" (SUPER_ADMIN, ALL-scope, or an explicit single id).
+ */
+function resolveBranchFilter(membershipBranchAccess, requestedBranchId) {
+    if (requestedBranchId) {
+        assertBranchAccessOrThrow(membershipBranchAccess, requestedBranchId);
+        return requestedBranchId;
+    }
+    if (membershipBranchAccess === undefined) {
+        return undefined;
+    }
+    const normalized = normalizeBranchAccess(membershipBranchAccess);
+    return normalized.scope === "ALL" ? undefined : normalized.branchIds;
 }

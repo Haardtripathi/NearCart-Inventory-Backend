@@ -48,9 +48,18 @@ const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
  * split, unlike nodemailer/Resend which accept the combined string directly.
  */
 function parseFromAddress(raw) {
-    const match = raw.match(/^(.*)<(.+)>$/);
+    // Strip one layer of wrapping double-quotes before matching — found live in prod (2026-08-11):
+    // `BREVO_FROM` was configured as `"NearCart Inventory <address>"` (quotes included in the env
+    // var's actual value), which the regex below can't match because `$` requires the string to
+    // end right after `>`, not after a trailing `"`. That silently fell through to the
+    // `{ email: raw.trim() }` branch, sending the *entire* quoted "Name <address>" string as the
+    // sender email — Brevo correctly rejects that ("valid sender email required"), which surfaced
+    // as an uncaught 500 on every OTP-send call (registration/verification still succeeded
+    // underneath, so the user ended up with an unverifiable account and no error explaining why).
+    const trimmed = raw.trim().replace(/^"(.*)"$/, "$1").trim();
+    const match = trimmed.match(/^(.*)<(.+)>$/);
     if (!match) {
-        return { email: raw.trim() };
+        return { email: trimmed };
     }
     const name = match[1].trim();
     const email = match[2].trim();

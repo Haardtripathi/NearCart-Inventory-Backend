@@ -110,8 +110,8 @@ exports.SIDEBAR_MODULE_CATALOG = [
     {
         key: "taxRates",
         label: "Tax Rates",
-        description: "Manage tax rate records. Backend API exists but there is currently no frontend page for this module, so enabling it here has no visible effect yet.",
-        defaultEnabled: false,
+        description: "Manage tax rate records (rate, inclusive/exclusive, active status) used on sales orders.",
+        defaultEnabled: true,
         required: false,
     },
 ];

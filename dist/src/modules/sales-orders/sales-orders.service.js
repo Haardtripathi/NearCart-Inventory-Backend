@@ -8,7 +8,10 @@ exports.confirmSalesOrder = confirmSalesOrder;
 exports.rejectSalesOrder = rejectSalesOrder;
 exports.cancelSalesOrder = cancelSalesOrder;
 exports.deliverSalesOrder = deliverSalesOrder;
+exports.parseDeclinedDriverIds = parseDeclinedDriverIds;
 exports.findNearestFreeDriver = findNearestFreeDriver;
+exports.findNearestUnassignedOrderForDriver = findNearestUnassignedOrderForDriver;
+exports.notifyStaffOfAutoAssignFailure = notifyStaffOfAutoAssignFailure;
 exports.markSalesOrderReady = markSalesOrderReady;
 exports.assignDriverToSalesOrder = assignDriverToSalesOrder;
 const client_1 = require("@prisma/client");
@@ -25,6 +28,7 @@ const audit_service_1 = require("../audit/audit.service");
 const inventory_service_1 = require("../inventory/inventory.service");
 const order_event_webhook_service_1 = require("../../services/order-event-webhook.service");
 const push_notification_service_1 = require("../../services/push-notification.service");
+const notifications_service_1 = require("../notifications/notifications.service");
 const INTERACTIVE_TRANSACTION_OPTIONS = {
     maxWait: 10_000,
     timeout: 30_000,
@@ -107,7 +111,11 @@ async function listSalesOrders(organizationId, query) {
     const { page, limit, skip } = (0, pagination_1.getPagination)(query.page, query.limit);
     const where = {
         organizationId,
-        ...(query.branchId ? { branchId: query.branchId } : {}),
+        // branchId may be a single explicit filter or a branch-scoped caller's allowed-set array —
+        // see resolveBranchFilter in utils/branchAccess.ts, wired in from the controller.
+        ...(query.branchId
+            ? { branchId: Array.isArray(query.branchId) ? { in: query.branchId } : query.branchId }
+            : {}),
         ...(query.customerId ? { customerId: query.customerId } : {}),
         ...(query.status ? { status: query.status } : {}),
         ...(query.paymentStatus ? { paymentStatus: query.paymentStatus } : {}),
@@ -395,13 +403,27 @@ async function rejectSalesOrder(organizationId, orderId, actorUserId, rejectionR
     if (!EDITABLE_ORDER_STATUSES.includes(order.status)) {
         throw ApiError_1.ApiError.badRequest("Only draft or pending orders can be rejected");
     }
-    const updated = await prisma_1.prisma.salesOrder.update({
-        where: { id: orderId },
+    // Bug fixed: this used to be a plain `prisma.salesOrder.update` after the status checks above,
+    // with no re-check of status at write time — a classic TOCTOU race against `confirmSalesOrder`
+    // (which DOES atomically compare-and-swap). Two concurrent requests — a staff member clicking
+    // Confirm while another clicks Reject, or the order-confirmation-sweep cron auto-rejecting the
+    // same order a staff member is confirming — could both pass their own status check against the
+    // same stale read, then confirm decrements stock and this unconditional update would overwrite
+    // status back to REJECTED afterward, leaving a REJECTED order with stock already deducted and no
+    // reversal (REJECTED is defined as "nothing was ever deducted, no reversal needed"). Guarded the
+    // same way `confirmSalesOrder`/`markSalesOrderReady` already are: an atomic `updateMany` that
+    // only succeeds if the row is still in an editable status at the moment of the write itself.
+    const { count } = await prisma_1.prisma.salesOrder.updateMany({
+        where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
         data: {
             status: client_1.SalesOrderStatus.REJECTED,
             rejectionReason,
         },
     });
+    if (count === 0) {
+        throw ApiError_1.ApiError.conflict("Order is no longer draft/pending — it may have already been confirmed or rejected");
+    }
+    const updated = await prisma_1.prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
     await (0, entityFieldTranslations_1.syncEntityFieldTranslations)(prisma_1.prisma, {
         organizationId,
         entityType: "SalesOrder",
@@ -446,7 +468,37 @@ async function cancelSalesOrder(organizationId, orderId, actorUserId) {
         throw ApiError_1.ApiError.badRequest("Delivered or returned orders cannot be cancelled in this flow");
     }
     const cancelled = await prisma_1.prisma.$transaction(async (tx) => {
-        if (CANCELLABLE_STOCK_REVERSAL_STATUSES.includes(order.status)) {
+        // Bug fixed: this previously decided whether to reverse stock, and then whether to write
+        // CANCELLED at all, purely from the `order` snapshot read by `getSalesOrderById` BEFORE this
+        // transaction started — with no re-check of status at write time. That's a TOCTOU race against
+        // every other transition (confirm/reject/mark-ready/deliver), all of which DO atomically
+        // compare-and-swap their own status change. Concretely: if this order was CONFIRMED (stock
+        // already deducted) at read time but gets DELIVERED by someone else before this transaction's
+        // final `update` runs, the stale `order.status` still says CONFIRMED, so this code reverses
+        // stock for an order that was actually delivered (double-dipping the ledger) and then
+        // unconditionally overwrites DELIVERED back to CANCELLED — corrupting both the order status
+        // and the stock count for an item that was physically handed to the customer.
+        //
+        // Fixed by claiming the row atomically FIRST via `updateMany`, split into the two disjoint
+        // status sets that determine whether a reversal is owed (mirrors the same "atomic UPDATE...
+        // WHERE decides the transition" pattern already used by confirmSalesOrder/markSalesOrderReady/
+        // assignDriverToSalesOrder). Only the branch whose `updateMany` actually matched a row tells us
+        // which prior state we truly claimed — not the pre-transaction snapshot.
+        const deductedClaim = await tx.salesOrder.updateMany({
+            where: { id: orderId, organizationId, status: { in: CANCELLABLE_STOCK_REVERSAL_STATUSES } },
+            data: { status: client_1.SalesOrderStatus.CANCELLED },
+        });
+        const stockWasDeducted = deductedClaim.count > 0;
+        if (!stockWasDeducted) {
+            const undeductedClaim = await tx.salesOrder.updateMany({
+                where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
+                data: { status: client_1.SalesOrderStatus.CANCELLED },
+            });
+            if (undeductedClaim.count === 0) {
+                throw ApiError_1.ApiError.conflict("Order can no longer be cancelled — its status changed concurrently");
+            }
+        }
+        if (stockWasDeducted) {
             for (const item of order.items) {
                 await (0, inventory_service_1.applyStockMovement)(tx, {
                     organizationId,
@@ -462,12 +514,7 @@ async function cancelSalesOrder(organizationId, orderId, actorUserId) {
                 });
             }
         }
-        const updated = await tx.salesOrder.update({
-            where: { id: orderId },
-            data: {
-                status: client_1.SalesOrderStatus.CANCELLED,
-            },
-        });
+        const updated = await tx.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
         await (0, audit_service_1.createAuditLog)(tx, {
             organizationId,
             actorUserId,
@@ -504,14 +551,24 @@ async function deliverSalesOrder(organizationId, orderId, actorUserId) {
     if (!DELIVERABLE_ORDER_STATUSES.includes(order.status)) {
         throw ApiError_1.ApiError.badRequest("Only confirmed orders can be delivered");
     }
-    const updated = await prisma_1.prisma.salesOrder.update({
-        where: { id: orderId },
+    // Bug fixed: same TOCTOU class as reject/cancel above — this used to be an unconditional
+    // `prisma.salesOrder.update` after the status checks, so e.g. a concurrent cancel racing this
+    // deliver (both reading the same pre-transition status) could overwrite each other's terminal
+    // state depending on write order, or two concurrent deliver calls could both "succeed" past the
+    // already-delivered guard. Guarded with the same atomic-`updateMany`-then-conflict pattern used
+    // throughout this file.
+    const { count } = await prisma_1.prisma.salesOrder.updateMany({
+        where: { id: orderId, organizationId, status: { in: DELIVERABLE_ORDER_STATUSES } },
         data: {
             status: client_1.SalesOrderStatus.DELIVERED,
             deliveredAt: new Date(),
             deliveredById: actorUserId,
         },
     });
+    if (count === 0) {
+        throw ApiError_1.ApiError.conflict("Order is no longer in a deliverable state — it may have already been delivered or cancelled");
+    }
+    const updated = await prisma_1.prisma.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
     await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
         organizationId,
         actorUserId,
@@ -526,6 +583,11 @@ async function deliverSalesOrder(organizationId, orderId, actorUserId) {
             externalOrderId: updated.externalOrderId,
             status: updated.status,
             eventType: "DELIVERED",
+            // Staff-initiated deliver (as opposed to the driver-app flow in
+            // driver-orders.service.ts's deliverDriverOrder) never captures a new photo itself, but
+            // carries whatever's already on the row for consistency with that other DELIVERED sender —
+            // see NotifyOrderEventInput's doc comment.
+            deliveryProofPhotoUrl: updated.deliveryProofPhotoUrl,
         });
     }
     return updated;
@@ -550,6 +612,82 @@ function haversineDistanceKm(from, to) {
     return EARTH_RADIUS_KM * c;
 }
 /**
+ * Clamps a linear base+per-km driver fare between DRIVER_FARE_MIN/MAX (see config/env.ts's doc
+ * comment on those four DRIVER_FARE_* vars). Called once from `markSalesOrderReady` at mark-ready
+ * time using the branch↔delivery-address distance — NOT the same distance
+ * `findNearestFreeDriver` computes (branch↔candidate-driver, for matching purposes only). Rounded
+ * to 2 decimal places since this feeds a `Decimal` money column (`SalesOrder.driverDeliveryFee`).
+ */
+function computeDriverFare(distanceKm) {
+    const raw = env_1.env.DRIVER_FARE_BASE + env_1.env.DRIVER_FARE_PER_KM * distanceKm;
+    const clamped = Math.min(Math.max(raw, env_1.env.DRIVER_FARE_MIN), env_1.env.DRIVER_FARE_MAX);
+    return Math.round(clamped * 100) / 100;
+}
+/**
+ * Parses `SalesOrder.deliveryAddress` (a `Json?` column shaped `{ addressLine, latitude,
+ * longitude }`, see the doc comment on that column in schema.prisma) back into just the
+ * coordinates needed for fare calculation. Tolerant of null/malformed values (pre-migration rows
+ * with no deliveryAddress at all, or a row where latitude/longitude were never supplied) — returns
+ * null rather than throwing, mirroring `parseDeclinedDriverIds` below: a fare-calculation read
+ * should never be able to break the mark-ready transition itself.
+ *
+ * Bug found live 2026-08-15: this always returned null in production, confirmed by direct repro
+ * (fresh order, valid deliveryAddress and branch coordinates both present, fare fields still
+ * came back null). Root cause: `typeof deliveryAddress !== "object"` was tripping because the
+ * value read back through this codebase's Prisma+libSQL/Turso adapter setup was a raw JSON
+ * *string*, not an already-parsed object, in at least some cases — the exact conditions weren't
+ * fully pinned down, so this now handles the string case defensively via JSON.parse rather than
+ * assuming Prisma always deserializes `Json?` columns before this function sees them.
+ */
+function parseDeliveryAddressCoords(deliveryAddress) {
+    let value = deliveryAddress;
+    if (typeof value === "string") {
+        try {
+            value = JSON.parse(value);
+        }
+        catch {
+            return null;
+        }
+    }
+    if (typeof value !== "object" || value === null) {
+        return null;
+    }
+    const { latitude, longitude } = value;
+    if (typeof latitude !== "number" || typeof longitude !== "number") {
+        return null;
+    }
+    return { latitude, longitude };
+}
+/**
+ * Parses `SalesOrder.declinedByDriverIds` (a `Json?` column storing a plain string array of
+ * `Driver.id`s who have ever declined that specific order) back into a string array. Tolerant of
+ * null/malformed values (pre-migration rows, or any future manual DB edit) — falls back to an
+ * empty array rather than throwing, since a decline-history read should never be able to break
+ * order-matching.
+ *
+ * Bug found live 2026-08-15 (same root cause as parseDeliveryAddressCoords above): this silently
+ * returned `[]` in production even for orders with a real, previously-written decline history,
+ * because the value read back through this codebase's Prisma+libSQL/Turso setup was a raw JSON
+ * *string* in at least some cases, and `Array.isArray("...")` is always false on a string. That
+ * broke the "never re-offer to a driver who already declined" guarantee — a declined order could
+ * bounce right back to the same driver. Now handles the string case via JSON.parse first.
+ */
+function parseDeclinedDriverIds(value) {
+    let parsed = value;
+    if (typeof parsed === "string") {
+        try {
+            parsed = JSON.parse(parsed);
+        }
+        catch {
+            return [];
+        }
+    }
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+    return parsed.filter((entry) => typeof entry === "string");
+}
+/**
  * Ranks currently-free, VERIFIED drivers by distance from a branch's pickup-point coordinates and
  * returns the closest one within `DRIVER_MATCH_RADIUS_KM`, or `null` if the branch has no
  * coordinates set, no driver is free, or no free driver is within radius. "Free" = a driver has
@@ -557,8 +695,16 @@ function haversineDistanceKm(from, to) {
  * READY/OUT_FOR_DELIVERY (see the `Driver.assignedOrders` relation). Called automatically from
  * `markSalesOrderReady` below — the existing manual assign-driver dropdown in the Inventory
  * frontend remains available as a fallback when this returns null.
+ *
+ * `excludeDriverIds` — bug fixed 2026-08-07: this used to be a single `excludeDriverId?: string`,
+ * only ever excluding whichever driver had JUST declined THIS SPECIFIC call. That let two drivers
+ * ping-pong an order back and forth: driver A declines (excluded, reassigned to B) -> driver B
+ * also declines (only B is excluded this time, A is free again) -> A gets re-matched to the exact
+ * order they already turned down, with no memory of it. Callers should now pass the FULL
+ * accumulated decline history for the order (see `parseDeclinedDriverIds` +
+ * `SalesOrder.declinedByDriverIds`), not just the latest decliner.
  */
-async function findNearestFreeDriver(branchId, excludeDriverId) {
+async function findNearestFreeDriver(branchId, excludeDriverIds = []) {
     const branch = await prisma_1.prisma.branch.findUnique({
         where: { id: branchId },
         select: { latitude: true, longitude: true },
@@ -573,10 +719,18 @@ async function findNearestFreeDriver(branchId, excludeDriverId) {
             status: client_1.DriverStatus.VERIFIED,
             lastKnownLatitude: { not: null },
             lastKnownLongitude: { not: null },
-            // Excludes the driver who just declined this exact order (see driver-orders.service.ts
-            // declineDriverOrder) — without this, a lone available driver would immediately get
-            // re-matched to the same order they just turned down.
-            ...(excludeDriverId ? { id: { not: excludeDriverId } } : {}),
+            // Bug found live 2026-08-09: a driver whose location ping went silent (app killed, dead
+            // phone, no network) while still toggled "available" used to keep matching here forever on
+            // whatever coordinates it last reported, however old. The app pings ~once/minute while
+            // online (see updateDriverLocation), so anything older than DRIVER_LOCATION_STALE_MINUTES
+            // means the driver has effectively gone dark — treat them the same as "no location" rather
+            // than trusting a stale fix.
+            lastLocationAt: { gte: new Date(Date.now() - env_1.env.DRIVER_LOCATION_STALE_MINUTES * 60_000) },
+            // Excludes every driver who has ever declined this exact order (see
+            // driver-orders.service.ts declineDriverOrder + SalesOrder.declinedByDriverIds) — not just
+            // the single most recent decliner, so a small pool of drivers can't get bounced the same
+            // order back and forth indefinitely.
+            ...(excludeDriverIds.length > 0 ? { id: { notIn: excludeDriverIds } } : {}),
             assignedOrders: {
                 none: {
                     status: { in: ACTIVE_DRIVER_ORDER_STATUSES },
@@ -604,6 +758,128 @@ async function findNearestFreeDriver(branchId, excludeDriverId) {
     return nearest ? { id: nearest.id } : null;
 }
 /**
+ * Fix (2026-08-07, E2E_SCENARIOS_FAILURE_EDGECASES.md C4): the inverse of `findNearestFreeDriver`
+ * above — instead of "given a READY order, find the nearest free driver", this is "given a driver
+ * who just came online, find the nearest READY-and-unassigned order they could take". Called from
+ * `updateDriverAvailability` below right after a driver flips online, since previously nothing
+ * ever re-ran matching when a driver became available again — an order that went READY while 0
+ * drivers were online would sit unassigned forever unless a manager manually intervened.
+ *
+ * Deliberately narrow in scope per the fix's own instructions: matches AT MOST ONE order (the
+ * nearest eligible one) to this one driver — not a full re-balancing sweep across every
+ * READY-unassigned order and every online driver, which is a materially bigger feature. Reuses the
+ * same radius/distance/eligibility rules as the forward path: branch must have coordinates, order
+ * must be within `DRIVER_MATCH_RADIUS_KM` of the driver's last known location, and this driver
+ * must not be in that specific order's `declinedByDriverIds` history (mirrors
+ * `findNearestFreeDriver`'s exclusion — a driver coming back online shouldn't be immediately
+ * handed an order they already turned down).
+ */
+async function findNearestUnassignedOrderForDriver(driverId, driverLocation) {
+    const candidates = await prisma_1.prisma.salesOrder.findMany({
+        where: {
+            status: client_1.SalesOrderStatus.READY,
+            assignedDriverId: null,
+            branch: {
+                latitude: { not: null },
+                longitude: { not: null },
+            },
+        },
+        select: {
+            id: true,
+            declinedByDriverIds: true,
+            branch: { select: { latitude: true, longitude: true } },
+        },
+    });
+    let nearest = null;
+    for (const candidate of candidates) {
+        if (candidate.branch.latitude == null || candidate.branch.longitude == null) {
+            continue;
+        }
+        if (parseDeclinedDriverIds(candidate.declinedByDriverIds).includes(driverId)) {
+            continue;
+        }
+        const distanceKm = haversineDistanceKm(driverLocation, {
+            latitude: candidate.branch.latitude,
+            longitude: candidate.branch.longitude,
+        });
+        if (distanceKm > env_1.env.DRIVER_MATCH_RADIUS_KM) {
+            continue;
+        }
+        if (!nearest || distanceKm < nearest.distanceKm) {
+            nearest = { id: candidate.id, distanceKm };
+        }
+    }
+    return nearest ? { id: nearest.id } : null;
+}
+/**
+ * Re-derives WHY `findNearestFreeDriver` came back empty, for the human-facing notification below
+ * — `findNearestFreeDriver` itself just returns `null` either way, which is fine for the
+ * auto-assign control flow but not descriptive enough for a staff-facing alert. Cheap (single
+ * indexed row lookup), only ever called on the rare failure path, so re-checking branch
+ * coordinates here rather than threading a reason code through `findNearestFreeDriver`'s return
+ * type (which every other caller would then have to unpack) is the simpler tradeoff.
+ */
+async function determineAutoAssignFailureReason(branchId) {
+    const branch = await prisma_1.prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { latitude: true, longitude: true },
+    });
+    if (!branch || branch.latitude == null || branch.longitude == null) {
+        return "NO_BRANCH_COORDINATES";
+    }
+    return "NO_DRIVER_AVAILABLE";
+}
+/**
+ * Fix (2026-08-07, E2E_SCENARIOS_CONTEXTUAL.md B6 / FAILURE_EDGECASES.md C4): previously, when
+ * auto-assignment found no match, a READY order was left completely invisible — no audit log
+ * entry beyond the unremarkable ORDER_READY transition, no notification, nothing. A human could
+ * only discover the gap by opening that exact order's detail page. This writes an
+ * ORDER_AUTOASSIGN_FAILED audit entry AND a NEW_ORDER-style NotificationLog + push to org staff,
+ * reusing the exact same record+push pattern `createBridgedSalesOrder` already uses for new-order
+ * alerts (see marketplace.service.ts) rather than inventing a second alerting mechanism.
+ * Best-effort/never-throws: called from a context where auto-assignment has already failed, so a
+ * failure here must not turn that into a harder error.
+ *
+ * Exported (2026-08-08 bug-hunt sweep): originally only called from `markSalesOrderReady` below,
+ * but `declineDriverOrder`'s own failed-rematch path (driver-orders.service.ts) left the exact
+ * same READY-and-unassigned state with zero trace — arguably the MORE common way an order ends up
+ * stuck, since it requires an active decline rather than just an empty driver pool at ready-time.
+ * Exporting so both call sites share one alerting path instead of drifting into two.
+ */
+async function notifyStaffOfAutoAssignFailure(organizationId, order) {
+    try {
+        const reason = await determineAutoAssignFailureReason(order.branchId);
+        await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+            organizationId,
+            action: client_1.AuditAction.ORDER_AUTOASSIGN_FAILED,
+            entityType: "SalesOrder",
+            entityId: order.id,
+            meta: { reason },
+        });
+        const title = "Driver auto-assignment failed";
+        const body = `Order #${order.orderNumber} is ready but no driver could be auto-assigned — assign manually.`;
+        const data = { salesOrderId: order.id, reason };
+        void (0, push_notification_service_1.sendPushToOrgStaff)(organizationId, {
+            title,
+            body,
+            data,
+            channelId: "order_alert",
+        }).catch((error) => {
+            console.warn(`[sales-orders] Failed to push auto-assign-failure alert to org staff for order ${order.id}`, error);
+        });
+        await (0, notifications_service_1.recordNotificationLog)(prisma_1.prisma, {
+            organizationId,
+            type: client_1.NotificationLogType.ORDER_AUTOASSIGN_FAILED,
+            title,
+            body,
+            data,
+        });
+    }
+    catch (error) {
+        console.warn(`[sales-orders] Failed to record auto-assign-failure notification for order ${order.id}`, error);
+    }
+}
+/**
  * Transitions CONFIRMED -> READY, the first of the two previously-dead SalesOrderStatus
  * transitions to get wired up. Separate step from assign-driver (below) since the shop may mark
  * an order ready for pickup before a driver has been assigned — matching the locked
@@ -615,6 +891,19 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
     if (order.status !== client_1.SalesOrderStatus.CONFIRMED) {
         throw ApiError_1.ApiError.badRequest("Only confirmed orders can be marked ready");
     }
+    // Distance-based driver fare (branch pickup-point <-> delivery address), computed here — before
+    // entering the transaction — so it can be written as literal data in the same atomic
+    // `updateMany` below rather than a separate round-trip. Both null when either coordinate set is
+    // missing (see doc comments on SalesOrder.estimatedDistanceKm/driverDeliveryFee in
+    // schema.prisma); the earnings summary falls back to the flat DRIVER_DELIVERY_FEE rate for those
+    // rows. Deliberately distinct from findNearestFreeDriver's branch<->candidate-driver distance —
+    // do not conflate the two.
+    const branchCoords = order.branch?.latitude != null && order.branch?.longitude != null
+        ? { latitude: order.branch.latitude, longitude: order.branch.longitude }
+        : null;
+    const deliveryCoords = parseDeliveryAddressCoords(order.deliveryAddress);
+    const estimatedDistanceKm = branchCoords && deliveryCoords ? haversineDistanceKm(branchCoords, deliveryCoords) : null;
+    const driverDeliveryFee = estimatedDistanceKm != null ? computeDriverFare(estimatedDistanceKm) : null;
     const updated = await prisma_1.prisma.$transaction(async (tx) => {
         // Guard against a concurrent request racing this same transition: `updateMany` compiles to a
         // single atomic `UPDATE ... WHERE` statement on any engine, so only one concurrent caller can
@@ -625,6 +914,8 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
                 status: client_1.SalesOrderStatus.READY,
                 readyAt: new Date(),
                 readyById: actorUserId,
+                estimatedDistanceKm,
+                driverDeliveryFee: driverDeliveryFee != null ? (0, decimal_1.toDecimal)(driverDeliveryFee) : null,
             },
         });
         if (count === 0) {
@@ -669,6 +960,11 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
     catch (error) {
         console.warn(`[sales-orders] Nearest-free-driver auto-assignment failed for order ${updated.id}`, error);
     }
+    // No driver got assigned — either findNearestFreeDriver came back empty (no branch coordinates
+    // or no free driver in range) or assignDriverToSalesOrder itself threw (e.g. a race against
+    // another concurrent assignment). Either way the order is READY-and-unassigned with nothing
+    // else pointing a human at it — see notifyStaffOfAutoAssignFailure's doc comment.
+    void notifyStaffOfAutoAssignFailure(organizationId, updated);
     return updated;
 }
 /**

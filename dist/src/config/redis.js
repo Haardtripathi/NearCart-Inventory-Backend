@@ -62,6 +62,14 @@ class UpstashRestRedisClient {
     async call(command, ...args) {
         return this.runCommand(command, args);
     }
+    async del(key) {
+        const result = await this.runCommand("DEL", [this.normalizeKey(key)]);
+        return Number(result) || 0;
+    }
+    async ttl(key) {
+        const result = await this.runCommand("TTL", [this.normalizeKey(key)]);
+        return Number(result);
+    }
     async connect() {
         this.status = "connecting";
         await this.runCommand("PING");
@@ -96,6 +104,12 @@ class IoredisClientAdapter {
     }
     async call(command, ...args) {
         return this.client.call(command, ...args.map((value) => String(value)));
+    }
+    async del(key) {
+        return this.client.del(key);
+    }
+    async ttl(key) {
+        return this.client.ttl(key);
     }
     async connect() {
         await this.client.connect();

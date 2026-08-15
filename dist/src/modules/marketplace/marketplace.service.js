@@ -24,6 +24,7 @@ const stock_1 = require("../../utils/stock");
 const prismaErrors_1 = require("../../utils/prismaErrors");
 const audit_service_1 = require("../audit/audit.service");
 const sales_orders_service_1 = require("../sales-orders/sales-orders.service");
+const notifications_service_1 = require("../notifications/notifications.service");
 const push_notification_service_1 = require("../../services/push-notification.service");
 function toNumber(value) {
     return Number(new client_1.Prisma.Decimal(value ?? 0).toString());
@@ -600,6 +601,7 @@ function summarizeSalesOrder(order) {
         rejectionReason: order.rejectionReason ?? undefined,
         confirmedAt: order.confirmedAt?.toISOString(),
         deliveredAt: order.deliveredAt?.toISOString(),
+        deliveryProofPhotoUrl: order.deliveryProofPhotoUrl ?? undefined,
     };
 }
 async function findOrCreateBridgeCustomer(organizationId, customerInput) {
@@ -769,13 +771,31 @@ async function createBridgedSalesOrder(organizationId, input) {
         // leading `organizationMembership`/`deviceToken` lookups are not guarded, so a transient DB
         // error there would otherwise become an unhandled promise rejection on this fire-and-forget
         // call and crash the process (same bug class documented elsewhere this session).
+        const pushTitle = "New order received";
+        const pushBody = `Order #${created.orderNumber} — ${preparedItems.length} item(s), ${created.total.toString()} total.`;
+        const pushData = { salesOrderId: created.id };
         void (0, push_notification_service_1.sendPushToOrgStaff)(organizationId, {
-            title: "New order received",
-            body: `Order #${created.orderNumber} — ${preparedItems.length} item(s), ${created.total.toString()} total.`,
-            data: { salesOrderId: created.id },
+            title: pushTitle,
+            body: pushBody,
+            data: pushData,
             channelId: "order_alert",
         }).catch((error) => {
             console.warn(`[marketplace] Failed to notify org staff of new order ${created.id}`, error);
+        });
+        // Persisted alongside the push above so the mobile app's alerts-history screen has something
+        // to show beyond a transient OS notification — see notifications.service.ts. Runs after the
+        // creating transaction has already committed (this whole block is outside the
+        // prisma.$transaction above), so this uses the plain `prisma` client, not a tx — and is
+        // fire-and-forget for the same reason as the push it accompanies: a failure here must never
+        // fail order creation, which has already succeeded by this point regardless.
+        void (0, notifications_service_1.recordNotificationLog)(prisma_1.prisma, {
+            organizationId,
+            type: client_1.NotificationLogType.NEW_ORDER,
+            title: pushTitle,
+            body: pushBody,
+            data: pushData,
+        }).catch((error) => {
+            console.warn(`[marketplace] Failed to record new-order notification log for order ${created.id}`, error);
         });
         return { ...summarizeSalesOrder(created), created: true };
     }

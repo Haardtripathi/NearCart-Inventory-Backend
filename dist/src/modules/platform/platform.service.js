@@ -5,6 +5,7 @@ exports.createIndustry = createIndustry;
 exports.updateIndustry = updateIndustry;
 exports.listPlatformDrivers = listPlatformDrivers;
 exports.verifyPlatformDriver = verifyPlatformDriver;
+exports.listPlatformOrganizations = listPlatformOrganizations;
 exports.suspendPlatformDriver = suspendPlatformDriver;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
@@ -190,6 +191,46 @@ async function verifyPlatformDriver(actorUserId, driverId) {
         after: { status: updated.status },
     });
     return serializeDriver(updated);
+}
+// Contract fixed by the frontend/mobile clients ahead of this endpoint existing — see
+// NearCart-Inventory/frontend's `src/types/platform.ts` (`PlatformOrganizationOverview`) and
+// `src/features/platform/platform.api.ts`. One row per non-deleted organization with cheap
+// activity signals a SUPER_ADMIN needs to pick/triage an org, not full org detail.
+async function listPlatformOrganizations() {
+    const organizations = await prisma_1.prisma.organization.findMany({
+        where: { deletedAt: null },
+        orderBy: { createdAt: "desc" },
+        select: {
+            id: true,
+            name: true,
+            slug: true,
+            status: true,
+            createdAt: true,
+            _count: {
+                select: {
+                    branches: true,
+                    memberships: true,
+                    salesOrders: true,
+                },
+            },
+            salesOrders: {
+                orderBy: { createdAt: "desc" },
+                take: 1,
+                select: { createdAt: true },
+            },
+        },
+    });
+    return organizations.map((organization) => ({
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        status: organization.status,
+        createdAt: organization.createdAt.toISOString(),
+        branchCount: organization._count.branches,
+        memberCount: organization._count.memberships,
+        salesOrderCount: organization._count.salesOrders,
+        lastSalesOrderAt: organization.salesOrders[0]?.createdAt.toISOString() ?? null,
+    }));
 }
 async function suspendPlatformDriver(actorUserId, driverId) {
     const driver = await getDriverOrThrow(driverId);

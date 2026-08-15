@@ -9,6 +9,7 @@ import {
   createIndustryController,
   getIndustriesController,
   getPlatformDriversController,
+  getPlatformOrganizationsController,
   suspendPlatformDriverController,
   updateIndustryController,
   verifyPlatformDriverController,
@@ -36,6 +37,17 @@ platformRouter.patch(
   requireRoles(UserRole.SUPER_ADMIN),
   validateRequest({ body: updateIndustrySchema }),
   asyncHandler(updateIndustryController),
+);
+
+// Platform-wide organization list — SUPER_ADMIN only, used both by the web PlatformOrganizations
+// page and the mobile app's org-picker for a SUPER_ADMIN (who has no org membership to derive a
+// list from). Contract fixed ahead of this endpoint existing — see frontend's
+// src/types/platform.ts / src/features/platform/platform.api.ts.
+platformRouter.get(
+  "/organizations",
+  authenticate,
+  requireRoles(UserRole.SUPER_ADMIN),
+  asyncHandler(getPlatformOrganizationsController),
 );
 
 // Platform-admin driver verification — see PHASE1_REQUIREMENTS.md's "Driver API contract".

@@ -6,6 +6,7 @@ import {
   createIndustry,
   listIndustries,
   listPlatformDrivers,
+  listPlatformOrganizations,
   suspendPlatformDriver,
   updateIndustry,
   verifyPlatformDriver,
@@ -27,6 +28,11 @@ export async function updateIndustryController(req: Request, res: Response) {
   const localeContext = await resolveLocaleContext(req);
   const data = await updateIndustry(req.params.id!, req.body, localeContext);
   return sendSuccess(res, 200, "Industry updated successfully", data);
+}
+
+export async function getPlatformOrganizationsController(_req: Request, res: Response) {
+  const data = await listPlatformOrganizations();
+  return sendSuccess(res, 200, "Organizations fetched successfully", data);
 }
 
 export async function getPlatformDriversController(req: Request, res: Response) {

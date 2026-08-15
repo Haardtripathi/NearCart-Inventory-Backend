@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getIndustriesController = getIndustriesController;
 exports.createIndustryController = createIndustryController;
 exports.updateIndustryController = updateIndustryController;
+exports.getPlatformOrganizationsController = getPlatformOrganizationsController;
 exports.getPlatformDriversController = getPlatformDriversController;
 exports.verifyPlatformDriverController = verifyPlatformDriverController;
 exports.suspendPlatformDriverController = suspendPlatformDriverController;
@@ -23,6 +24,10 @@ async function updateIndustryController(req, res) {
     const localeContext = await (0, localization_1.resolveLocaleContext)(req);
     const data = await (0, platform_service_1.updateIndustry)(req.params.id, req.body, localeContext);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Industry updated successfully", data);
+}
+async function getPlatformOrganizationsController(_req, res) {
+    const data = await (0, platform_service_1.listPlatformOrganizations)();
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Organizations fetched successfully", data);
 }
 async function getPlatformDriversController(req, res) {
     const data = await (0, platform_service_1.listPlatformDrivers)(req.query);

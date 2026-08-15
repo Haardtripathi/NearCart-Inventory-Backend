@@ -41,8 +41,9 @@ async function enrichWithAutoTranslations(args) {
     if (missingLanguages.length === 0) {
         return Array.from(translationByLanguage.values());
     }
-    // Guarantee complete multilingual rows even when machine translation is disabled.
-    if (!env_1.env.AUTO_TRANSLATE_ON_WRITE) {
+    // Guarantee complete multilingual rows even when machine translation is disabled (globally, or
+    // for just this one request via skipAutoTranslate).
+    if (!env_1.env.AUTO_TRANSLATE_ON_WRITE || args.skipAutoTranslate) {
         for (const language of missingLanguages) {
             translationByLanguage.set(language, {
                 language,

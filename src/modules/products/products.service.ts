@@ -533,6 +533,7 @@ async function createVariantRecord(
 async function enrichVariantPayloadTranslations(
   organizationId: string,
   variants: NormalizedVariantInput[],
+  skipAutoTranslate?: boolean,
 ): Promise<NormalizedVariantInput[]> {
   return Promise.all(
     variants.map(async (variant) => ({
@@ -541,6 +542,7 @@ async function enrichVariantPayloadTranslations(
         organizationId,
         baseName: variant.name,
         existingTranslations: variant.translations,
+        skipAutoTranslate,
       }),
     })),
   );
@@ -648,6 +650,7 @@ export async function createProduct(
     translations?: ProductTranslationInput[];
     defaultVariant?: VariantInput;
     variants?: VariantInput[];
+    skipAutoTranslate?: boolean;
   },
   localeContext: LocaleContext,
 ) {
@@ -688,11 +691,13 @@ export async function createProduct(
     baseName: input.name,
     baseDescription: input.description,
     existingTranslations: input.translations,
+    skipAutoTranslate: input.skipAutoTranslate,
   });
 
   const normalizedVariants = await enrichVariantPayloadTranslations(
     organizationId,
     normalizeVariantPayload(input.name, computedHasVariants, rawVariants),
+    input.skipAutoTranslate,
   );
   const slug = slugify(input.slug ?? input.name);
 

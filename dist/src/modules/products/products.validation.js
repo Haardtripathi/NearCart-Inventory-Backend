@@ -32,6 +32,7 @@ const variantInputSchema = zod_1.z.object({
     customFields: zod_1.z.unknown().optional(),
     metadata: zod_1.z.unknown().optional(),
     translations: (0, validation_1.uniqueLanguageArraySchema)(variantTranslationSchema).optional(),
+    skipAutoTranslate: zod_1.z.boolean().optional(),
 });
 const productBaseSchema = zod_1.z.object({
     categoryId: validation_1.optionalTrimmedString,
@@ -54,6 +55,9 @@ const productBaseSchema = zod_1.z.object({
     customFields: zod_1.z.unknown().optional(),
     metadata: zod_1.z.unknown().optional(),
     translations: (0, validation_1.uniqueLanguageArraySchema)(productTranslationSchema).optional(),
+    // Lets the client skip the outbound LibreTranslate call for this request — see
+    // utils/autoTranslate.ts's enrichWithAutoTranslations. Defaults to false (unchanged behavior).
+    skipAutoTranslate: zod_1.z.boolean().optional(),
 });
 exports.productQuerySchema = validation_1.paginationQuerySchema.extend({
     status: zod_1.z.nativeEnum(client_1.ProductStatus).optional(),

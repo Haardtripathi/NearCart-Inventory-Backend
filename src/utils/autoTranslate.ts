@@ -37,6 +37,11 @@ export async function enrichWithAutoTranslations<T extends TranslationLike>(args
   baseDescription?: string;
   sourceLanguage?: LanguageCode | "AUTO";
   existingTranslations?: T[];
+  // Lets a caller opt a single request out of the outbound LibreTranslate call entirely (e.g. a
+  // mobile "skip translation" toggle) — takes the same fast, no-network fallback path as
+  // AUTO_TRANSLATE_ON_WRITE=false (base name/description echoed into every missing language),
+  // without touching the org-wide/env-wide setting for every other request.
+  skipAutoTranslate?: boolean;
 }): Promise<T[]> {
   const existingTranslations = args.existingTranslations ?? [];
 
@@ -69,8 +74,9 @@ export async function enrichWithAutoTranslations<T extends TranslationLike>(args
     return Array.from(translationByLanguage.values());
   }
 
-  // Guarantee complete multilingual rows even when machine translation is disabled.
-  if (!env.AUTO_TRANSLATE_ON_WRITE) {
+  // Guarantee complete multilingual rows even when machine translation is disabled (globally, or
+  // for just this one request via skipAutoTranslate).
+  if (!env.AUTO_TRANSLATE_ON_WRITE || args.skipAutoTranslate) {
     for (const language of missingLanguages) {
       translationByLanguage.set(language, {
         language,

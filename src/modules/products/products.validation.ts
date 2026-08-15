@@ -42,6 +42,7 @@ const variantInputSchema = z.object({
   customFields: z.unknown().optional(),
   metadata: z.unknown().optional(),
   translations: uniqueLanguageArraySchema(variantTranslationSchema).optional(),
+  skipAutoTranslate: z.boolean().optional(),
 });
 
 const productBaseSchema = z.object({
@@ -65,6 +66,9 @@ const productBaseSchema = z.object({
   customFields: z.unknown().optional(),
   metadata: z.unknown().optional(),
   translations: uniqueLanguageArraySchema(productTranslationSchema).optional(),
+  // Lets the client skip the outbound LibreTranslate call for this request — see
+  // utils/autoTranslate.ts's enrichWithAutoTranslations. Defaults to false (unchanged behavior).
+  skipAutoTranslate: z.boolean().optional(),
 });
 
 export const productQuerySchema = paginationQuerySchema.extend({

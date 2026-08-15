@@ -381,13 +381,14 @@ async function createVariantRecord(db, organizationId, productId, input) {
 }
 /** Resolves auto-translations for a batch of variants before any transaction opens (see the
  * `createVariantRecord` comment above for why this must happen up front). */
-async function enrichVariantPayloadTranslations(organizationId, variants) {
+async function enrichVariantPayloadTranslations(organizationId, variants, skipAutoTranslate) {
     return Promise.all(variants.map(async (variant) => ({
         ...variant,
         translations: await (0, autoTranslate_1.enrichWithAutoTranslations)({
             organizationId,
             baseName: variant.name,
             existingTranslations: variant.translations,
+            skipAutoTranslate,
         }),
     })));
 }
@@ -481,8 +482,9 @@ async function createProduct(organizationId, actorUserId, input, localeContext) 
         baseName: input.name,
         baseDescription: input.description,
         existingTranslations: input.translations,
+        skipAutoTranslate: input.skipAutoTranslate,
     });
-    const normalizedVariants = await enrichVariantPayloadTranslations(organizationId, normalizeVariantPayload(input.name, computedHasVariants, rawVariants));
+    const normalizedVariants = await enrichVariantPayloadTranslations(organizationId, normalizeVariantPayload(input.name, computedHasVariants, rawVariants), input.skipAutoTranslate);
     const slug = (0, slug_1.slugify)(input.slug ?? input.name);
     const productId = await prisma_1.prisma.$transaction(async (tx) => {
         const product = await tx.product.create({

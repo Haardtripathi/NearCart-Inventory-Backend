@@ -22,23 +22,26 @@ const configuredCorsOrigins = env.CORS_ORIGIN.split(",")
   .map((origin) =>
     /^https?:\/\//i.test(origin) ? origin : `http://${origin}`,
   );
-const developmentCorsOrigins =
-  env.NODE_ENV === "development"
-    ? [
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-      ]
-    : [];
-const corsOrigins = Array.from(
-  new Set([...configuredCorsOrigins, ...developmentCorsOrigins]),
-);
+// Any localhost/127.0.0.1 port, not just the frontend's usual 5173-5175 — dev tooling (Expo web
+// preview, Playwright, etc.) binds to arbitrary ports, and a hardcoded port list here previously
+// CORS-blocked anything not on that exact list even though this only ever runs in development.
+// Mirrors NearCart/backend's src/config/cors.ts, which already solved this the same way.
+const localOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 app.use(helmet());
 app.use(
   cors({
-    origin: corsOrigins,
+    origin(origin, callback) {
+      const isAllowedLocalOrigin =
+        env.NODE_ENV !== "production" && localOriginPattern.test(origin ?? "");
+
+      if (!origin || configuredCorsOrigins.includes(origin) || isAllowedLocalOrigin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
     credentials: true,
   }),
 );

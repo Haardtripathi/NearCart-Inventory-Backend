@@ -55,24 +55,51 @@ function parseJsonFromModelOutput(output: unknown): ModelJsonResponse | null {
   }
 }
 
+// Cloudinary's secure_url points at the full-resolution original (a phone camera photo, often
+// 3000x4000+ and several MB) — feeding that straight into a 13B vision model measurably slows
+// inference on top of this community model's own cold-start latency. Downsize+compress on the fly
+// via a Cloudinary URL transform before handing the image to Replicate; the stored original
+// (used elsewhere for driver-profile/back-office display) is untouched.
+function toVisionModelUrl(imageUrl: string): string {
+  const marker = "/upload/";
+  const index = imageUrl.indexOf(marker);
+  if (index === -1) return imageUrl;
+
+  const insertAt = index + marker.length;
+  return `${imageUrl.slice(0, insertAt)}w_1024,c_limit,q_auto:good,f_auto/${imageUrl.slice(insertAt)}`;
+}
+
+// yorickvp/llava-13b is a community model with no dedicated/warm hardware — a cold start plus
+// inference can take minutes with no built-in ceiling from the Replicate SDK's `run()`, which
+// previously just hung until *something else* gave up: the mobile client's 60s axios timeout, or
+// (more often, and sooner) Render's own gateway, which severs the still-in-flight connection and
+// hands the client a bare 502 with no useful body. Bounding the call ourselves means we always
+// resolve first, on our terms, with the clean 503 below instead of an opaque gateway error.
+const VISION_MODEL_TIMEOUT_MS = 45_000;
+
 async function runVisionPrompt(imageUrl: string, prompt: string): Promise<ModelJsonResponse | null> {
   let output: unknown;
 
   try {
     output = await getClient().run(VISION_MODEL, {
       input: {
-        image: imageUrl,
+        image: toVisionModelUrl(imageUrl),
         prompt,
         max_tokens: 512,
       },
+      signal: AbortSignal.timeout(VISION_MODEL_TIMEOUT_MS),
     });
   } catch (error) {
-    // A raw Replicate/model failure (rate limit, model-side error, transient outage) previously
-    // bubbled up as an uncaught 500 with the third-party error string forwarded straight to the
-    // client (e.g. "Prediction failed: mean must have 1 elements...") — the wrong status code (this
-    // isn't our bug) and a message no driver/shop-owner could act on. Log the real cause
-    // server-side, surface a clean 503 instead.
-    console.error("[replicate] Vision prediction failed:", error);
+    // A raw Replicate/model failure (rate limit, model-side error, transient outage, or our own
+    // timeout above) previously bubbled up as an uncaught 500 with the third-party error string
+    // forwarded straight to the client (e.g. "Prediction failed: mean must have 1 elements...") —
+    // the wrong status code (this isn't our bug) and a message no driver/shop-owner could act on.
+    // Log the real cause server-side, surface a clean 503 instead.
+    const isTimeout = error instanceof Error && error.name === "TimeoutError";
+    console.error(
+      isTimeout ? `[replicate] Vision prediction timed out after ${VISION_MODEL_TIMEOUT_MS}ms` : "[replicate] Vision prediction failed:",
+      isTimeout ? undefined : error,
+    );
     throw ApiError.serviceUnavailable(
       "Photo verification service is temporarily unavailable. Please try again in a moment.",
     );

@@ -37,8 +37,8 @@ import { createClient } from "@libsql/client";
 import fs from "node:fs";
 import path from "node:path";
 
-const INVENTORY_BASE = "https://nearcart-inventory-backend.onrender.com/api";
-const NEARCART_BASE = "https://nearcart-backend.onrender.com/api";
+const INVENTORY_BASE = "https://nearcart-inventory-backend-uf5i.onrender.com/api";
+const NEARCART_BASE = "https://nearcart-backend-1.onrender.com/api";
 
 const envPath = path.resolve(process.cwd(), ".env");
 const envText = fs.readFileSync(envPath, "utf8");

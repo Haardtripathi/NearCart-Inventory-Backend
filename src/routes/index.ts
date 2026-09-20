@@ -29,6 +29,7 @@ import { driversRouter } from "../modules/drivers/drivers.route";
 import { driverVerificationRouter } from "../modules/driver-verification/driver-verification.route";
 import { analyticsRouter } from "../modules/analytics/analytics.route";
 import { notificationsRouter } from "../modules/notifications/notifications.route";
+import { shopStatusRouter } from "../modules/shop-status/shop-status.route";
 
 export const apiRouter = Router();
 
@@ -62,8 +63,22 @@ apiRouter.use("/translate-item", translationRouter);
 apiRouter.use("/uploads", uploadsRouter);
 apiRouter.use("/internal/marketplace", marketplaceRouter);
 apiRouter.use("/driver-auth", driverAuthRouter);
-apiRouter.use("/driver", driverOrdersRouter);
+// Bug fix: driverVerificationRouter must mount BEFORE driverOrdersRouter. Both share the "/driver"
+// prefix and each does a path-less `router.use(<authMiddleware>)` — that runs unconditionally for
+// EVERY request under the prefix the moment it enters that router, before Express even checks
+// whether any route further down matches. With driverOrdersRouter mounted first (as it was),
+// every /driver/verification/* request hit driverOrdersRouter's strict `authenticateDriver` FIRST
+// (rejecting any non-VERIFIED driver) and never reached driverVerificationRouter's own, more
+// permissive `authenticateDriverForVerification` at all — silently defeating the pending-driver
+// evidence-submission fix (see driverAuth.middleware.ts). Mounting verification first fixes this:
+// a /driver/verification/* request now matches a real route there and responds without ever
+// falling through to driverOrdersRouter. A /driver/orders (etc.) request still falls through
+// driverVerificationRouter (no matching route there) to driverOrdersRouter's own check, which
+// still gates it exactly as strictly as before — this only reorders which router's blanket
+// middleware runs first, not what either one allows.
 apiRouter.use("/driver", driverVerificationRouter);
+apiRouter.use("/driver", driverOrdersRouter);
 apiRouter.use("/drivers", driversRouter);
 apiRouter.use("/analytics", analyticsRouter);
 apiRouter.use("/notifications", notificationsRouter);
+apiRouter.use("/shop-status", shopStatusRouter);

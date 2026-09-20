@@ -4,7 +4,7 @@ import bcrypt from "bcrypt";
 import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
 import { ApiError } from "../../utils/ApiError";
-import { signDriverAuthToken } from "../../utils/driverJwt";
+import { signDriverAuthToken, signDriverVerificationPendingToken } from "../../utils/driverJwt";
 import {
   createDriverRefreshSession,
   revokeDriverRefreshSession,
@@ -39,10 +39,18 @@ interface LoginDriverInput {
  */
 export class DriverStatusError extends Error {
   code: "DRIVER_NOT_VERIFIED" | "DRIVER_SUSPENDED";
+  // Only ever set alongside DRIVER_NOT_VERIFIED — see loginDriver below. Lets a driver who is
+  // still PENDING_VERIFICATION (including one who registered before this token existed) obtain a
+  // fresh evidence-submission token from the same login call the app already makes, without a new
+  // endpoint. Additive on the existing locked `{error:{code,message}}` contract (see
+  // driver-auth.controller.ts) — an older client that doesn't know this field exists just ignores
+  // it, same login-rejected UX as before.
+  verificationToken?: string;
 
-  constructor(code: "DRIVER_NOT_VERIFIED" | "DRIVER_SUSPENDED", message: string) {
+  constructor(code: "DRIVER_NOT_VERIFIED" | "DRIVER_SUSPENDED", message: string, verificationToken?: string) {
     super(message);
     this.code = code;
+    this.verificationToken = verificationToken;
   }
 }
 
@@ -144,7 +152,14 @@ export async function registerDriver(input: RegisterDriverInput) {
     after: serializeDriver(driver),
   });
 
-  return serializeDriver(driver);
+  // See driverJwt.ts's signDriverVerificationPendingToken doc comment: a freshly-registered driver
+  // is PENDING_VERIFICATION and `loginDriver` won't issue a real session until a SUPER_ADMIN
+  // approves them, so without this they'd have no way to reach the vehicle-photo/license
+  // evidence-submission endpoints at all. Returned alongside `driver`, additive to this
+  // endpoint's existing response shape.
+  const verificationToken = signDriverVerificationPendingToken({ driverId: driver.id });
+
+  return { driver: serializeDriver(driver), verificationToken };
 }
 
 export async function loginDriver(input: LoginDriverInput) {
@@ -170,9 +185,17 @@ export async function loginDriver(input: LoginDriverInput) {
   }
 
   if (driver.status !== DriverStatus.VERIFIED) {
+    // Reissue a fresh evidence-submission token on every pending login attempt (cheap — just a
+    // JWT sign, no DB write) rather than only at registration: covers a driver who registered
+    // before this token existed, or whose earlier one expired/was lost, without needing a new
+    // endpoint. Gated behind the bcrypt password check above, so this isn't a new enumeration
+    // surface — only the actual account owner can pull a token this way.
+    const verificationToken = signDriverVerificationPendingToken({ driverId: driver.id });
+
     throw new DriverStatusError(
       "DRIVER_NOT_VERIFIED",
       "Your driver account is still pending verification. We'll notify you once it's approved.",
+      verificationToken,
     );
   }
 

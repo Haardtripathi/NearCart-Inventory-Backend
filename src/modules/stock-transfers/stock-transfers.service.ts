@@ -231,8 +231,17 @@ export async function updateStockTransfer(
   const items = input.items ? await prepareTransferItems(organizationId, input.items) : null;
 
   await prisma.$transaction(async (tx) => {
-    await tx.stockTransfer.update({
-      where: { id: transferId },
+    // Bug fix: this used to be a plain `tx.stockTransfer.update({where: {id: transferId}})` with no
+    // status predicate — a concurrent `approveStockTransfer` that had already moved the transfer out
+    // of DRAFT between the check above and this write would be silently overridden, rewriting
+    // items/branches on a transfer that's already APPROVED (with stock already moved for the OLD
+    // quantities/branches). Guarded the same way `approveStockTransfer` already guards its own
+    // DRAFT -> APPROVED transition: atomic `updateMany` re-checking status at write time, conflict
+    // if it no longer matches. `approveStockTransfer` additionally re-reads items fresh inside its
+    // own transaction after its claim (see below), so this and that fix close both directions of
+    // the same race.
+    const { count } = await tx.stockTransfer.updateMany({
+      where: { id: transferId, organizationId, status: StockTransferStatus.DRAFT },
       data: {
         ...(input.fromBranchId ? { fromBranchId: input.fromBranchId } : {}),
         ...(input.toBranchId ? { toBranchId: input.toBranchId } : {}),
@@ -240,6 +249,12 @@ export async function updateStockTransfer(
         ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
       },
     });
+
+    if (count === 0) {
+      throw ApiError.conflict(
+        "Stock transfer is no longer draft — it may have changed status concurrently and can no longer be edited",
+      );
+    }
 
     if (items) {
       await tx.stockTransferItem.deleteMany({
@@ -316,35 +331,45 @@ export async function approveStockTransfer(organizationId: string, transferId: s
       );
     }
 
-    for (const item of transfer.items) {
+    // Bug fix: re-read the transfer's CURRENT items/branches inside the transaction, right after
+    // the atomic claim above, instead of using `transfer` (read before this transaction started).
+    // If a concurrent PATCH /stock-transfers/:id edited quantities/branches between that outer read
+    // and this claim succeeding, `transfer.items`/`fromBranchId`/`toBranchId` would be stale —
+    // moving stock for quantities/branches that no longer match what StockTransferItem actually
+    // holds. See sales-orders.service.ts's confirmSalesOrder for the fuller rationale behind this
+    // same pattern; updateStockTransfer's own atomic CAS guard closes the other half of this race.
+    const updated = await tx.stockTransfer.findUniqueOrThrow({
+      where: { id: transferId },
+      include: { items: true },
+    });
+
+    for (const item of updated.items) {
       await applyStockMovement(tx, {
         organizationId,
-        branchId: transfer.fromBranchId,
+        branchId: updated.fromBranchId,
         variantId: item.variantId,
         movementType: StockMovementType.TRANSFER_OUT,
         referenceType: ReferenceType.STOCK_TRANSFER,
-        referenceId: transfer.id,
+        referenceId: updated.id,
         quantityDelta: toDecimal(item.quantity).negated(),
         unitCost: item.unitCost ?? undefined,
-        note: transfer.notes ?? undefined,
+        note: updated.notes ?? undefined,
         createdById: actorUserId,
       });
 
       await applyStockMovement(tx, {
         organizationId,
-        branchId: transfer.toBranchId,
+        branchId: updated.toBranchId,
         variantId: item.variantId,
         movementType: StockMovementType.TRANSFER_IN,
         referenceType: ReferenceType.STOCK_TRANSFER,
-        referenceId: transfer.id,
+        referenceId: updated.id,
         quantityDelta: item.quantity,
         unitCost: item.unitCost ?? undefined,
-        note: transfer.notes ?? undefined,
+        note: updated.notes ?? undefined,
         createdById: actorUserId,
       });
     }
-
-    const updated = await tx.stockTransfer.findUniqueOrThrow({ where: { id: transferId } });
 
     await createAuditLog(tx, {
       organizationId,

@@ -19,8 +19,12 @@ import {
  * backend uses the normal envelope.
  */
 export async function registerDriverController(req: Request, res: Response) {
-  const driver = await registerDriver(req.body);
-  return res.status(201).json({ driver });
+  // `verificationToken` is additive to the locked `{ driver }` shape (see this file's top
+  // comment) — see driver-auth.service.ts's registerDriver: it's what lets a freshly-registered,
+  // still-PENDING_VERIFICATION driver submit vehicle/license evidence before a SUPER_ADMIN
+  // approves them, since login won't issue a real session until then.
+  const { driver, verificationToken } = await registerDriver(req.body);
+  return res.status(201).json({ driver, verificationToken });
 }
 
 export async function loginDriverController(req: Request, res: Response) {
@@ -29,7 +33,13 @@ export async function loginDriverController(req: Request, res: Response) {
     return res.status(200).json(data);
   } catch (error) {
     if (error instanceof DriverStatusError) {
-      return res.status(403).json({ error: { code: error.code, message: error.message } });
+      // `verificationToken` (only ever set for DRIVER_NOT_VERIFIED, see DriverStatusError's own
+      // doc comment) is additive to the locked `{ error: {code,message} }` shape — an older client
+      // that doesn't know this field exists just ignores it, same "login rejected" UX as before.
+      return res.status(403).json({
+        error: { code: error.code, message: error.message },
+        ...(error.verificationToken ? { verificationToken: error.verificationToken } : {}),
+      });
     }
 
     throw error;

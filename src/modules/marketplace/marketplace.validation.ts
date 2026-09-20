@@ -72,6 +72,30 @@ const bridgedSalesOrderItemSchema = z.object({
   unitPrice: decimalInputSchema,
 });
 
+// Money facts NearCart charged the customer (delivery fee, discount, payment method/status, what
+// the customer actually owes). Persisted verbatim under `SalesOrder.deliveryAddress.payment` — see
+// utils/orderPayment.ts for why it rides in that Json column and how `amountToCollect` is derived
+// from it. Every field is optional so an older NearCart deployment that doesn't send (all of) it
+// keeps working; values that ARE sent are strictly typed (closed enums, finite non-negative
+// numbers — deliberately NOT z.coerce, which would turn a literal `null` into 0 rupees) so a
+// malformed money block fails the push loudly (NearCart marks the sync FAILED and retries) rather
+// than being stored as garbage a driver then collects against. Unknown keys are stripped, not
+// rejected, so a future NearCart adding a field can't start failing every order push.
+const moneyAmountSchema = z.number().finite().nonnegative();
+
+const bridgedSalesOrderPaymentSchema = z.object({
+  method: z.enum(["COD", "ONLINE", "PAY_ON_PICKUP"]).optional(),
+  status: z.enum(["PENDING", "PAID", "FAILED", "REFUNDED"]).optional(),
+  itemTotal: moneyAmountSchema.optional(),
+  deliveryFee: moneyAmountSchema.optional(),
+  weatherSurchargeFee: moneyAmountSchema.optional(),
+  discountTotal: moneyAmountSchema.optional(),
+  loyaltyDiscount: moneyAmountSchema.optional(),
+  couponCode: z.string().trim().min(1).max(64).optional(),
+  amountPayable: moneyAmountSchema.optional(),
+  currency: z.string().trim().min(1).max(8).optional(),
+});
+
 export const createBridgedSalesOrderSchema = z.object({
   branchId: trimmedString,
   externalOrderId: trimmedString,
@@ -81,6 +105,7 @@ export const createBridgedSalesOrderSchema = z.object({
   // Nullable: NearCart's Order.notes column is `String?` — a caller forwarding it verbatim would
   // send a literal `null` when no notes were given, which optionalTrimmedString would reject.
   notes: nullableTrimmedString,
+  payment: bridgedSalesOrderPaymentSchema.nullable().optional(),
 });
 
 export const externalOrderIdParamSchema = z.object({

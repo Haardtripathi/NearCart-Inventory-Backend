@@ -3,7 +3,7 @@ import { Router } from "express";
 import multer from "multer";
 
 import { env } from "../../config/env";
-import { authenticateDriver } from "../../middlewares/driverAuth.middleware";
+import { authenticateDriverForVerification } from "../../middlewares/driverAuth.middleware";
 import { requireReplicateConfigured } from "../../middlewares/requireReplicate.middleware";
 import { validateRequest } from "../../middlewares/validate.middleware";
 import { asyncHandler } from "../../utils/asyncHandler";
@@ -48,7 +48,11 @@ function handlePhotoUpload(req: Request, res: Response, next: NextFunction) {
 // repos; do not rename these paths without coordinating there.
 export const driverVerificationRouter = Router();
 
-driverVerificationRouter.use(authenticateDriver);
+// Bug fix: was plain `authenticateDriver`, which refuses any driver whose status isn't already
+// VERIFIED — making this router's own evidence-submission endpoints unreachable for the
+// PENDING_VERIFICATION driver they exist to serve. See authenticateDriverForVerification's doc
+// comment for the full fix.
+driverVerificationRouter.use(authenticateDriverForVerification);
 
 // Pure read of what's currently on file — not gated by requireReplicateConfigured (no Replicate
 // call involved) unlike the three verify/OCR routes below. Backs the driver app's Documents screen.

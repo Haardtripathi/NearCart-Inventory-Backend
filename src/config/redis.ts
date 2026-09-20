@@ -18,6 +18,19 @@ export interface AppRedisClient {
   call(command: string, ...args: RedisCallArg[]): Promise<unknown>;
   del(key: string): Promise<number>;
   ttl(key: string): Promise<number>;
+  // Runs a Lua script atomically server-side. Unlike `call()`, `keys` ARE key-prefixed (each one
+  // individually, same as get/set/del/ttl above) — only `args` (non-key values passed to the
+  // script) are left as-is. This is what closes the otp.ts check-then-delete /
+  // check-then-increment races: the whole "read attempts, compare code hash, delete-or-increment"
+  // sequence runs as one atomic Redis operation instead of separate get/set round-trips a
+  // concurrent request could interleave with.
+  eval(script: string, keys: string[], args: RedisCallArg[]): Promise<unknown>;
+  // Atomic `SET key value EX ttlSeconds NX` — true if this call actually set the key (it didn't
+  // exist yet), false if it already existed (and was left untouched). Used by otp.ts's cooldown
+  // claim: a plain GET-then-SET has the same class of race the Lua-scripted verify path was
+  // written to close — concurrent callers could all read "no cooldown yet" before any of them
+  // writes it, letting a burst of requests bypass the resend throttle entirely.
+  setIfNotExists(key: string, value: string, ttlSeconds: number): Promise<boolean>;
   status: "ready" | "connecting" | "end";
   connect(): Promise<void>;
   quit(): Promise<void>;
@@ -101,6 +114,16 @@ class UpstashRestRedisClient implements AppRedisClient {
     return Number(result);
   }
 
+  async eval(script: string, keys: string[], args: RedisCallArg[]) {
+    const prefixedKeys = keys.map((key) => this.normalizeKey(key));
+    return this.runCommand("EVAL", [script, keys.length, ...prefixedKeys, ...args]);
+  }
+
+  async setIfNotExists(key: string, value: string, ttlSeconds: number) {
+    const result = await this.runCommand("SET", [this.normalizeKey(key), value, "EX", ttlSeconds, "NX"]);
+    return result === "OK";
+  }
+
   async connect() {
     this.status = "connecting";
     await this.runCommand("PING");
@@ -149,6 +172,19 @@ class IoredisClientAdapter implements AppRedisClient {
 
   async ttl(key: string) {
     return this.client.ttl(key);
+  }
+
+  async eval(script: string, keys: string[], args: RedisCallArg[]) {
+    // ioredis's built-in `keyPrefix` option (configured where this client is constructed below)
+    // transparently prefixes the key arguments of `eval`/`evalsha` calls — it inspects `numkeys`
+    // to know how many of the following arguments are keys, same mechanism that already prefixes
+    // plain get/set/del/ttl above without this adapter doing it manually.
+    return this.client.eval(script, keys.length, ...keys, ...args.map((value) => String(value)));
+  }
+
+  async setIfNotExists(key: string, value: string, ttlSeconds: number) {
+    const result = await this.client.set(key, value, "EX", ttlSeconds, "NX");
+    return result === "OK";
   }
 
   async connect() {

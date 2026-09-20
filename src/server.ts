@@ -4,6 +4,7 @@ import { prisma } from "./config/prisma";
 import { connectRedis, disconnectRedis } from "./config/redis";
 import { registerOrderConfirmationSweep } from "./jobs/order-confirmation-sweep";
 import { registerKeepAlivePing } from "./jobs/keep-alive";
+import { registerDriverAssignmentWatchdog } from "./jobs/driver-assignment-watchdog";
 
 void connectRedis().catch((error) => {
   console.error("Redis connection failed, running without Redis", error);
@@ -13,6 +14,7 @@ const server = app.listen(env.PORT, () => {
   console.log(`NearCart Inventory backend running on port ${env.PORT}`);
   registerOrderConfirmationSweep();
   registerKeepAlivePing();
+  registerDriverAssignmentWatchdog();
 });
 
 server.on("error", (error: NodeJS.ErrnoException) => {

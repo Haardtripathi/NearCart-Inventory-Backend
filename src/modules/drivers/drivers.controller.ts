@@ -4,6 +4,6 @@ import { sendSuccess } from "../../utils/ApiResponse";
 import { listAssignableDrivers } from "./drivers.service";
 
 export async function listAssignableDriversController(req: Request, res: Response) {
-  const data = await listAssignableDrivers(req.query as never);
+  const data = await listAssignableDrivers(req.query as never, req.auth!.activeOrganizationId!);
   return sendSuccess(res, 200, "Drivers fetched successfully", data);
 }

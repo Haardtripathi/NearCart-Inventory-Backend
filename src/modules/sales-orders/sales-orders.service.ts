@@ -24,6 +24,8 @@ import { notifyOrderEvent } from "../../services/order-event-webhook.service";
 import { sendPushToDriver, sendPushToOrgStaff } from "../../services/push-notification.service";
 import { recordNotificationLog } from "../notifications/notifications.service";
 
+const STALE_READY_ORDER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 interface SalesOrderItemInput {
   productId: string;
   variantId: string;
@@ -332,8 +334,18 @@ export async function updateSalesOrder(
   const prepared = input.items ? await prepareSalesOrderItems(organizationId, input.items) : null;
 
   await prisma.$transaction(async (tx) => {
-    await tx.salesOrder.update({
-      where: { id: orderId },
+    // Bug fix: this used to be a plain `tx.salesOrder.update({where: {id: orderId}})` with no
+    // status predicate — so a concurrent confirm/reject/cancel that had already moved the order out
+    // of DRAFT/PENDING between the `ensureEditableStatus` check above and this write would be
+    // silently overridden: this transaction would still succeed, rewriting items/totals on an order
+    // that's no longer editable (e.g. already CONFIRMED, with stock already deducted for the OLD
+    // quantities). Guarded the same way every transition function in this file already guards its
+    // own status change: atomic `updateMany` re-checking status at write time, conflict if it
+    // no longer matches. Confirm/cancel/etc. additionally re-read items fresh inside their own
+    // transactions after their claim (see confirmSalesOrder/cancelSalesOrder) so this and those
+    // fixes close both directions of the same race.
+    const { count } = await tx.salesOrder.updateMany({
+      where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
       data: {
         ...(input.branchId ? { branchId: input.branchId } : {}),
         ...(input.customerId !== undefined ? { customerId: input.customerId || null } : {}),
@@ -351,6 +363,12 @@ export async function updateSalesOrder(
           : {}),
       },
     });
+
+    if (count === 0) {
+      throw ApiError.conflict(
+        "Order is no longer draft/pending — it may have changed status concurrently and can no longer be edited",
+      );
+    }
 
     if (prepared) {
       await tx.salesOrderItem.deleteMany({
@@ -435,29 +453,39 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
       throw ApiError.conflict("Order is no longer draft/pending — it may have already been confirmed");
     }
 
-    for (const item of order.items) {
-      await applyStockMovement(tx, {
-        organizationId,
-        branchId: order.branchId,
-        variantId: item.variantId,
-        movementType: StockMovementType.SALE,
-        referenceType: ReferenceType.SALES_ORDER,
-        referenceId: order.id,
-        quantityDelta: toDecimal(item.quantity).negated(),
-        unitCost: item.variant.costPrice,
-        note: order.notes ?? undefined,
-        createdById: actorUserId,
-      });
-    }
-
-    const updated = await tx.salesOrder.findUniqueOrThrow({
+    // Bug fix: re-read the order's CURRENT items/branch inside the transaction, right after the
+    // atomic claim above, instead of using `order` (read before this transaction even started —
+    // and, worse, before this function's own two status checks above it). If a concurrent
+    // PATCH /sales-orders/:id changed quantities/branch between that outer read and this claim
+    // succeeding, `order.items`/`order.branchId` would be stale — deducting stock for quantities
+    // that no longer match what SalesOrderItem actually holds, silently desyncing the immutable
+    // ledger from the order (and, on a later cancel, reversing the WRONG — edited — quantity,
+    // inflating InventoryBalance.onHand). See updateSalesOrder's own atomic CAS guard for the other
+    // half of this race: an edit landing AFTER this claim now correctly fails with a conflict
+    // instead of silently overwriting an already-CONFIRMED order's items post-hoc.
+    const current = await tx.salesOrder.findUniqueOrThrow({
       where: { id: orderId },
       include: {
-        items: true,
+        items: { include: { variant: true } },
         branch: true,
         customer: true,
       },
     });
+
+    for (const item of current.items) {
+      await applyStockMovement(tx, {
+        organizationId,
+        branchId: current.branchId,
+        variantId: item.variantId,
+        movementType: StockMovementType.SALE,
+        referenceType: ReferenceType.SALES_ORDER,
+        referenceId: current.id,
+        quantityDelta: toDecimal(item.quantity).negated(),
+        unitCost: item.variant.costPrice,
+        note: current.notes ?? undefined,
+        createdById: actorUserId,
+      });
+    }
 
     await createAuditLog(tx, {
       organizationId,
@@ -466,10 +494,10 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
       entityType: "SalesOrder",
       entityId: order.id,
       before: order,
-      after: updated,
+      after: current,
     });
 
-    return updated;
+    return current;
   }, INTERACTIVE_TRANSACTION_OPTIONS);
 
   if (confirmed.externalOrderId) {
@@ -615,11 +643,22 @@ export async function cancelSalesOrder(organizationId: string, orderId: string, 
       }
     }
 
+    // Bug fix: re-read current items (with variant costPrice) inside the tx, AFTER whichever claim
+    // above succeeded, instead of the pre-transaction `order.items` snapshot — see
+    // confirmSalesOrder's fuller rationale for this same pattern. Matters here specifically because
+    // the quantity being reversed must match what was actually deducted at confirm time, which
+    // reflects the CURRENT SalesOrderItem rows, not whatever this function's own outer read
+    // happened to see before a concurrent edit (now itself guarded — see updateSalesOrder) landed.
+    const updated = await tx.salesOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      include: { items: { include: { variant: true } } },
+    });
+
     if (stockWasDeducted) {
-      for (const item of order.items) {
+      for (const item of updated.items) {
         await applyStockMovement(tx, {
           organizationId,
-          branchId: order.branchId,
+          branchId: updated.branchId,
           variantId: item.variantId,
           movementType: StockMovementType.SALE_CANCEL,
           referenceType: ReferenceType.SALES_ORDER,
@@ -631,8 +670,6 @@ export async function cancelSalesOrder(organizationId: string, orderId: string, 
         });
       }
     }
-
-    const updated = await tx.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
 
     await createAuditLog(tx, {
       organizationId,
@@ -944,6 +981,10 @@ export async function findNearestUnassignedOrderForDriver(
     where: {
       status: SalesOrderStatus.READY,
       assignedDriverId: null,
+      // Hyperlocal orders are same-day. Without an age cap, a READY order nobody ever collected
+      // was pushed to whichever driver next came online — on-device 2026-09-20 a driver going
+      // online was handed a 5-week-old order. Older ones need a human (shop cancels/reassigns).
+      createdAt: { gte: new Date(Date.now() - STALE_READY_ORDER_MAX_AGE_MS) },
       branch: {
         latitude: { not: null },
         longitude: { not: null },

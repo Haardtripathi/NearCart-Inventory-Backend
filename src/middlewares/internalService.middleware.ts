@@ -1,7 +1,25 @@
+import crypto from "crypto";
+
 import type { NextFunction, Request, Response } from "express";
 
 import { env } from "../config/env";
 import { ApiError } from "../utils/ApiError";
+
+// Constant-time comparison for the shared internal-service secret — a plain `!==` here leaks
+// timing information proportional to the matching-prefix length. NearCart's mirror of this same
+// middleware (backend/src/middleware/internalService.ts) already uses crypto.timingSafeEqual;
+// this brings the two sides in line. Falls back to `false` on a length mismatch since
+// timingSafeEqual requires equal-length buffers.
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const bufferA = Buffer.from(a, "utf8");
+  const bufferB = Buffer.from(b, "utf8");
+
+  if (bufferA.length !== bufferB.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(bufferA, bufferB);
+}
 
 function readInternalToken(req: Request) {
   const headerToken = req.headers["x-internal-service-token"];
@@ -36,7 +54,7 @@ export function requireInternalServiceAuth(
 
   const providedToken = readInternalToken(req);
 
-  if (!providedToken || providedToken !== configuredToken) {
+  if (!providedToken || !timingSafeEqualStrings(providedToken, configuredToken)) {
     return next(ApiError.forbidden("Invalid internal service token"));
   }
 

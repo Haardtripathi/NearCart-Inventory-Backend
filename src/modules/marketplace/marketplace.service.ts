@@ -3,6 +3,7 @@ import {
   LanguageCode,
   NotificationLogType,
   OrderSource,
+  PaymentStatus,
   ProductStatus,
   Prisma,
   SalesOrderStatus,
@@ -14,6 +15,7 @@ import { ApiError } from "../../utils/ApiError";
 import { assertBranchInOrg, assertOrganizationExists } from "../../utils/guards";
 import { toDecimal } from "../../utils/decimal";
 import { toNullableJsonValue } from "../../utils/json";
+import { buildBridgedDeliveryAddress, isPrepaidOnline, type BridgedOrderPaymentInput } from "../../utils/orderPayment";
 import {
   createLocaleContext,
   type LocaleContext,
@@ -756,6 +758,9 @@ interface CreateBridgedSalesOrderInput {
     unitPrice: string | number;
   }>;
   notes?: string | null;
+  // Optional: absent on pushes from a NearCart deployment that predates it. See
+  // utils/orderPayment.ts.
+  payment?: BridgedOrderPaymentInput | null;
 }
 
 function summarizeSalesOrder(order: {
@@ -774,6 +779,16 @@ function summarizeSalesOrder(order: {
   // since not every caller of this function selects it (kept optional rather than widening every
   // call site's Prisma `select`).
   deliveryProofPhotoUrl?: string | null;
+  // Assigned-driver identity/contact, mirroring what the DRIVER_ASSIGNED/DRIVER_UNASSIGNED push
+  // webhook already carries (order-event-webhook.service.ts's NotifyOrderEventInput) — added so
+  // the poll path has a real fallback for driver info instead of relying entirely on that
+  // fire-and-forget webhook landing. Optional on the input type for the same reason as
+  // deliveryProofPhotoUrl above (not every call site includes the relation); when a caller DOES
+  // include it, `null` is a meaningful "no driver currently assigned" (as opposed to `undefined`,
+  // which means "this caller didn't select the relation, no signal either way" and is dropped
+  // from the JSON response entirely so older readers don't mistake it for an explicit unassign).
+  assignedDriver?: { fullName: string; phone: string; vehicleType: string } | null;
+  assignedAt?: Date | null;
 }) {
   return {
     salesOrderId: order.id,
@@ -783,6 +798,17 @@ function summarizeSalesOrder(order: {
     confirmedAt: order.confirmedAt?.toISOString(),
     deliveredAt: order.deliveredAt?.toISOString(),
     deliveryProofPhotoUrl: order.deliveryProofPhotoUrl ?? undefined,
+    assignedDriver:
+      order.assignedDriver === undefined
+        ? undefined
+        : order.assignedDriver
+          ? {
+              fullName: order.assignedDriver.fullName,
+              phone: order.assignedDriver.phone,
+              vehicleType: order.assignedDriver.vehicleType,
+            }
+          : null,
+    driverAssignedAt: order.assignedAt?.toISOString(),
   };
 }
 
@@ -841,6 +867,7 @@ export async function createBridgedSalesOrder(
 
   const existing = await prisma.salesOrder.findUnique({
     where: { externalOrderId: input.externalOrderId },
+    include: { assignedDriver: { select: { fullName: true, phone: true, vehicleType: true } } },
   });
 
   if (existing) {
@@ -904,14 +931,31 @@ export async function createBridgedSalesOrder(
     }
 
     const quantity = toDecimal(item.quantity);
-    const unitPrice = toDecimal(item.unitPrice);
+
+    // Repriced server-side from this organization's own catalog rather than trusting
+    // `item.unitPrice` as sent over the bridge. This is a service-to-service call authenticated
+    // only by a shared secret, not a per-request signature — the price on it ultimately traces
+    // back to whatever NearCart's cart/checkout had cached for this item, which is exactly the
+    // kind of stale/manipulable value the sibling apps' own "price-drift" bug class has already
+    // shown can go wrong on the NearCart side. Inventory owns the catalog, so it — not the
+    // caller — must be the source of truth for what an item actually costs; accepting a
+    // caller-supplied price here would let a stale or tampered cart under- (or over-) charge a
+    // customer relative to the shop's real, current selling price. `item.unitPrice` is still
+    // accepted on the request shape for backward compatibility and logged below when it disagrees
+    // meaningfully with the real price, purely as a signal that NearCart's own cart snapshot may
+    // be out of sync — it is never used to compute totals.
+    const unitPrice = variant.sellingPrice;
 
     if (quantity.lessThanOrEqualTo(0)) {
       throw ApiError.badRequest("Sales quantities must be positive");
     }
 
-    if (unitPrice.isNegative()) {
-      throw ApiError.badRequest("Unit price cannot be negative");
+    const suppliedUnitPrice = toDecimal(item.unitPrice);
+
+    if (!suppliedUnitPrice.equals(unitPrice)) {
+      console.warn(
+        `[marketplace] Bridged order item for variant ${variant.id} arrived with unitPrice ${suppliedUnitPrice.toString()} but the organization's current sellingPrice is ${unitPrice.toString()} — repricing server-side and ignoring the supplied value.`,
+      );
     }
 
     const lineTotal = quantity.mul(unitPrice);
@@ -936,14 +980,15 @@ export async function createBridgedSalesOrder(
   // from Customer.address since a returning customer may order to a different address each
   // time. Previously this was appended as free text onto `notes` (see git history); notes is now
   // reserved for actual free-text notes only, populated straight from input.notes.
-  const deliveryAddress =
-    input.customer.addressLine || input.customer.latitude != null || input.customer.longitude != null
-      ? {
-          addressLine: input.customer.addressLine ?? null,
-          latitude: input.customer.latitude ?? null,
-          longitude: input.customer.longitude ?? null,
-        }
-      : null;
+  //
+  // Also carries the optional `payment` block (delivery fee, discount, payment method/status,
+  // amount the customer actually owes) — `subtotal/total` below stay "goods value" only (stock/
+  // sales analytics read them), so without this the driver app asked for the goods total instead
+  // of what the customer owes. See utils/orderPayment.ts.
+  const deliveryAddress = buildBridgedDeliveryAddress(input.customer, input.payment);
+  // PAID only when NearCart says an ONLINE payment has actually been received; COD, pay-at-shop
+  // and unconfirmed online payments all start UNPAID exactly as before.
+  const paymentStatus = isPrepaidOnline(input.payment) ? PaymentStatus.PAID : PaymentStatus.UNPAID;
   const notes = input.notes ?? null;
 
   try {
@@ -966,6 +1011,7 @@ export async function createBridgedSalesOrder(
           // as (see status above).
           confirmationDeadlineAt: new Date(Date.now() + env.ORDER_CONFIRMATION_TIMEOUT_MINUTES * 60_000),
           deliveryAddress: toNullableJsonValue(deliveryAddress),
+          paymentStatus,
           subtotal,
           taxTotal: toDecimal(0),
           discountTotal: toDecimal(0),
@@ -999,7 +1045,13 @@ export async function createBridgedSalesOrder(
     // error there would otherwise become an unhandled promise rejection on this fire-and-forget
     // call and crash the process (same bug class documented elsewhere this session).
     const pushTitle = "New order received";
-    const pushBody = `Order #${created.orderNumber} — ${preparedItems.length} item(s), ${created.total.toString()} total.`;
+    // When NearCart sent the customer's bill, quote what the customer actually pays + how (the
+    // goods-only `total` next to nothing else is what made a 434 COD order read as "360").
+    const paymentMethodLabel = { COD: "cash on delivery", ONLINE: "online payment", PAY_ON_PICKUP: "pay at shop" } as const;
+    const pushBody =
+      input.payment?.amountPayable != null && input.payment.method
+        ? `Order #${created.orderNumber} — ${preparedItems.length} item(s), customer pays ${input.payment.amountPayable} (${paymentMethodLabel[input.payment.method]}).`
+        : `Order #${created.orderNumber} — ${preparedItems.length} item(s), ${created.total.toString()} total.`;
     const pushData = { salesOrderId: created.id };
 
     void sendPushToOrgStaff(organizationId, {
@@ -1038,6 +1090,7 @@ export async function createBridgedSalesOrder(
     if (error instanceof Prisma.PrismaClientKnownRequestError && isUniqueConstraintError(error)) {
       const raceWinner = await prisma.salesOrder.findUnique({
         where: { externalOrderId: input.externalOrderId },
+        include: { assignedDriver: { select: { fullName: true, phone: true, vehicleType: true } } },
       });
 
       if (raceWinner) {
@@ -1052,6 +1105,7 @@ export async function createBridgedSalesOrder(
 export async function getSalesOrderByExternalId(externalOrderId: string) {
   const order = await prisma.salesOrder.findUnique({
     where: { externalOrderId },
+    include: { assignedDriver: { select: { fullName: true, phone: true, vehicleType: true } } },
   });
 
   if (!order) {

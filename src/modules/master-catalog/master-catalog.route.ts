@@ -3,7 +3,7 @@ import { UserRole } from "@prisma/client";
 
 import { MANAGER_ROLES, READ_WRITE_STAFF_ROLES } from "../../constants/roles";
 import { authenticate, requireRoles } from "../../middlewares/auth.middleware";
-import { requireOrganizationContext } from "../../middlewares/org.middleware";
+import { attachOrganizationContextIfPresent, requireOrganizationContext } from "../../middlewares/org.middleware";
 import { validateRequest } from "../../middlewares/validate.middleware";
 import { asyncHandler } from "../../utils/asyncHandler";
 import {
@@ -38,12 +38,14 @@ masterCatalogRouter.use(authenticate);
 
 masterCatalogRouter.get(
   "/categories",
+  attachOrganizationContextIfPresent,
   requireRoles(...READ_WRITE_STAFF_ROLES),
   validateRequest({ query: masterCatalogCategoriesQuerySchema }),
   asyncHandler(getMasterCatalogCategoriesController),
 );
 masterCatalogRouter.get(
   "/categories/tree",
+  attachOrganizationContextIfPresent,
   requireRoles(...READ_WRITE_STAFF_ROLES),
   validateRequest({ query: masterCatalogCategoryTreeQuerySchema }),
   asyncHandler(getMasterCatalogCategoryTreeController),
@@ -63,12 +65,14 @@ masterCatalogRouter.patch(
 
 masterCatalogRouter.get(
   "/items",
+  attachOrganizationContextIfPresent,
   requireRoles(...READ_WRITE_STAFF_ROLES),
   validateRequest({ query: masterCatalogItemsQuerySchema }),
   asyncHandler(getMasterCatalogItemsController),
 );
 masterCatalogRouter.get(
   "/items/:id",
+  attachOrganizationContextIfPresent,
   requireRoles(...READ_WRITE_STAFF_ROLES),
   asyncHandler(getMasterCatalogItemController),
 );
@@ -100,6 +104,7 @@ masterCatalogRouter.post(
 );
 masterCatalogRouter.get(
   "/industries/:industryId/featured-items",
+  attachOrganizationContextIfPresent,
   requireRoles(...READ_WRITE_STAFF_ROLES),
   validateRequest({ query: featuredMasterCatalogItemsQuerySchema }),
   asyncHandler(getFeaturedMasterCatalogItemsController),

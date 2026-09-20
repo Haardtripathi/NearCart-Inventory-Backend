@@ -120,6 +120,15 @@ const envSchema = z
     // dispatch/the customer see, and should it auto-flag or auto-reassign?) intentionally left
     // unaddressed here.
     DRIVER_LOCATION_STALE_MINUTES: z.coerce.number().positive().default(10),
+    // How long a SalesOrder may sit READY with the same assignedDriverId before the
+    // driver-assignment watchdog sweep (jobs/driver-assignment-watchdog.ts) treats the driver as
+    // non-responsive and reassigns — see registerDriverAssignmentWatchdog's doc comment for the
+    // full rationale. Deliberately much longer than the driver app's own ~25s client-side
+    // decline countdown: this is a backstop for a driver who never engaged with the assignment at
+    // all (app closed, push never arrived, phone off), not a substitute for that faster
+    // in-app flow, so it needs enough slack for a genuinely-busy driver who simply hasn't opened
+    // the app yet or is still en route to pickup.
+    DRIVER_ASSIGNMENT_STALE_MINUTES: z.coerce.number().positive().default(10),
     // Fallback/legacy flat per-delivery payout — no longer the primary pricing mechanism. Now that
     // `SalesOrder.driverDeliveryFee` is computed and persisted per order at mark-ready time (see
     // computeDriverFare in sales-orders.service.ts), this rate is only used for orders whose
@@ -143,6 +152,14 @@ const envSchema = z
     // "Months" tenor for a driver's rotating refresh session, mirroring NearCart/backend's
     // AUTH_REFRESH_TTL_DAYS for the same reason (long-lived mobile sessions).
     DRIVER_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(90),
+    // Lifetime of the narrowly-scoped token issued to a PENDING_VERIFICATION driver (at
+    // registration, and again on every login attempt while still pending) that authenticates ONLY
+    // the vehicle-photo/license evidence-submission endpoints — see driverJwt.ts's
+    // signDriverVerificationPendingToken and driverVerificationAuth.middleware.ts. Long enough that
+    // a driver gathering documents over a few days doesn't get locked out mid-onboarding (a fresh
+    // one is reissued on every pending login attempt anyway), short enough that a token from a
+    // long-abandoned registration doesn't stay usable indefinitely.
+    DRIVER_VERIFICATION_PENDING_JWT_EXPIRES_IN: z.string().min(1).default("14d"),
     // Server-side Google Maps key: reverse-geocoding a dropped pin into address fields (branch
     // location picker) and Places Text/Nearby Search for shop-photo verification
     // (placeLocationMatch check in POST /branches/:id/verification/photo). Optional — when unset,

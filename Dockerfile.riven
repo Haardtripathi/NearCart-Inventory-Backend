@@ -1,0 +1,39 @@
+# Build/runtime image for the NearCart Inventory backend.
+#
+# Committed deliberately, for two reasons:
+#  1. Prisma's client is code-generated into node_modules/.prisma/client. The host's generated
+#     Dockerfile installed dependencies in one stage and copied THAT stage's node_modules into
+#     the runtime image, so a client generated in any later stage was lost and the container
+#     died with "Cannot find module '.prisma/client/default'". Here the stage that generates the
+#     client is the stage whose node_modules ships.
+#  2. `npm run build` type-checks against the generated client, so generation has to happen
+#     before the build, not after. This package's `postinstall` already runs `prisma generate`,
+#     which works only because the schema is copied in before `npm ci`.
+#
+# `dist/` is gitignored for the image (see .dockerignore) and always rebuilt here — this repo has
+# a committed dist/ that has gone stale before and shipped an old build.
+#
+# Node 22 (not 20): firebase-admin@14 and @prisma/streams-local both declare "node >= 22".
+
+FROM node:22-alpine AS builder
+WORKDIR /app
+
+# Schema first: postinstall runs `prisma generate` and needs it.
+COPY package*.json ./
+COPY prisma ./prisma
+RUN npm ci
+
+COPY . .
+RUN npx prisma generate && npm run build
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/package*.json ./
+
+EXPOSE 5011
+CMD ["node", "dist/src/server.js"]

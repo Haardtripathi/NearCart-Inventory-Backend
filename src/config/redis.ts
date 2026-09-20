@@ -2,6 +2,8 @@ import Redis from "ioredis";
 
 import { env } from "./env";
 
+const REDIS_COMMAND_TIMEOUT_MS = 1500;
+
 type RedisCallArg = string | number;
 
 export interface AppRedisClient {
@@ -58,7 +60,10 @@ class UpstashRestRedisClient implements AppRedisClient {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(5000),
+      // 5s was far too long for a call that sits on the auth hot path (every authenticated
+      // request consults the token blacklist): a slow Upstash stalled every request for a full
+      // 5s before failing. Callers already degrade gracefully, so give up quickly instead.
+      signal: AbortSignal.timeout(REDIS_COMMAND_TIMEOUT_MS),
     });
 
     const data = (await response.json().catch(() => null)) as

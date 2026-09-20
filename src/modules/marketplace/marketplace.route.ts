@@ -14,6 +14,7 @@ import {
   listMarketplaceCatalogController,
   listMarketplaceCategoriesController,
   listMarketplaceOrganizationsController,
+  respondToPartialFulfilmentController,
 } from "./marketplace.controller";
 import {
   createBridgedSalesOrderSchema,
@@ -24,6 +25,7 @@ import {
   marketplaceScopedQuerySchema,
   organizationBranchParamSchema,
   organizationExternalOrderIdParamSchema,
+  partialFulfilmentResponseSchema,
 } from "./marketplace.validation";
 
 // NOTE on the write-back contract (§3 of the phase-1 backend track): this router implements
@@ -104,4 +106,14 @@ marketplaceRouter.get(
   "/organizations/:organizationId/branches/:branchId/active-order-count",
   validateRequest({ params: organizationBranchParamSchema }),
   asyncHandler(getBranchActiveOrderCountController),
+);
+
+// The customer's answer to a shop's partial-fulfilment proposal ("the shop can only supply 3 of
+// your 5 items — approve?"). Org-scoped in the path for the same reason as the cancel route
+// above. Accepting applies the reduced item set AND confirms the order (moving stock for the
+// final quantities only); declining cancels it. Idempotent — see respondToPartialFulfilment.
+marketplaceRouter.post(
+  "/organizations/:organizationId/sales-orders/by-external/:externalOrderId/partial-response",
+  validateRequest({ params: organizationExternalOrderIdParamSchema, body: partialFulfilmentResponseSchema }),
+  asyncHandler(respondToPartialFulfilmentController),
 );

@@ -14,12 +14,14 @@ import {
   getSalesOrderController,
   listSalesOrdersController,
   markSalesOrderReadyController,
+  proposePartialFulfilmentController,
   rejectSalesOrderController,
   updateSalesOrderController,
 } from "./sales-orders.controller";
 import {
   assignDriverSchema,
   createSalesOrderSchema,
+  proposePartialFulfilmentSchema,
   rejectSalesOrderSchema,
   salesOrderQuerySchema,
   updateSalesOrderSchema,
@@ -34,6 +36,17 @@ salesOrdersRouter.post("/", requireRoles(...READ_WRITE_STAFF_ROLES), validateReq
 salesOrdersRouter.get("/:id", requireRoles(...READ_WRITE_STAFF_ROLES), asyncHandler(getSalesOrderController));
 salesOrdersRouter.patch("/:id", requireRoles(...READ_WRITE_STAFF_ROLES), validateRequest({ body: updateSalesOrderSchema }), asyncHandler(updateSalesOrderController));
 salesOrdersRouter.post("/:id/confirm", requireRoles(...MANAGER_ROLES), asyncHandler(confirmSalesOrderController));
+// Shop-side partial fulfilment: "I can only supply 3 of the 5 things they ordered". Same
+// MANAGER_ROLES gate and same branch-access check as confirm/reject, because it is the third
+// option in that same decision — and deliberately only available BEFORE confirming. Writes
+// nothing but the proposal itself: no stock moves and no item row changes until the customer
+// accepts (see sales-orders.service.ts).
+salesOrdersRouter.post(
+  "/:id/propose-partial",
+  requireRoles(...MANAGER_ROLES),
+  validateRequest({ body: proposePartialFulfilmentSchema }),
+  asyncHandler(proposePartialFulfilmentController),
+);
 salesOrdersRouter.post("/:id/reject", requireRoles(...MANAGER_ROLES), validateRequest({ body: rejectSalesOrderSchema }), asyncHandler(rejectSalesOrderController));
 salesOrdersRouter.post("/:id/cancel", requireRoles(...MANAGER_ROLES), asyncHandler(cancelSalesOrderController));
 salesOrdersRouter.post("/:id/deliver", requireRoles(...MANAGER_ROLES), asyncHandler(deliverSalesOrderController));

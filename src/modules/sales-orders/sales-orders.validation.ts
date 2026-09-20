@@ -59,3 +59,22 @@ export const rejectSalesOrderSchema = z.object({
 export const assignDriverSchema = z.object({
   driverId: trimmedString,
 });
+
+/**
+ * Shop-side partial fulfilment: "of what this customer ordered, here is what I can actually
+ * supply". `availableQuantity: 0` means "cannot supply this item at all" — which is exactly why
+ * this is `nonnegative()` rather than `positive()`. The per-item upper bound (never more than was
+ * ordered) and the "at least one item must survive" rule both need the order itself, so they live
+ * in the service (see buildPartialFulfilmentProposal), not here.
+ */
+export const proposePartialFulfilmentSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        salesOrderItemId: trimmedString,
+        availableQuantity: z.coerce.number().nonnegative(),
+      }),
+    )
+    .min(1),
+  note: optionalTrimmedString,
+});

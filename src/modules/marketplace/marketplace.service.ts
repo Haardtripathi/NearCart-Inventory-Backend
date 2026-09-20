@@ -16,6 +16,7 @@ import { assertBranchInOrg, assertOrganizationExists } from "../../utils/guards"
 import { toDecimal } from "../../utils/decimal";
 import { toNullableJsonValue } from "../../utils/json";
 import { buildBridgedDeliveryAddress, isPrepaidOnline, type BridgedOrderPaymentInput } from "../../utils/orderPayment";
+import { parsePartialFulfilment } from "../../utils/partialFulfilment";
 import {
   createLocaleContext,
   type LocaleContext,
@@ -26,6 +27,11 @@ import { buildPagination, getPagination } from "../../utils/pagination";
 import { getAvailableStock, isLowStock } from "../../utils/stock";
 import { isUniqueConstraintError } from "../../utils/prismaErrors";
 import { createAuditLog } from "../audit/audit.service";
+import {
+  acceptPartialFulfilment,
+  declinePartialFulfilment,
+  type RevisedPaymentInput,
+} from "../sales-orders/sales-orders.service";
 import { cancelSalesOrder } from "../sales-orders/sales-orders.service";
 import { recordNotificationLog } from "../notifications/notifications.service";
 import { sendPushToOrgStaff } from "../../services/push-notification.service";
@@ -789,6 +795,12 @@ function summarizeSalesOrder(order: {
   // from the JSON response entirely so older readers don't mistake it for an explicit unassign).
   assignedDriver?: { fullName: string; phone: string; vehicleType: string } | null;
   assignedAt?: Date | null;
+  // Raw `SalesOrder.deliveryAddress` Json column. Only ever read here to surface the parsed
+  // `partialFulfilment` proposal (see utils/partialFulfilment.ts) — NearCart polls this endpoint
+  // for order status, and this is how the customer's "the shop can only supply 3 of your 5
+  // items — approve?" screen gets its data without a second endpoint. Optional on the input type
+  // for the same reason as deliveryProofPhotoUrl above.
+  deliveryAddress?: unknown;
 }) {
   return {
     salesOrderId: order.id,
@@ -809,6 +821,10 @@ function summarizeSalesOrder(order: {
             }
           : null,
     driverAssignedAt: order.assignedAt?.toISOString(),
+    // `null` (not `undefined`) when there is no proposal: NearCart treats a missing key as "this
+    // bridge deployment is too old to know about partial fulfilment" and an explicit null as
+    // "there is genuinely nothing to review", which are meaningfully different on its side.
+    partialFulfilment: parsePartialFulfilment(order.deliveryAddress),
   };
 }
 
@@ -1185,4 +1201,52 @@ export async function getBranchActiveOrderCount(organizationId: string, branchId
   });
 
   return { activeOrderCount };
+}
+
+/**
+ * The customer's answer to a shop's partial-fulfilment proposal, arriving over the bridge from
+ * NearCart (which owns the customer relationship — see utils/partialFulfilment.ts for the whole
+ * flow). Looked up by externalOrderId, org-scoped in the path like the cancel endpoint so the
+ * caller confirms which organization it expects the order to belong to.
+ *
+ * IDEMPOTENT BY DESIGN: a retried/duplicated call (flaky network, an impatient double-tap) must
+ * not confirm an order twice or cancel an already-confirmed one. If the proposal is no longer
+ * AWAITING_CUSTOMER this returns the current state with `applied: false` and changes nothing —
+ * a second POST is a successful no-op, not a 409, because from NearCart's point of view the
+ * answer did land.
+ */
+export async function respondToPartialFulfilment(
+  organizationId: string,
+  externalOrderId: string,
+  input: { accepted: boolean; revisedPayment?: RevisedPaymentInput | null },
+) {
+  const order = await prisma.salesOrder.findUnique({ where: { externalOrderId } });
+
+  if (!order || order.organizationId !== organizationId) {
+    throw ApiError.notFound("No sales order found for this externalOrderId in this organization");
+  }
+
+  const proposal = parsePartialFulfilment(order.deliveryAddress);
+
+  if (!proposal) {
+    throw ApiError.conflict("This order has no revised order awaiting a response");
+  }
+
+  if (proposal.state !== "AWAITING_CUSTOMER") {
+    const current = await prisma.salesOrder.findUniqueOrThrow({ where: { id: order.id } });
+
+    return {
+      ...summarizeSalesOrder(current),
+      applied: false as const,
+    };
+  }
+
+  const updated = input.accepted
+    ? await acceptPartialFulfilment(organizationId, order.id, input.revisedPayment)
+    : await declinePartialFulfilment(organizationId, order.id);
+
+  return {
+    ...summarizeSalesOrder(updated),
+    applied: true as const,
+  };
 }

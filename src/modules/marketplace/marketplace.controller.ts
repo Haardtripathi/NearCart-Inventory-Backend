@@ -16,6 +16,7 @@ import {
   listMarketplaceCatalog,
   listMarketplaceCategories,
   listMarketplaceOrganizations,
+  respondToPartialFulfilment,
 } from "./marketplace.service";
 
 function resolveRequestedLanguage(req: Request) {
@@ -112,4 +113,23 @@ export async function cancelBridgedSalesOrderController(req: Request, res: Respo
 export async function getBranchActiveOrderCountController(req: Request, res: Response) {
   const data = await getBranchActiveOrderCount(req.params.organizationId!, req.params.branchId!);
   return sendSuccess(res, 200, "Branch active order count fetched successfully", data);
+}
+
+export async function respondToPartialFulfilmentController(req: Request, res: Response) {
+  const data = await respondToPartialFulfilment(
+    req.params.organizationId!,
+    req.params.externalOrderId!,
+    req.body,
+  );
+
+  return sendSuccess(
+    res,
+    200,
+    data.applied
+      ? req.body.accepted
+        ? "Revised order accepted and confirmed"
+        : "Revised order declined and the order was cancelled"
+      : "This revised order has already been answered",
+    data,
+  );
 }

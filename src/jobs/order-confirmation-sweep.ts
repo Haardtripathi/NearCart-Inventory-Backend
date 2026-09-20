@@ -2,7 +2,8 @@ import { schedule } from "node-cron";
 import { SalesOrderStatus } from "@prisma/client";
 
 import { prisma } from "../config/prisma";
-import { rejectSalesOrder } from "../modules/sales-orders/sales-orders.service";
+import { expirePartialFulfilment, rejectSalesOrder } from "../modules/sales-orders/sales-orders.service";
+import { parsePartialFulfilment } from "../utils/partialFulfilment";
 
 const AUTO_CANCEL_REASON = "Shop did not confirm in time (auto-cancelled)";
 
@@ -16,11 +17,22 @@ const AUTO_CANCEL_REASON = "Shop did not confirm in time (auto-cancelled)";
  * notified immediately either way, per the confirmed product decision that auto-cancels notify
  * the customer.
  *
+ * PARTIAL FULFILMENT (see utils/partialFulfilment.ts): an order the shop has asked the customer
+ * to approve a REDUCED version of deliberately stays PENDING while the customer decides, which
+ * means it lands squarely in this sweep's query. Auto-rejecting it here would silently kill a
+ * live order the shop is actively negotiating — so a proposal still inside its own `expiresAt`
+ * window is skipped outright, and one that has run out is routed to `expirePartialFulfilment`
+ * (cancel, reason "Customer did not respond…", shop notified) instead of the shop-didn't-confirm
+ * auto-reject, which would blame the wrong party. Proposing also pushes the order's
+ * `confirmationDeadlineAt` out to the proposal's `expiresAt`, so in practice this sweep only sees
+ * such an order at exactly the moment it should act on it; the state check below is belt-and-
+ * braces for rows where that write and this read disagree.
+ *
  * Exported as a plain function (not just the cron registration) so it can be invoked directly in
  * tests/manual verification without waiting for the schedule to tick.
  */
 export async function sweepExpiredPendingOrders(): Promise<{ processed: number; failed: number }> {
-  let overdue: Array<{ id: string; organizationId: string }>;
+  let overdue: Array<{ id: string; organizationId: string; deliveryAddress: unknown }>;
 
   try {
     // Bug fixed 2026-07-27 (found via live end-to-end test): this query previously ran
@@ -35,7 +47,7 @@ export async function sweepExpiredPendingOrders(): Promise<{ processed: number; 
         status: SalesOrderStatus.PENDING,
         confirmationDeadlineAt: { lt: new Date() },
       },
-      select: { id: true, organizationId: true },
+      select: { id: true, organizationId: true, deliveryAddress: true },
     });
   } catch (error) {
     console.warn("[order-confirmation-sweep] Failed to query overdue orders — skipping this tick", error);
@@ -45,8 +57,26 @@ export async function sweepExpiredPendingOrders(): Promise<{ processed: number; 
   let processed = 0;
   let failed = 0;
 
+  const now = Date.now();
+
   for (const order of overdue) {
     try {
+      const proposal = parsePartialFulfilment(order.deliveryAddress);
+
+      if (proposal?.state === "AWAITING_CUSTOMER") {
+        const expiresAt = Date.parse(proposal.expiresAt);
+
+        // Still inside the customer's window — leave it alone. This is the check that stops the
+        // sweep from killing orders mid-negotiation.
+        if (Number.isFinite(expiresAt) && expiresAt > now) {
+          continue;
+        }
+
+        await expirePartialFulfilment(order.organizationId, order.id);
+        processed += 1;
+        continue;
+      }
+
       await rejectSalesOrder(order.organizationId, order.id, null, AUTO_CANCEL_REASON);
       processed += 1;
     } catch (error) {

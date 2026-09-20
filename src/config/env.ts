@@ -103,6 +103,14 @@ const envSchema = z
     // How long a bridged/created PENDING SalesOrder waits for shop confirmation before the
     // order-confirmation-sweep cron auto-rejects it (see jobs/order-confirmation-sweep.ts).
     ORDER_CONFIRMATION_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(10),
+    // How long a partial-fulfilment proposal (shop: "I can only supply 3 of your 5 items") waits
+    // for the customer to accept or refuse before the order-confirmation sweep expires it and
+    // cancels the order — see utils/partialFulfilment.ts and jobs/order-confirmation-sweep.ts.
+    // Deliberately longer than ORDER_CONFIRMATION_TIMEOUT_MINUTES: that deadline is a shop SLA,
+    // this one is a human customer who has to read a push notification and make a decision.
+    // Proposing rewrites `SalesOrder.confirmationDeadlineAt` to the proposal's `expiresAt` so the
+    // existing every-minute sweep fires at exactly the right moment either way.
+    PARTIAL_FULFILMENT_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(30),
     // Max distance (km) a driver's last known location may be from a branch's pickup point to be
     // considered for nearest-free-driver auto-assignment (see sales-orders driver-matching logic).
     DRIVER_MATCH_RADIUS_KM: z.coerce.number().positive().default(15),

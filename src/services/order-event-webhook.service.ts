@@ -1,4 +1,5 @@
 import { env } from "../config/env";
+import type { PartialFulfilmentInfo } from "../utils/partialFulfilment";
 
 type OrderEventType =
   | "CONFIRMED"
@@ -9,7 +10,16 @@ type OrderEventType =
   | "OUT_FOR_DELIVERY"
   | "DELIVERED"
   | "AUTO_CANCELLED"
-  | "CANCELLED";
+  | "CANCELLED"
+  // Shop-side partial fulfilment (see utils/partialFulfilment.ts). Added as explicit event types
+  // rather than folded into the status-based ones above because PARTIAL_PROPOSED carries NO
+  // status change at all (the order deliberately stays PENDING while the customer decides), and
+  // because the customer-facing copy for "you declined the revised order" is nothing like the
+  // generic "the shop rejected your order". Every existing event above is untouched.
+  | "PARTIAL_PROPOSED"
+  | "PARTIAL_ACCEPTED"
+  | "PARTIAL_DECLINED"
+  | "PARTIAL_EXPIRED";
 
 interface NotifyOrderEventInput {
   externalOrderId: string;
@@ -24,6 +34,10 @@ interface NotifyOrderEventInput {
   // see, matching the existing pattern of carrying synced fields like driver name/phone on this
   // same webhook.
   deliveryProofPhotoUrl?: string | null;
+  // The full partial-fulfilment proposal, sent on every PARTIAL_* event so NearCart can render
+  // the review screen (and word its customer push) without an extra bridge round trip. Absent on
+  // every other event type.
+  partialFulfilment?: PartialFulfilmentInfo | null;
 }
 
 /**

@@ -181,6 +181,18 @@ enum AuditAction {
   // POST /driver/orders/:id/arrived (driver-orders.service.ts) — driver confirms they've reached
   // the branch/pickup point, before pickup.
   ORDER_DRIVER_ARRIVED
+  // Shop-side partial fulfilment with customer approval (see utils/partialFulfilment.ts). The
+  // shop proposes a reduced order on a still-unconfirmed order (PROPOSE), and the customer then
+  // accepts it (ACCEPT — this is also where stock finally moves, for the FINAL quantities only),
+  // refuses it (DECLINE), or never answers within PARTIAL_FULFILMENT_TIMEOUT_MINUTES (EXPIRE,
+  // written by the order-confirmation sweep). Adding enum values needs no migration here: Prisma
+  // stores enums as plain TEXT on SQLite with no CHECK constraint (see the AuditLog DDL in
+  // prisma/migrations/20260727141013_init), which is exactly how ORDER_AUTOASSIGN_FAILED /
+  // ORDER_DRIVER_ARRIVED above were added too.
+  ORDER_PARTIAL_PROPOSE
+  ORDER_PARTIAL_ACCEPT
+  ORDER_PARTIAL_DECLINE
+  ORDER_PARTIAL_EXPIRE
 }
 
 // Result of the automatic Replicate (image clarity/OCR) + Google Places shop-photo check run by
@@ -243,6 +255,10 @@ enum NotificationLogType {
   // Org-staff-facing alert that the assigned driver has arrived at the branch for pickup — see
   // AuditAction.ORDER_DRIVER_ARRIVED.
   ORDER_DRIVER_ARRIVED
+  // Org-staff-facing outcome of a partial-fulfilment proposal the shop sent to the customer:
+  // accepted (order is now CONFIRMED), declined, or expired unanswered (order cancelled). See
+  // utils/partialFulfilment.ts and AuditAction.ORDER_PARTIAL_* above.
+  ORDER_PARTIAL_RESPONSE
 }
 
 model NotificationLog {

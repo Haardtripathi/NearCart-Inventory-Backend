@@ -121,3 +121,23 @@ export const organizationBranchParamSchema = z.object({
   organizationId: trimmedString,
   branchId: trimmedString,
 });
+
+/**
+ * The customer's answer to a shop's partial-fulfilment proposal. `accepted` is the whole
+ * contract; `revisedPayment` is an optional correction from NearCart for the cases where its own
+ * coupon/loyalty rules change the bill beyond the pure item-total reduction this backend can
+ * compute on its own (most importantly: a coupon whose minimum spend no longer holds has to be
+ * dropped, which pushes the amount payable back UP). Without it we fall back to the proposal's
+ * own `proposedAmountPayable`, so an older NearCart keeps working.
+ */
+const revisedPaymentSchema = z.object({
+  discountTotal: moneyAmountSchema.optional(),
+  loyaltyDiscount: moneyAmountSchema.optional(),
+  couponCode: z.string().trim().min(1).max(64).nullable().optional(),
+  amountPayable: moneyAmountSchema.optional(),
+});
+
+export const partialFulfilmentResponseSchema = z.object({
+  accepted: z.boolean(),
+  revisedPayment: revisedPaymentSchema.nullable().optional(),
+});

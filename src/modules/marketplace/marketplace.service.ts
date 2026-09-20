@@ -1425,3 +1425,37 @@ export async function respondToPartialFulfilment(
     applied: true as const,
   };
 }
+
+
+/**
+ * Nudges this organization's staff to confirm, in the Partner app, that the shop is open today.
+ *
+ * NearCart owns the "open today" flag (see modules/shop-status), and until it is confirmed each
+ * day the storefront shows "Hours not confirmed yet" and every cart-validate/checkout for that
+ * shop is rejected — so a shop owner who simply forgets gets zero orders and no explanation.
+ * NearCart runs the daily sweep because it is the side that can find the unconfirmed shops in one
+ * indexed query; it calls here because the staff device tokens live in THIS database.
+ *
+ * Deliberately takes no message body: the copy is fixed here so this endpoint can never be used
+ * to push arbitrary text to a shop's staff. Fire-and-forget, like every other push in this repo —
+ * a failed nudge must not fail the caller's sweep.
+ */
+export async function sendShopOpenReminder(organizationId: string) {
+  const organization = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { id: true, name: true, status: true },
+  });
+
+  if (!organization || organization.status !== "ACTIVE") {
+    throw ApiError.notFound("No active organization found for this id");
+  }
+
+  void sendPushToOrgStaff(organizationId, {
+    title: "Confirm you're open today",
+    body: "Customers can't order from you until you confirm today's opening hours in the Partner app.",
+    data: { type: "SHOP_OPEN_REMINDER", organizationId },
+    channelId: "order_alert",
+  });
+
+  return { organizationId, notified: true as const };
+}

@@ -122,6 +122,10 @@ export const organizationBranchParamSchema = z.object({
   branchId: trimmedString,
 });
 
+export const organizationParamSchema = z.object({
+  organizationId: trimmedString,
+});
+
 /**
  * The customer's answer to a shop's partial-fulfilment proposal. `accepted` is the whole
  * contract; `revisedPayment` is an optional correction from NearCart for the cases where its own

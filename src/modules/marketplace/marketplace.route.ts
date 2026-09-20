@@ -15,6 +15,7 @@ import {
   listMarketplaceCategoriesController,
   listMarketplaceOrganizationsController,
   respondToPartialFulfilmentController,
+  sendShopOpenReminderController,
 } from "./marketplace.controller";
 import {
   createBridgedSalesOrderSchema,
@@ -24,6 +25,7 @@ import {
   marketplaceOrganizationsQuerySchema,
   marketplaceScopedQuerySchema,
   organizationBranchParamSchema,
+  organizationParamSchema,
   organizationExternalOrderIdParamSchema,
   partialFulfilmentResponseSchema,
 } from "./marketplace.validation";
@@ -116,4 +118,14 @@ marketplaceRouter.post(
   "/organizations/:organizationId/sales-orders/by-external/:externalOrderId/partial-response",
   validateRequest({ params: organizationExternalOrderIdParamSchema, body: partialFulfilmentResponseSchema }),
   asyncHandler(respondToPartialFulfilmentController),
+);
+
+// Daily nudge to this org's staff to confirm the shop is open today. NearCart runs the sweep
+// (it owns the flag and can find unconfirmed shops in one query) and calls here because the
+// staff device tokens live in this database. No body — the copy is fixed in the service so this
+// can't be used to push arbitrary text to a shop.
+marketplaceRouter.post(
+  "/organizations/:organizationId/shop-open-reminder",
+  validateRequest({ params: organizationParamSchema }),
+  asyncHandler(sendShopOpenReminderController),
 );

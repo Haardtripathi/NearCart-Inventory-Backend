@@ -17,6 +17,7 @@ import {
   listMarketplaceCategories,
   listMarketplaceOrganizations,
   respondToPartialFulfilment,
+  sendShopOpenReminder,
 } from "./marketplace.service";
 
 function resolveRequestedLanguage(req: Request) {
@@ -113,6 +114,11 @@ export async function cancelBridgedSalesOrderController(req: Request, res: Respo
 export async function getBranchActiveOrderCountController(req: Request, res: Response) {
   const data = await getBranchActiveOrderCount(req.params.organizationId!, req.params.branchId!);
   return sendSuccess(res, 200, "Branch active order count fetched successfully", data);
+}
+
+export async function sendShopOpenReminderController(req: Request, res: Response) {
+  const data = await sendShopOpenReminder(req.params.organizationId!);
+  return sendSuccess(res, 200, "Shop-open reminder sent", data);
 }
 
 export async function respondToPartialFulfilmentController(req: Request, res: Response) {

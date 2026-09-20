@@ -8,6 +8,27 @@ import { parsePartialFulfilment } from "../utils/partialFulfilment";
 const AUTO_CANCEL_REASON = "Shop did not confirm in time (auto-cancelled)";
 
 /**
+ * Hard cap on how many overdue orders one tick will touch.
+ *
+ * The query below is indexed (SalesOrder [status, confirmationDeadlineAt]) so FINDING the rows is
+ * cheap at any table size, but each row is then processed one at a time, each doing its own
+ * transaction, audit write and outbound notification. Unbounded, a backlog — the process was down
+ * for a few hours, a deploy paused the cron, an incident left thousands of orders past their
+ * deadline — would make a single tick run for minutes while the next tick starts on top of it. The
+ * cap turns that into steady drainage at CONFIRMATION_SWEEP_BATCH_SIZE per minute instead, which
+ * for a deadline measured in minutes is far more than real traffic ever produces.
+ */
+const CONFIRMATION_SWEEP_BATCH_SIZE = 200;
+
+/**
+ * Guards against overlapping ticks. node-cron fires on the wall clock regardless of whether the
+ * previous run has finished, so a slow tick (a sluggish database, a large batch) would otherwise
+ * have a second run select the same rows and race it — every one of those duplicates then failing
+ * its status guard and being counted as an error.
+ */
+let sweepInFlight = false;
+
+/**
  * Finds every PENDING SalesOrder whose confirmationDeadlineAt has passed and auto-rejects it,
  * routing through the existing staff-facing rejectSalesOrder (actorUserId: null — same nullable-
  * actor pattern already used for the nearest-free-driver auto-assign path in
@@ -48,6 +69,10 @@ export async function sweepExpiredPendingOrders(): Promise<{ processed: number; 
         confirmationDeadlineAt: { lt: new Date() },
       },
       select: { id: true, organizationId: true, deliveryAddress: true },
+      // Oldest deadline first, so a backlog drains in the order customers have been waiting
+      // rather than in whatever order the storage engine happens to return.
+      orderBy: { confirmationDeadlineAt: "asc" },
+      take: CONFIRMATION_SWEEP_BATCH_SIZE,
     });
   } catch (error) {
     console.warn("[order-confirmation-sweep] Failed to query overdue orders — skipping this tick", error);
@@ -99,11 +124,25 @@ export async function sweepExpiredPendingOrders(): Promise<{ processed: number; 
 /** Registers the every-minute sweep. Called once at server startup (see server.ts). */
 export function registerOrderConfirmationSweep(): void {
   schedule("* * * * *", () => {
+    // node-cron fires on the wall clock whether or not the previous tick has finished. Skipping
+    // rather than queueing keeps two runs from selecting and racing the same overdue orders; the
+    // batch the in-flight run is already working through covers them.
+    if (sweepInFlight) {
+      console.warn("[order-confirmation-sweep] Previous tick still running — skipping this one.");
+      return;
+    }
+
+    sweepInFlight = true;
+
     // Defense in depth on top of the internal try/catch above — a scheduled job must never be
     // able to produce an unhandled rejection that takes the whole process down with it.
-    sweepExpiredPendingOrders().catch((error) => {
-      console.warn("[order-confirmation-sweep] Unexpected error during sweep tick", error);
-    });
+    sweepExpiredPendingOrders()
+      .catch((error) => {
+        console.warn("[order-confirmation-sweep] Unexpected error during sweep tick", error);
+      })
+      .finally(() => {
+        sweepInFlight = false;
+      });
   });
 
   console.log("[order-confirmation-sweep] Registered (runs every minute).");

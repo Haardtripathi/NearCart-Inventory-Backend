@@ -9,6 +9,7 @@ import { slugify } from "../../utils/slug";
 import { mergeTranslationsForUpdate, upsertTranslations } from "../../utils/translations";
 import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
 import { createAuditLog } from "../audit/audit.service";
+import { invalidateOrgCatalogMetadata } from "../marketplace/marketplace-metadata.cache";
 
 interface BrandTranslationInput {
   language: LanguageCode;
@@ -151,6 +152,13 @@ export async function createBrand(
     after: brand,
   });
 
+  // The marketplace bridge serves category/brand/unit display data to the customer app from a
+  // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+  // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+  // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+  // its own.
+  await invalidateOrgCatalogMetadata(organizationId);
+
   return serializeBrand(await getBrandRecordById(organizationId, brand.id), localeContext);
 }
 
@@ -233,6 +241,13 @@ export async function updateBrand(
     after: await getBrandRecordById(organizationId, brandId),
   });
 
+  // The marketplace bridge serves category/brand/unit display data to the customer app from a
+  // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+  // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+  // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+  // its own.
+  await invalidateOrgCatalogMetadata(organizationId);
+
   return serializeBrand(await getBrandRecordById(organizationId, brandId), localeContext);
 }
 
@@ -256,6 +271,13 @@ export async function deleteBrand(organizationId: string, brandId: string, actor
     before: existing,
     after: deleted,
   });
+
+  // The marketplace bridge serves category/brand/unit display data to the customer app from a
+  // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+  // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+  // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+  // its own.
+  await invalidateOrgCatalogMetadata(organizationId);
 
   return deleted;
 }

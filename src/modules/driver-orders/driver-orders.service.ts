@@ -911,6 +911,14 @@ export async function getDriverPerformanceSummary(driverId: string, range: Drive
  * pattern) so it can be invoked directly outside the schedule (manual runs, tests) as well as from
  * the registered cron in jobs/driver-assignment-watchdog.ts.
  */
+// Per-tick caps for the two watchdog sweeps below. Both are indexed lookups (SalesOrder
+// [status, assignedAt]) so finding the rows stays cheap at any table size, but each row then costs
+// a transaction and an outbound push. Unbounded, a backlog — the process was down, a deploy paused
+// the cron — would make one tick run for minutes and the next tick start on top of it. The caps
+// turn that into steady drainage per two-minute tick, well above any real assignment rate.
+const STALE_ASSIGNMENT_SWEEP_BATCH_SIZE = 100;
+const NEAR_TIMEOUT_REMINDER_BATCH_SIZE = 200;
+
 export async function sweepStaleDriverAssignments(): Promise<{
   reassigned: number;
   unassigned: number;
@@ -955,6 +963,10 @@ export async function sweepStaleDriverAssignments(): Promise<{
         declinedByDriverIds: true,
         externalOrderId: true,
       },
+      // Longest-stale first: those are the customers who have been waiting on a no-show driver
+      // the longest, so they are the ones to rematch first if a backlog ever forms.
+      orderBy: { assignedAt: "asc" },
+      take: STALE_ASSIGNMENT_SWEEP_BATCH_SIZE,
     });
   } catch (error) {
     console.warn(
@@ -1111,6 +1123,8 @@ export async function sendNearTimeoutReminders(): Promise<{ reminded: number }> 
         arrivedForPickupAt: null,
       },
       select: { id: true, orderNumber: true, assignedDriverId: true },
+      orderBy: { assignedAt: "asc" },
+      take: NEAR_TIMEOUT_REMINDER_BATCH_SIZE,
     });
   } catch (error) {
     console.warn(

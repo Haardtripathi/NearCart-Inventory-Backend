@@ -597,6 +597,10 @@ model Customer {
   salesOrders    SalesOrder[]
 
   @@index([organizationId, deletedAt])
+  // Every bridged order from NearCart resolves its customer with
+  // organizationId + phone (marketplace.service.ts findOrCreateBridgeCustomer). Without this,
+  // that lookup scans every customer the shop has ever had, on the order-creation path.
+  @@index([organizationId, phone])
 }
 
 model Product {
@@ -649,6 +653,11 @@ model Product {
   @@index([organizationId, deletedAt])
   @@index([organizationId, status])
   @@index([organizationId, masterCatalogItemId])
+  // Storefront browsing is overwhelmingly "active products in this category/brand" — the
+  // [organizationId, status] index alone leaves the category/brand predicate to a scan of every
+  // active product in the shop.
+  @@index([organizationId, status, categoryId])
+  @@index([organizationId, status, brandId])
 }
 
 model ProductVariant {
@@ -998,6 +1007,16 @@ model InventoryLedger {
   @@index([branchId])
   @@index([variantId])
   @@index([createdAt])
+  // This is the table that actually grows without bound — one row per stock movement, forever.
+  // Every read of it (inventory.service.ts listLedger) filters by organizationId and orders by
+  // createdAt DESC, optionally narrowed to a branch or a variant. The single-column indexes above
+  // can satisfy the filter OR the ordering but never both, so the database had to read every row
+  // for the organization and sort them to return one page; that gets slower every month the log
+  // grows. These three cover the filter and the sort together, so a page costs a seek plus one
+  // page of rows no matter how large the table gets.
+  @@index([organizationId, createdAt])
+  @@index([organizationId, branchId, createdAt])
+  @@index([organizationId, variantId, createdAt])
 }
 
 model InventoryBatch {
@@ -1187,6 +1206,17 @@ model SalesOrder {
   // [organizationId, status] index above doesn't help there since branchId isn't its leading
   // column, so add a dedicated compound index.
   @@index([branchId, status])
+  // Analytics windows ("last 30 days") and any date-ordered order list filter on organizationId
+  // and range/sort on createdAt; [organizationId, status] cannot serve the date range.
+  @@index([organizationId, createdAt])
+  // The driver-assignment watchdog (jobs/driver-assignment-watchdog.ts) runs every two minutes,
+  // forever, looking for READY orders whose assignedAt has aged past a threshold — and the
+  // near-timeout reminder on the same tick does the same with a narrower window. Without assignAt
+  // in the index those sweeps re-scan every READY row on every tick.
+  @@index([status, assignedAt])
+  // findNearestUnassignedOrderForDriver (sales-orders.service.ts) looks for READY orders with no
+  // driver, capped by age, every time a driver comes online.
+  @@index([status, assignedDriverId, createdAt])
 }
 
 // Drivers are a platform-wide pool, independent of User/OrganizationMembership (not tied to any
@@ -1248,6 +1278,10 @@ model Driver {
 
   @@index([status])
   @@index([isAvailableForAssignment])
+  // findNearestFreeDriver (sales-orders.service.ts) runs on every mark-ready and selects on
+  // status + availability + location freshness together; neither single-column index above can
+  // narrow more than one of those.
+  @@index([status, isAvailableForAssignment, lastLocationAt])
 }
 
 // Mirrors NearCart/backend's RefreshToken model/rotation design (rotate-on-use, hashed storage,
@@ -1303,6 +1337,10 @@ model SalesOrderItem {
   variant             ProductVariant @relation(fields: [variantId], references: [id])
 
   @@index([salesOrderId])
+  // Sales-velocity reads (analytics.service.ts getReorderSuggestions) start from "which variants
+  // sold recently", which is a lookup by variant/product across order items rather than by order.
+  @@index([variantId])
+  @@index([productId])
 }
 
 model StockTransfer {

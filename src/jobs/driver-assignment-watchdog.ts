@@ -16,6 +16,13 @@ import {
  * to act. `sendNearTimeoutReminders`'s own reminder window is deliberately sized against this
  * exact 2-minute cadence — keep them in sync if this schedule ever changes.
  */
+// node-cron fires on the wall clock whether or not the previous tick has finished, so a slow run
+// would otherwise have a second one select and race the same orders — unassigning or re-notifying
+// twice. Tracked per sweep so a slow one never blocks the other (they are deliberately independent,
+// see below).
+let staleSweepInFlight = false;
+let reminderSweepInFlight = false;
+
 export function registerDriverAssignmentWatchdog(): void {
   schedule("*/2 * * * *", () => {
     // Defense in depth on top of each function's own internal try/catch blocks — a scheduled job
@@ -23,13 +30,33 @@ export function registerDriverAssignmentWatchdog(): void {
     // it (this exact bug class was previously found and fixed in this same backend's
     // order-confirmation-sweep). Run independently (not chained) so a failure in one never
     // prevents the other from running.
-    sweepStaleDriverAssignments().catch((error) => {
-      console.warn("[driver-assignment-watchdog] Unexpected error during sweep tick", error);
-    });
+    if (staleSweepInFlight) {
+      console.warn("[driver-assignment-watchdog] Previous stale-assignment sweep still running — skipping.");
+    } else {
+      staleSweepInFlight = true;
 
-    sendNearTimeoutReminders().catch((error) => {
-      console.warn("[driver-assignment-watchdog] Unexpected error during reminder tick", error);
-    });
+      sweepStaleDriverAssignments()
+        .catch((error) => {
+          console.warn("[driver-assignment-watchdog] Unexpected error during sweep tick", error);
+        })
+        .finally(() => {
+          staleSweepInFlight = false;
+        });
+    }
+
+    if (reminderSweepInFlight) {
+      console.warn("[driver-assignment-watchdog] Previous reminder sweep still running — skipping.");
+    } else {
+      reminderSweepInFlight = true;
+
+      sendNearTimeoutReminders()
+        .catch((error) => {
+          console.warn("[driver-assignment-watchdog] Unexpected error during reminder tick", error);
+        })
+        .finally(() => {
+          reminderSweepInFlight = false;
+        });
+    }
   });
 
   console.log("[driver-assignment-watchdog] Registered (runs every 2 minutes).");

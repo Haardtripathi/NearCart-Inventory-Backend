@@ -35,12 +35,17 @@ import {
 import { cancelSalesOrder } from "../sales-orders/sales-orders.service";
 import { recordNotificationLog } from "../notifications/notifications.service";
 import { sendPushToOrgStaff } from "../../services/push-notification.service";
+import { selectCatalogCandidates, type CatalogSort } from "./marketplace-catalog.query";
+import {
+  ensureCatalogMetadataCoverage,
+  getOrgCatalogMetadata,
+  readThroughJsonCache,
+  type OrgCatalogMetadataIndex,
+} from "./marketplace-metadata.cache";
 
 type RequestedLocaleOptions = {
   requestedLanguage?: LanguageCode | null;
 };
-
-type MarketplaceProductRecord = Awaited<ReturnType<typeof getMarketplaceProductRecord>>;
 
 function toNumber(value: Prisma.Decimal.Value | null | undefined) {
   return Number(new Prisma.Decimal(value ?? 0).toString());
@@ -87,20 +92,12 @@ async function getMarketplaceOrganization(
       status: true,
       currencyCode: true,
       defaultLanguage: true,
-      branches: {
-        where: {
-          deletedAt: null,
-        },
-        orderBy: [{ isActive: "desc" }, { createdAt: "asc" }],
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          type: true,
-          city: true,
-          isActive: true,
-        },
-      },
+      // The branch list that used to be selected here was never read by any caller of this
+      // helper — every one of them resolves the single branch it was asked about via
+      // getMarketplaceBranch, and only listMarketplaceOrganizations (which has its own query)
+      // returns branches. As a nested relation it cost a second remote round trip on the front
+      // of every catalog, product, availability, categories and brands request: 78ms of the
+      // ~250ms budget, measured, for data that was thrown away.
     },
   });
 
@@ -138,73 +135,250 @@ async function getMarketplaceBranch(
   return serializeLocalizedEntity(branch, localeContext);
 }
 
-function buildMarketplaceProductInclude(branchId: string) {
-  return {
-    category: {
-      include: {
-        translations: {
-          orderBy: {
-            language: "asc" as const,
-          },
-        },
+interface MarketplaceVariantRecord {
+  id: string;
+  sku: string;
+  barcode: string | null;
+  name: string;
+  imageUrl: string | null;
+  sellingPrice: Prisma.Decimal;
+  mrp: Prisma.Decimal | null;
+  reorderLevel: Prisma.Decimal;
+  minStockLevel: Prisma.Decimal;
+  isDefault: boolean;
+  unitId: string | null;
+  translations: Array<{ language: LanguageCode; name: string }>;
+  balances: Array<{ onHand: Prisma.Decimal; reserved: Prisma.Decimal }>;
+}
+
+interface MarketplaceProductRecord {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  imageUrl: string | null;
+  hasVariants: boolean;
+  categoryId: string | null;
+  brandId: string | null;
+  primaryUnitId: string | null;
+  translations: Array<{ language: LanguageCode; name: string; description: string | null }>;
+  variants: MarketplaceVariantRecord[];
+}
+
+/**
+ * Loads the products matching `productWhere`, with the variants, translations and live branch
+ * stock the marketplace response needs.
+ *
+ * WHY THIS IS FIVE FLAT QUERIES AND NOT ONE NESTED `select`:
+ *
+ * Prisma resolves a nested selection one relation LEVEL at a time, and every level is a separate
+ * round trip to the remote Turso database. The nested version of this read was
+ * Product -> (translations, variants) -> (variant translations, balances): three sequential levels,
+ * 149ms measured for eight products, and the second and third levels could not start until the one
+ * above them came back.
+ *
+ * Expressing each leaf as its own query with a RELATION FILTER (`{ product: productWhere }`) means
+ * the database, not this process, resolves which rows belong to the page — so all five go out at
+ * once and the whole read costs one round trip's latency instead of three. Nothing is fetched that
+ * the nested form did not fetch; the rows are just stitched back together here.
+ *
+ * Category, brand and unit are deliberately absent: they are slow-changing display metadata served
+ * from the cached per-organization snapshot (marketplace-metadata.cache.ts). Stock is deliberately
+ * present: `balances` is read live, on every request, and is never cached anywhere.
+ */
+async function hydrateMarketplaceProducts(
+  productWhere: Prisma.ProductWhereInput,
+  branchId: string,
+): Promise<MarketplaceProductRecord[]> {
+  const activeVariantWhere: Prisma.ProductVariantWhereInput = {
+    product: productWhere,
+    deletedAt: null,
+    isActive: true,
+  };
+
+  const [products, productTranslations, variants, variantTranslations, balances] = await Promise.all([
+    prisma.product.findMany({
+      where: productWhere,
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        description: true,
+        imageUrl: true,
+        hasVariants: true,
+        categoryId: true,
+        brandId: true,
+        primaryUnitId: true,
       },
-    },
-    brand: {
-      include: {
-        translations: {
-          orderBy: {
-            language: "asc" as const,
-          },
-        },
+    }),
+    prisma.productTranslation.findMany({
+      where: { product: productWhere },
+      select: { productId: true, language: true, name: true, description: true },
+      orderBy: { language: "asc" },
+    }),
+    prisma.productVariant.findMany({
+      where: activeVariantWhere,
+      select: {
+        id: true,
+        productId: true,
+        sku: true,
+        barcode: true,
+        name: true,
+        imageUrl: true,
+        sellingPrice: true,
+        mrp: true,
+        reorderLevel: true,
+        minStockLevel: true,
+        isDefault: true,
+        unitId: true,
       },
-    },
-    primaryUnit: {
-      include: {
-        translations: {
-          orderBy: {
-            language: "asc" as const,
-          },
-        },
-      },
-    },
-    translations: {
-      orderBy: {
-        language: "asc" as const,
-      },
-    },
-    variants: {
-      where: {
-        deletedAt: null,
-        isActive: true,
-      },
-      include: {
-        translations: {
-          orderBy: {
-            language: "asc" as const,
-          },
-        },
-        unit: {
-          include: {
-            translations: {
-              orderBy: {
-                language: "asc" as const,
-              },
-            },
-          },
-        },
-        balances: {
-          where: {
-            branchId,
-          },
-          select: {
-            onHand: true,
-            reserved: true,
-          },
-        },
-      },
-      orderBy: [{ isDefault: "desc" as const }, { createdAt: "asc" as const }],
-    },
-  } satisfies Prisma.ProductInclude;
+      // Same ordering the nested `variants` selection used, so getDefaultVariant still picks the
+      // flagged default and otherwise the oldest active variant.
+      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    }),
+    prisma.productVariantTranslation.findMany({
+      where: { variant: activeVariantWhere },
+      select: { variantId: true, language: true, name: true },
+      orderBy: { language: "asc" },
+    }),
+    prisma.inventoryBalance.findMany({
+      where: { branchId, variant: activeVariantWhere },
+      select: { variantId: true, onHand: true, reserved: true },
+    }),
+  ]);
+
+  const translationsByProductId = new Map<string, MarketplaceProductRecord["translations"]>();
+
+  for (const translation of productTranslations) {
+    const bucket = translationsByProductId.get(translation.productId);
+    const entry = {
+      language: translation.language,
+      name: translation.name,
+      description: translation.description,
+    };
+
+    if (bucket) {
+      bucket.push(entry);
+    } else {
+      translationsByProductId.set(translation.productId, [entry]);
+    }
+  }
+
+  const translationsByVariantId = new Map<string, MarketplaceVariantRecord["translations"]>();
+
+  for (const translation of variantTranslations) {
+    const bucket = translationsByVariantId.get(translation.variantId);
+    const entry = { language: translation.language, name: translation.name };
+
+    if (bucket) {
+      bucket.push(entry);
+    } else {
+      translationsByVariantId.set(translation.variantId, [entry]);
+    }
+  }
+
+  // At most one balance row per variant+branch (InventoryBalance is unique on
+  // organizationId+branchId+variantId), but it stays an array so resolveVariantStockSummary's
+  // `balances[0] ?? null` — and its "no row means zero stock" behaviour — is unchanged.
+  const balancesByVariantId = new Map<string, MarketplaceVariantRecord["balances"]>();
+
+  for (const balance of balances) {
+    const bucket = balancesByVariantId.get(balance.variantId);
+    const entry = { onHand: balance.onHand, reserved: balance.reserved };
+
+    if (bucket) {
+      bucket.push(entry);
+    } else {
+      balancesByVariantId.set(balance.variantId, [entry]);
+    }
+  }
+
+  const variantsByProductId = new Map<string, MarketplaceVariantRecord[]>();
+
+  for (const variant of variants) {
+    const entry: MarketplaceVariantRecord = {
+      id: variant.id,
+      sku: variant.sku,
+      barcode: variant.barcode,
+      name: variant.name,
+      imageUrl: variant.imageUrl,
+      sellingPrice: variant.sellingPrice,
+      mrp: variant.mrp,
+      reorderLevel: variant.reorderLevel,
+      minStockLevel: variant.minStockLevel,
+      isDefault: variant.isDefault,
+      unitId: variant.unitId,
+      translations: translationsByVariantId.get(variant.id) ?? [],
+      balances: balancesByVariantId.get(variant.id) ?? [],
+    };
+
+    const bucket = variantsByProductId.get(variant.productId);
+
+    if (bucket) {
+      bucket.push(entry);
+    } else {
+      variantsByProductId.set(variant.productId, [entry]);
+    }
+  }
+
+  return products.map((product) => ({
+    id: product.id,
+    slug: product.slug,
+    name: product.name,
+    description: product.description,
+    imageUrl: product.imageUrl,
+    hasVariants: product.hasVariants,
+    categoryId: product.categoryId,
+    brandId: product.brandId,
+    primaryUnitId: product.primaryUnitId,
+    translations: translationsByProductId.get(product.id) ?? [],
+    variants: variantsByProductId.get(product.id) ?? [],
+  }));
+}
+
+/** Category/brand/unit ids a hydrated product page actually references, for the cache backstop. */
+function collectMetadataReferences(products: MarketplaceProductRecord[]) {
+  const categoryIds = new Set<string>();
+  const brandIds = new Set<string>();
+  const unitIds = new Set<string>();
+
+  for (const product of products) {
+    if (product.categoryId) {
+      categoryIds.add(product.categoryId);
+    }
+
+    if (product.brandId) {
+      brandIds.add(product.brandId);
+    }
+
+    if (product.primaryUnitId) {
+      unitIds.add(product.primaryUnitId);
+    }
+
+    for (const variant of product.variants) {
+      if (variant.unitId) {
+        unitIds.add(variant.unitId);
+      }
+    }
+  }
+
+  return { categoryIds, brandIds, unitIds };
+}
+
+/**
+ * Loads the cached catalog metadata and guarantees it covers every id these products reference.
+ * Callers that already have the metadata in hand (the catalog listing fetches it in parallel with
+ * the candidate query) pass it in instead of loading it twice.
+ */
+async function resolveMetadataFor(
+  organizationId: string,
+  products: MarketplaceProductRecord[],
+  preloaded?: OrgCatalogMetadataIndex,
+) {
+  const metadata = preloaded ?? (await getOrgCatalogMetadata(organizationId));
+  await ensureCatalogMetadataCoverage(metadata, collectMetadataReferences(products));
+
+  return metadata;
 }
 
 async function getMarketplaceProductRecord(
@@ -212,15 +386,15 @@ async function getMarketplaceProductRecord(
   branchId: string,
   productId: string,
 ) {
-  const product = await prisma.product.findFirst({
-    where: {
+  const [product] = await hydrateMarketplaceProducts(
+    {
       id: productId,
       organizationId,
       deletedAt: null,
       status: ProductStatus.ACTIVE,
     },
-    include: buildMarketplaceProductInclude(branchId),
-  });
+    branchId,
+  );
 
   if (!product) {
     throw ApiError.notFound("Active product not found");
@@ -254,9 +428,11 @@ function resolveVariantStockSummary(
 function serializeMarketplaceVariant(
   variant: MarketplaceProductRecord["variants"][number],
   localeContext: LocaleContext,
+  metadata: OrgCatalogMetadataIndex,
 ) {
   const localizedVariant = serializeLocalizedEntity(variant, localeContext);
-  const localizedUnit = variant.unit ? serializeLocalizedEntity(variant.unit, localeContext) : null;
+  const unit = variant.unitId ? metadata.unitById.get(variant.unitId) ?? null : null;
+  const localizedUnit = unit ? serializeLocalizedEntity(unit, localeContext) : null;
   const stock = resolveVariantStockSummary(variant);
 
   return {
@@ -281,20 +457,18 @@ function serializeMarketplaceVariant(
 function serializeMarketplaceProduct(
   product: MarketplaceProductRecord,
   localeContext: LocaleContext,
+  metadata: OrgCatalogMetadataIndex,
 ) {
   const localizedProduct = serializeLocalizedEntity(product, localeContext);
-  const localizedCategory = product.category
-    ? serializeLocalizedEntity(product.category, localeContext)
-    : null;
-  const localizedBrand = product.brand
-    ? serializeLocalizedEntity(product.brand, localeContext)
-    : null;
-  const localizedPrimaryUnit = product.primaryUnit
-    ? serializeLocalizedEntity(product.primaryUnit, localeContext)
-    : null;
+  const category = product.categoryId ? metadata.categoryById.get(product.categoryId) ?? null : null;
+  const brand = product.brandId ? metadata.brandById.get(product.brandId) ?? null : null;
+  const primaryUnit = product.primaryUnitId ? metadata.unitById.get(product.primaryUnitId) ?? null : null;
+  const localizedCategory = category ? serializeLocalizedEntity(category, localeContext) : null;
+  const localizedBrand = brand ? serializeLocalizedEntity(brand, localeContext) : null;
+  const localizedPrimaryUnit = primaryUnit ? serializeLocalizedEntity(primaryUnit, localeContext) : null;
   const defaultVariant = getDefaultVariant(product);
   const serializedVariants = product.variants.map((variant) =>
-    serializeMarketplaceVariant(variant, localeContext),
+    serializeMarketplaceVariant(variant, localeContext, metadata),
   );
   const primaryVariant = defaultVariant
     ? serializedVariants.find((variant) => variant.id === defaultVariant.id) ?? null
@@ -343,49 +517,51 @@ function serializeMarketplaceProduct(
   };
 }
 
-function applyCatalogSort(
-  items: Array<ReturnType<typeof serializeMarketplaceProduct>>,
-  sort: "featured" | "name-asc" | "price-asc" | "price-desc" | "newest",
-) {
-  const normalized = items.filter(
-    (item): item is NonNullable<typeof item> => Boolean(item),
-  );
+// The shop directory is read on every customer app open and fans out from NearCart's public
+// endpoints, but it only changes when a shop is onboarded, renamed, deactivated or gains a
+// branch. 60s of staleness is invisible to a shopper and cannot produce a bad order: the write
+// path re-checks the branch's isActive itself before accepting anything (see
+// createBridgedSalesOrder), so a branch that went inactive in the last minute still refuses the
+// order even if it is briefly still listed here.
+const ORGANIZATIONS_CACHE_TTL_SECONDS = 60;
+const ORGANIZATIONS_CACHE_KEY = "mp-organizations:v1";
 
-  switch (sort) {
-    case "name-asc":
-      return normalized.sort((left, right) => left.name.localeCompare(right.name));
-    case "price-asc":
-      return normalized.sort((left, right) => left.price - right.price);
-    case "price-desc":
-      return normalized.sort((left, right) => right.price - left.price);
-    case "newest":
-      return normalized;
-    case "featured":
-    default:
-      return normalized.sort((left, right) => {
-        if (left.isAvailable !== right.isAvailable) {
-          return Number(right.isAvailable) - Number(left.isAvailable);
-        }
+// Derived from the loader rather than hand-written so the cached shape can never drift from the
+// uncached one. Everything in it is JSON-safe (strings, booleans, enum string unions) — no Date
+// or Decimal, which would not survive the JSON round trip through Redis.
+type MarketplaceOrganizationsResult = Awaited<ReturnType<typeof loadMarketplaceOrganizations>>;
 
-        if (left.stockStatus !== right.stockStatus) {
-          return left.stockStatus.localeCompare(right.stockStatus);
-        }
-
-        return left.name.localeCompare(right.name);
-      });
-  }
+function isMarketplaceOrganizationsResult(value: unknown): value is MarketplaceOrganizationsResult {
+  return typeof value === "object" && value !== null && Array.isArray((value as MarketplaceOrganizationsResult).items);
 }
 
 export async function listMarketplaceOrganizations(query: { search?: string }) {
+  // Only the unfiltered directory is cached. A `search` term is deliberately read through to the
+  // database rather than filtered in JS over a cached list, because Prisma's `contains` compiles
+  // to SQL LIKE and matching that exactly in JavaScript (case folding, non-ASCII) is the kind of
+  // near-miss that quietly changes which shops a customer can find.
+  if (query.search) {
+    return loadMarketplaceOrganizations(query.search);
+  }
+
+  return readThroughJsonCache(
+    ORGANIZATIONS_CACHE_KEY,
+    ORGANIZATIONS_CACHE_TTL_SECONDS,
+    isMarketplaceOrganizationsResult,
+    () => loadMarketplaceOrganizations(undefined),
+  );
+}
+
+async function loadMarketplaceOrganizations(search: string | undefined) {
   const organizations = await prisma.organization.findMany({
     where: {
       deletedAt: null,
       status: "ACTIVE",
-      ...(query.search
+      ...(search
         ? {
             OR: [
-              { name: { contains: query.search } },
-              { slug: { contains: query.search } },
+              { name: { contains: search } },
+              { slug: { contains: search } },
             ],
           }
         : {}),
@@ -445,75 +621,49 @@ export async function listMarketplaceCatalog(
     category?: string;
     brand?: string;
     inStockOnly?: boolean;
-    sort: "featured" | "name-asc" | "price-asc" | "price-desc" | "newest";
+    sort: CatalogSort;
   },
   options: RequestedLocaleOptions = {},
 ) {
   const { organization, localeContext } = await getMarketplaceOrganization(organizationId, options);
-  const branch = await getMarketplaceBranch(organizationId, query.branchId, localeContext);
-  const include = buildMarketplaceProductInclude(query.branchId);
-
-  const products = await prisma.product.findMany({
-    where: {
-      organizationId,
-      deletedAt: null,
-      status: ProductStatus.ACTIVE,
-      ...(query.search
-        ? {
-            OR: [
-              { name: { contains: query.search } },
-              { slug: { contains: query.search } },
-              {
-                translations: {
-                  some: {
-                    name: {
-                      contains: query.search,
-                    },
-                  },
-                },
-              },
-            ],
-          }
-        : {}),
-      ...(query.category
-        ? {
-            OR: [
-              { categoryId: query.category },
-              { category: { slug: query.category } },
-            ],
-          }
-        : {}),
-      ...(query.brand
-        ? {
-            OR: [{ brandId: query.brand }, { brand: { slug: query.brand } }],
-          }
-        : {}),
-    },
-    include,
-    orderBy:
-      query.sort === "newest"
-        ? {
-            createdAt: "desc",
-          }
-        : {
-            name: "asc",
-          },
-  });
-
-  const serializedProducts = applyCatalogSort(
-    products.map((product) => serializeMarketplaceProduct(product, localeContext)),
-    query.sort,
-  ).filter((product) => !query.inStockOnly || product.isAvailable);
-
   const { page, limit, skip } = getPagination(query.page, query.limit);
-  const paginatedItems = serializedProducts.slice(skip, skip + limit);
+
+  // Independent of each other and each a separate remote round trip, so they go out together
+  // rather than one after another — this endpoint's cost is round-trip latency, not row count.
+  // The candidate query resolves filter + sort + page + total in the database (see
+  // marketplace-catalog.query.ts) instead of loading the whole catalog and slicing it in JS.
+  const [branch, candidates, preloadedMetadata] = await Promise.all([
+    getMarketplaceBranch(organizationId, query.branchId, localeContext),
+    selectCatalogCandidates(organizationId, query, localeContext, { skip, take: limit }),
+    getOrgCatalogMetadata(organizationId),
+  ]);
+
+  // Only the ids on this page get the full per-product read, so the hydrate cost is bounded by
+  // `limit` rather than by how many products the shop sells.
+  const products = candidates.productIds.length
+    ? await hydrateMarketplaceProducts({ id: { in: candidates.productIds } }, query.branchId)
+    : [];
+
+  const metadata = await resolveMetadataFor(organizationId, products, preloadedMetadata);
+  const productById = new Map(products.map((product) => [product.id, product]));
+
+  // `findMany` with an `in` filter has no ordering guarantee, so the page is rebuilt in the order
+  // the candidate query decided on.
+  const items = candidates.productIds
+    .map((productId) => productById.get(productId))
+    .filter((product): product is MarketplaceProductRecord => Boolean(product))
+    .map((product) => serializeMarketplaceProduct(product, localeContext, metadata))
+    .filter((product): product is NonNullable<typeof product> => Boolean(product));
 
   return {
-    items: paginatedItems,
-    pagination: buildPagination(page, limit, serializedProducts.length),
+    items,
+    pagination: buildPagination(page, limit, candidates.totalItems),
     filters: {
-      categories: await listMarketplaceCategories(organizationId, options),
-      brands: await listMarketplaceBrands(organizationId, options),
+      // Served from the same cached snapshot as the product rows above — previously these were two
+      // more awaited calls that each re-fetched the organization and then its categories/brands,
+      // eight further round trips on every catalog page view.
+      categories: serializeCatalogCategories(metadata, localeContext),
+      brands: serializeCatalogBrands(metadata, localeContext),
     },
     shopInventory: {
       organization: {
@@ -534,9 +684,12 @@ export async function getMarketplaceCatalogProduct(
   options: RequestedLocaleOptions = {},
 ) {
   const { organization, localeContext } = await getMarketplaceOrganization(organizationId, options);
-  const branch = await getMarketplaceBranch(organizationId, branchId, localeContext);
-  const product = await getMarketplaceProductRecord(organizationId, branchId, productId);
-  const serializedProduct = serializeMarketplaceProduct(product, localeContext);
+  const [branch, product] = await Promise.all([
+    getMarketplaceBranch(organizationId, branchId, localeContext),
+    getMarketplaceProductRecord(organizationId, branchId, productId),
+  ]);
+  const metadata = await resolveMetadataFor(organizationId, [product]);
+  const serializedProduct = serializeMarketplaceProduct(product, localeContext, metadata);
 
   if (!serializedProduct) {
     throw ApiError.notFound("Active product not found");
@@ -569,21 +722,29 @@ export async function checkMarketplaceAvailability(
   options: RequestedLocaleOptions = {},
 ) {
   const { organization, localeContext } = await getMarketplaceOrganization(organizationId, options);
-  const branch = await getMarketplaceBranch(organizationId, input.branchId, localeContext);
   const productIds = Array.from(new Set(input.items.map((item) => item.productId)));
-  const products = await prisma.product.findMany({
-    where: {
-      organizationId,
-      id: {
-        in: productIds,
-      },
-      deletedAt: null,
-      status: ProductStatus.ACTIVE,
-    },
-    include: buildMarketplaceProductInclude(input.branchId),
-  });
 
+  const [branch, products, preloadedMetadata] = await Promise.all([
+    getMarketplaceBranch(organizationId, input.branchId, localeContext),
+    hydrateMarketplaceProducts(
+      {
+        organizationId,
+        id: {
+          in: productIds,
+        },
+        deletedAt: null,
+        status: ProductStatus.ACTIVE,
+      },
+      input.branchId,
+    ),
+    getOrgCatalogMetadata(organizationId),
+  ]);
+
+  const metadata = await resolveMetadataFor(organizationId, products, preloadedMetadata);
   const productMap = new Map(products.map((product) => [product.id, product]));
+  // A cart can list the same product twice (two variants of it); serializing the product once per
+  // distinct id keeps that from redoing the same localization work per line.
+  const serializedProductCache = new Map<string, ReturnType<typeof serializeMarketplaceProduct>>();
 
   const items = input.items.map((item) => {
     const product = productMap.get(item.productId);
@@ -623,8 +784,14 @@ export async function checkMarketplaceAvailability(
       };
     }
 
-    const serializedProduct = serializeMarketplaceProduct(product, localeContext);
-    const serializedVariant = serializeMarketplaceVariant(resolvedVariant, localeContext);
+    let serializedProduct = serializedProductCache.get(product.id);
+
+    if (serializedProduct === undefined) {
+      serializedProduct = serializeMarketplaceProduct(product, localeContext, metadata);
+      serializedProductCache.set(product.id, serializedProduct);
+    }
+
+    const serializedVariant = serializeMarketplaceVariant(resolvedVariant, localeContext, metadata);
     const availableQuantity = serializedVariant.stock.availableQty;
     const quantityAccepted = Math.min(item.quantity, availableQuantity);
     const status =
@@ -672,72 +839,64 @@ export async function checkMarketplaceAvailability(
   };
 }
 
+/**
+ * The customer-visible category filter list, derived from the cached snapshot. The snapshot holds
+ * every category (a product may reference a deactivated one — see the cache module), so the
+ * active/not-deleted filter and the sortOrder-then-name ordering that the database used to apply
+ * are reproduced here instead.
+ */
+function serializeCatalogCategories(metadata: OrgCatalogMetadataIndex, localeContext: LocaleContext) {
+  return metadata.metadata.categories
+    .filter((category) => category.isActive && !category.isDeleted)
+    .map((category) => {
+      const localizedCategory = serializeLocalizedEntity(category, localeContext);
+
+      return {
+        id: category.id,
+        slug: category.slug,
+        name: localizedCategory.displayName ?? category.name,
+        translations: buildTranslationMap(category.translations),
+      };
+    });
+}
+
+function serializeCatalogBrands(metadata: OrgCatalogMetadataIndex, localeContext: LocaleContext) {
+  return metadata.metadata.brands
+    .filter((brand) => brand.isActive && !brand.isDeleted)
+    .map((brand) => {
+      const localizedBrand = serializeLocalizedEntity(brand, localeContext);
+
+      return {
+        id: brand.id,
+        slug: brand.slug,
+        name: localizedBrand.displayName ?? brand.name,
+        translations: buildTranslationMap(brand.translations),
+      };
+    });
+}
+
 export async function listMarketplaceCategories(
   organizationId: string,
   options: RequestedLocaleOptions = {},
 ) {
-  const { localeContext } = await getMarketplaceOrganization(organizationId, options);
-  const categories = await prisma.category.findMany({
-    where: {
-      organizationId,
-      deletedAt: null,
-      isActive: true,
-    },
-    include: {
-      translations: {
-        orderBy: {
-          language: "asc",
-        },
-      },
-    },
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-  });
+  const [{ localeContext }, metadata] = await Promise.all([
+    getMarketplaceOrganization(organizationId, options),
+    getOrgCatalogMetadata(organizationId),
+  ]);
 
-  return categories.map((category) => {
-    const localizedCategory = serializeLocalizedEntity(category, localeContext);
-
-    return {
-      id: category.id,
-      slug: category.slug,
-      name: localizedCategory.displayName ?? category.name,
-      translations: buildTranslationMap(category.translations),
-    };
-  });
+  return serializeCatalogCategories(metadata, localeContext);
 }
 
 export async function listMarketplaceBrands(
   organizationId: string,
   options: RequestedLocaleOptions = {},
 ) {
-  const { localeContext } = await getMarketplaceOrganization(organizationId, options);
-  const brands = await prisma.brand.findMany({
-    where: {
-      organizationId,
-      deletedAt: null,
-      isActive: true,
-    },
-    include: {
-      translations: {
-        orderBy: {
-          language: "asc",
-        },
-      },
-    },
-    orderBy: {
-      name: "asc",
-    },
-  });
+  const [{ localeContext }, metadata] = await Promise.all([
+    getMarketplaceOrganization(organizationId, options),
+    getOrgCatalogMetadata(organizationId),
+  ]);
 
-  return brands.map((brand) => {
-    const localizedBrand = serializeLocalizedEntity(brand, localeContext);
-
-    return {
-      id: brand.id,
-      slug: brand.slug,
-      name: localizedBrand.displayName ?? brand.name,
-      translations: buildTranslationMap(brand.translations),
-    };
-  });
+  return serializeCatalogBrands(metadata, localeContext);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -911,30 +1070,46 @@ export async function createBridgedSalesOrder(
     lineTotal: Prisma.Decimal;
   }> = [];
 
+  // Every variant this order needs, in ONE query. This used to be a `findFirst` per line item
+  // inside the loop below — a textbook N+1, and an expensive one here because each of those is a
+  // separate round trip to a remote database: a 20-line order paid 20 sequential round trips
+  // before it could even open its write transaction. Ordered so the first row for a product is
+  // the one the old per-item default lookup would have picked.
+  const orderProductIds = Array.from(new Set(input.items.map((item) => item.inventoryProductId)));
+  const orderVariants = await prisma.productVariant.findMany({
+    where: {
+      productId: { in: orderProductIds },
+      organizationId,
+      deletedAt: null,
+      product: { deletedAt: null },
+    },
+    select: {
+      id: true,
+      productId: true,
+      name: true,
+      sku: true,
+      sellingPrice: true,
+      product: { select: { name: true } },
+    },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+  });
+
+  const orderVariantById = new Map(orderVariants.map((variant) => [variant.id, variant]));
+  const defaultVariantByProductId = new Map<string, (typeof orderVariants)[number]>();
+
+  for (const variant of orderVariants) {
+    if (!defaultVariantByProductId.has(variant.productId)) {
+      defaultVariantByProductId.set(variant.productId, variant);
+    }
+  }
+
   for (const item of input.items) {
     // `inventoryVariantId` is nullable: NearCart sends null for cart items that were validated
     // without pinning a specific variant. Fall back to the product's default (or first active)
     // variant rather than requiring an exact id match in that case.
     const variant = item.inventoryVariantId
-      ? await prisma.productVariant.findFirst({
-          where: {
-            id: item.inventoryVariantId,
-            organizationId,
-            deletedAt: null,
-            product: { deletedAt: null },
-          },
-          include: { product: true },
-        })
-      : await prisma.productVariant.findFirst({
-          where: {
-            productId: item.inventoryProductId,
-            organizationId,
-            deletedAt: null,
-            product: { deletedAt: null },
-          },
-          include: { product: true },
-          orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-        });
+      ? orderVariantById.get(item.inventoryVariantId) ?? null
+      : defaultVariantByProductId.get(item.inventoryProductId) ?? null;
 
     if (
       !variant ||

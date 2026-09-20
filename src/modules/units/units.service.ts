@@ -8,6 +8,7 @@ import { buildPagination, getPagination } from "../../utils/pagination";
 import { mergeTranslationsForUpdate, upsertTranslations } from "../../utils/translations";
 import { enrichWithAutoTranslations } from "../../utils/autoTranslate";
 import { createAuditLog } from "../audit/audit.service";
+import { invalidateOrgCatalogMetadata } from "../marketplace/marketplace-metadata.cache";
 
 interface UnitTranslationInput {
   language: LanguageCode;
@@ -178,6 +179,13 @@ export async function createUnit(
     after: unit,
   });
 
+  // The marketplace bridge serves category/brand/unit display data to the customer app from a
+  // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+  // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+  // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+  // its own.
+  await invalidateOrgCatalogMetadata(organizationId);
+
   return serializeUnit(await getUnitRecordById(organizationId, unit.id), localeContext);
 }
 
@@ -274,6 +282,13 @@ export async function updateUnit(
     before: existing,
     after: updated,
   });
+
+  // The marketplace bridge serves category/brand/unit display data to the customer app from a
+  // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+  // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+  // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+  // its own.
+  await invalidateOrgCatalogMetadata(organizationId);
 
   return serializeUnit(updated, localeContext);
 }

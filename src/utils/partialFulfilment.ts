@@ -2,8 +2,18 @@
  * Shop-side PARTIAL FULFILMENT with customer approval.
  *
  * The shop opens an order it can only partly supply ("I have 3 of the 5 things you ordered"),
- * proposes a reduced order, and the customer approves or refuses it in the NearCart app. While
- * that is in flight the order deliberately STAYS `PENDING`:
+ * proposes a reduced order, and the customer approves or refuses it in the NearCart app.
+ *
+ * THE CUSTOMER'S YES IS NOT THE END OF THE NEGOTIATION. The states run
+ * `AWAITING_CUSTOMER -> CUSTOMER_ACCEPTED -> ACCEPTED`: the customer approving the revised order
+ * hands it BACK to the shop, which still has to confirm it the normal way before anything is
+ * committed. That second approval is not ceremony — minutes can pass while the customer decides,
+ * and a walk-in can buy the very stock the proposal promised, so the shop has to be the one who
+ * says "yes, I can still supply this" at the moment stock actually moves. `ACCEPTED` therefore
+ * means "shop confirmed the revised order", and is written by `confirmSalesOrder`, not by the
+ * customer's response.
+ *
+ * While any of that is in flight the order deliberately STAYS `PENDING`:
  *
  *  - nothing has been committed yet — no stock has moved, no SalesOrderItem row has been touched,
  *    and the shop may still reject/cancel normally;
@@ -28,7 +38,13 @@
  * `partialFulfilment` object instead.
  */
 
-export const PARTIAL_FULFILMENT_STATES = ["AWAITING_CUSTOMER", "ACCEPTED", "DECLINED", "EXPIRED"] as const;
+export const PARTIAL_FULFILMENT_STATES = [
+  "AWAITING_CUSTOMER",
+  "CUSTOMER_ACCEPTED",
+  "ACCEPTED",
+  "DECLINED",
+  "EXPIRED",
+] as const;
 export type PartialFulfilmentState = (typeof PARTIAL_FULFILMENT_STATES)[number];
 
 /**
@@ -78,6 +94,47 @@ export interface PartialFulfilmentInfo {
    * `payment` block at all (walk-in/phone orders, or a push from an older NearCart).
    */
   proposedAmountPayable: number | null;
+  /**
+   * NearCart's own re-derivation of the bill, sent with the customer's acceptance and held here
+   * until the shop confirms. It has to be stored rather than applied immediately because the
+   * customer's yes no longer commits anything — see the state machine at the top of this file.
+   * Absent for a proposal that has not been accepted, and for an acceptance that carried no
+   * re-derived bill (we then fall back to `proposedAmountPayable`).
+   */
+  customerPayment?: PartialFulfilmentRevisedPayment | null;
+}
+
+/**
+ * NearCart may re-derive the customer's final bill differently from us — most importantly it has
+ * to drop a coupon whose minimum-spend no longer holds once items were removed, which pushes the
+ * amount payable back UP. Mirrors `RevisedPaymentInput` in sales-orders.service.ts, declared here
+ * so this module stays dependency-free (it is imported by the serializers).
+ */
+export interface PartialFulfilmentRevisedPayment {
+  discountTotal?: number;
+  loyaltyDiscount?: number;
+  couponCode?: string | null;
+  amountPayable?: number;
+}
+
+function parseRevisedPayment(value: unknown): PartialFulfilmentRevisedPayment | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const discountTotal = toAmount(record.discountTotal);
+  const loyaltyDiscount = toAmount(record.loyaltyDiscount);
+  const amountPayable = toAmount(record.amountPayable);
+
+  return {
+    ...(discountTotal != null ? { discountTotal } : {}),
+    ...(loyaltyDiscount != null ? { loyaltyDiscount } : {}),
+    ...(amountPayable != null ? { amountPayable } : {}),
+    // `null` is meaningful here (it means "the coupon no longer applies, drop it"), so it is kept
+    // as-is rather than collapsed away like the numeric fields above.
+    ...("couponCode" in record ? { couponCode: toText(record.couponCode) } : {}),
+  };
 }
 
 function toAmount(value: unknown): number | null {
@@ -226,12 +283,18 @@ export function parsePartialFulfilment(deliveryAddress: unknown): PartialFulfilm
     originalTotal: toAmount(record.originalTotal) ?? 0,
     proposedTotal: toAmount(record.proposedTotal) ?? 0,
     proposedAmountPayable: toAmount(record.proposedAmountPayable),
+    customerPayment: parseRevisedPayment(record.customerPayment),
   };
 }
 
 /** True only while the shop is actually waiting on the customer. */
 export function isAwaitingCustomer(deliveryAddress: unknown): boolean {
   return parsePartialFulfilment(deliveryAddress)?.state === "AWAITING_CUSTOMER";
+}
+
+/** True once the customer has approved a revised order that the shop has not yet confirmed. */
+export function isAwaitingShopConfirmation(deliveryAddress: unknown): boolean {
+  return parsePartialFulfilment(deliveryAddress)?.state === "CUSTOMER_ACCEPTED";
 }
 
 /**

@@ -485,6 +485,17 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
     throw ApiError.badRequest("Only draft or pending orders can be confirmed");
   }
 
+  const proposal = parsePartialFulfilment(order.deliveryAddress);
+
+  // A proposal the customer has not answered yet must not be confirmable. Without this, a shop
+  // that proposed "3 of the 5" and then hit Confirm would commit — and deduct stock for — the
+  // ORIGINAL five it had just said it could not supply.
+  if (proposal?.state === "AWAITING_CUSTOMER") {
+    throw ApiError.conflict(
+      "This order is waiting for the customer to accept or decline your revised order",
+    );
+  }
+
   const confirmed = await prisma.$transaction(async (tx) => {
     // Guard against a concurrent confirm racing this same transition (e.g. a double-click or a
     // duplicated webhook retry): claim the row atomically before touching stock. `updateMany`
@@ -517,6 +528,13 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
     // inflating InventoryBalance.onHand). See updateSalesOrder's own atomic CAS guard for the other
     // half of this race: an edit landing AFTER this claim now correctly fails with a conflict
     // instead of silently overwriting an already-CONFIRMED order's items post-hoc.
+    // The customer already approved a reduced order: apply it HERE, inside the same transaction
+    // and before the re-read below, so the items and money this confirm commits — and the stock
+    // it deducts — are the revised ones. This is the only place a revised order becomes real.
+    if (proposal?.state === "CUSTOMER_ACCEPTED") {
+      await applyAcceptedPartialFulfilment(tx, orderId, proposal);
+    }
+
     const current = await tx.salesOrder.findUniqueOrThrow({
       where: { id: orderId },
       include: {
@@ -531,7 +549,7 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
     await createAuditLog(tx, {
       organizationId,
       actorUserId,
-      action: AuditAction.ORDER_CONFIRM,
+      action: proposal?.state === "CUSTOMER_ACCEPTED" ? AuditAction.ORDER_PARTIAL_ACCEPT : AuditAction.ORDER_CONFIRM,
       entityType: "SalesOrder",
       entityId: order.id,
       before: order,
@@ -546,6 +564,9 @@ export async function confirmSalesOrder(organizationId: string, orderId: string,
       externalOrderId: confirmed.externalOrderId,
       status: confirmed.status,
       eventType: "CONFIRMED",
+      // Carries the now-ACCEPTED proposal so NearCart can settle its own copy of the order to the
+      // revised lines in the same beat it learns the order was confirmed.
+      partialFulfilment: parsePartialFulfilment(confirmed.deliveryAddress),
     });
   }
 
@@ -1427,6 +1448,13 @@ export async function assignDriverToSalesOrder(
 
 const PARTIAL_DECLINE_REASON = "Customer declined the revised order";
 const PARTIAL_EXPIRY_REASON = "Customer did not respond to the revised order";
+/**
+ * How long the shop gets to confirm a revised order the customer has already approved. The
+ * customer has said yes and is waiting, so this is deliberately tighter than a fresh order's SLA
+ * — the sweep's normal auto-cancel then applies, which is the correct outcome: a shop that has
+ * gone quiet after promising a reduced order should release the customer, not hold them.
+ */
+const PARTIAL_SHOP_CONFIRM_WINDOW_MS = 30 * 60 * 1000;
 
 function decimalToNumber(value: Prisma.Decimal.Value | null | undefined): number {
   return Number(toDecimal(value).toString());
@@ -1719,9 +1747,12 @@ async function notifyStaffOfPartialResponse(
 ): Promise<void> {
   try {
     const copy = {
+      // NOT "confirmed", and stock has NOT moved: the customer's yes hands the order back to this
+      // shop, which still has to confirm it. This push is the shop's cue to act, so it has to say
+      // so — the old wording told staff the job was done and nothing needed doing.
       ACCEPTED: {
-        title: "Customer accepted your revised order",
-        body: `Order #${order.orderNumber} is confirmed for the items you can supply — stock has been updated.`,
+        title: "Customer accepted — confirm to start packing",
+        body: `Order #${order.orderNumber}: the customer agreed to the items you can supply. Confirm the order to commit it and update stock.`,
       },
       DECLINED: {
         title: "Customer declined — order cancelled",
@@ -1809,11 +1840,94 @@ function buildAcceptedPaymentBlock(
 }
 
 /**
- * The customer said yes. One transaction does everything: apply the reduced item set, recompute
- * the order's money, mark the proposal ACCEPTED, flip the order to CONFIRMED and deduct stock —
- * for the FINAL quantities only, through the exact same `deductStockForSalesOrder` helper
- * `confirmSalesOrder` uses, so there is no second copy of the ledger logic and no way to
- * double-deduct (the status claim at the top of the transaction is what makes it exactly-once).
+ * Applies a revised order the customer has already approved: drops the removed lines, reduces the
+ * reduced ones, recomputes the order's money (including the bill NearCart re-derived and sent with
+ * the acceptance) and marks the proposal ACCEPTED.
+ *
+ * Deliberately takes the transaction client and no status handling of its own — it is called from
+ * inside `confirmSalesOrder`'s transaction, AFTER that function's atomic status claim and BEFORE
+ * it re-reads the order to deduct stock. That ordering is the whole point: the deduction then
+ * happens against the revised quantities through the one shared `deductStockForSalesOrder` path,
+ * so there is no second copy of the ledger logic and no way to deduct the original quantities.
+ */
+async function applyAcceptedPartialFulfilment(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  proposal: PartialFulfilmentInfo,
+): Promise<void> {
+  const claimed = await tx.salesOrder.findUniqueOrThrow({
+    where: { id: orderId },
+    include: { items: true },
+  });
+
+  const removedIds = new Set(proposal.removedItems.map((entry) => entry.itemId));
+  const reducedById = new Map(proposal.reducedItems.map((entry) => [entry.itemId, toDecimal(entry.toQuantity)]));
+
+  const keptLines: RecomputedLine[] = [];
+
+  for (const item of claimed.items) {
+    if (removedIds.has(item.id)) {
+      await tx.salesOrderItem.delete({ where: { id: item.id } });
+      continue;
+    }
+
+    const toQuantity = reducedById.get(item.id);
+
+    // An item the proposal never mentioned is unchanged; recomputing it at its own quantity is
+    // a no-op that keeps the totals below derived from one single code path.
+    const line = recomputeLine(item, toQuantity ?? toDecimal(item.quantity));
+    keptLines.push(line);
+
+    if (toQuantity) {
+      await tx.salesOrderItem.update({
+        where: { id: item.id },
+        data: {
+          quantity: line.toQuantity,
+          discountAmount: line.discountAmount,
+          taxAmount: line.taxAmount,
+          lineTotal: line.lineTotal,
+        },
+      });
+    }
+  }
+
+  const totals = sumLines(keptLines);
+  const settledProposal: PartialFulfilmentInfo = {
+    ...proposal,
+    state: "ACCEPTED",
+  };
+
+  let deliveryAddress = withPartialFulfilment(claimed.deliveryAddress, settledProposal);
+  const acceptedPayment = buildAcceptedPaymentBlock(claimed.deliveryAddress, settledProposal, proposal.customerPayment);
+
+  if (acceptedPayment) {
+    deliveryAddress = withPaymentBlock(deliveryAddress, acceptedPayment);
+  }
+
+  await tx.salesOrder.update({
+    where: { id: orderId },
+    data: {
+      subtotal: totals.subtotal,
+      taxTotal: totals.taxTotal,
+      discountTotal: totals.discountTotal,
+      total: totals.total,
+      deliveryAddress: toNullableJsonValue(deliveryAddress),
+    },
+  });
+}
+
+/**
+ * The customer said yes — which parks the order for the SHOP, and commits nothing.
+ *
+ * This used to confirm the order and deduct stock outright. It no longer does, because the shop
+ * has to get the last word: minutes can pass while the customer decides, and a walk-in can buy
+ * the very stock the proposal promised in the meantime. So this records `CUSTOMER_ACCEPTED`,
+ * leaves the order PENDING with its items untouched, and tells the shop it can now confirm.
+ * `confirmSalesOrder` is what applies the revision and moves stock, so there is exactly one code
+ * path where a revised order becomes real — and it is the shop's own Confirm action.
+ *
+ * `revisedPayment` is stashed on the proposal rather than applied, for the same reason: the bill
+ * only becomes fact when the shop confirms.
  */
 export async function acceptPartialFulfilment(
   organizationId: string,
@@ -1827,114 +1941,56 @@ export async function acceptPartialFulfilment(
     throw ApiError.conflict("This order is not waiting for a customer response");
   }
 
-  const confirmed = await prisma.$transaction(async (tx) => {
-    // Claim the transition before touching stock — identical guard, and identical reasoning, to
-    // confirmSalesOrder's. `confirmedById` stays null: nobody on the shop's staff confirmed this,
-    // the customer's approval did (the same nullable-actor pattern cancel/reject/auto-assign use).
-    const { count } = await tx.salesOrder.updateMany({
-      where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
-      data: { status: SalesOrderStatus.CONFIRMED, confirmedAt: new Date(), confirmedById: null },
-    });
+  const acceptedProposal: PartialFulfilmentInfo = {
+    ...proposal,
+    state: "CUSTOMER_ACCEPTED",
+    respondedAt: new Date().toISOString(),
+    customerPayment: revisedPayment ?? null,
+  };
 
-    if (count === 0) {
-      throw ApiError.conflict("Order is no longer draft/pending — it may have already been confirmed or cancelled");
-    }
+  // Same atomic compare-and-swap every other transition in this file uses: a concurrent
+  // confirm/reject/cancel that lands first must win rather than be overwritten by a late yes.
+  const { count } = await prisma.salesOrder.updateMany({
+    where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
+    data: {
+      deliveryAddress: toNullableJsonValue(withPartialFulfilment(order.deliveryAddress, acceptedProposal)),
+      // The clock is the shop's again, so the order-confirmation sweep's normal SLA applies from
+      // here rather than the proposal's own (now spent) customer window.
+      confirmationDeadlineAt: new Date(Date.now() + PARTIAL_SHOP_CONFIRM_WINDOW_MS),
+    },
+  });
 
-    // Re-read inside the transaction, after the claim, for the same reason confirmSalesOrder does:
-    // the quantities that get deducted must be the ones actually on the row right now.
-    const claimed = await tx.salesOrder.findUniqueOrThrow({
-      where: { id: orderId },
-      include: { items: true },
-    });
+  if (count === 0) {
+    throw ApiError.conflict("Order is no longer draft/pending — it may have been confirmed or cancelled concurrently");
+  }
 
-    const removedIds = new Set(proposal.removedItems.map((entry) => entry.itemId));
-    const reducedById = new Map(proposal.reducedItems.map((entry) => [entry.itemId, toDecimal(entry.toQuantity)]));
+  const accepted = await getSalesOrderById(organizationId, orderId);
 
-    const keptLines: RecomputedLine[] = [];
+  await createAuditLog(prisma, {
+    organizationId,
+    action: AuditAction.ORDER_PARTIAL_ACCEPT,
+    entityType: "SalesOrder",
+    entityId: orderId,
+    before: order,
+    after: accepted,
+    meta: {
+      source: "marketplace_bridge",
+      note: "Customer accepted the revised order — awaiting the shop's confirmation",
+    },
+  });
 
-    for (const item of claimed.items) {
-      if (removedIds.has(item.id)) {
-        await tx.salesOrderItem.delete({ where: { id: item.id } });
-        continue;
-      }
+  void notifyStaffOfPartialResponse(organizationId, accepted, "ACCEPTED");
 
-      const toQuantity = reducedById.get(item.id);
-
-      // An item the proposal never mentioned is unchanged; recomputing it at its own quantity is
-      // a no-op that keeps the totals below derived from one single code path.
-      const line = recomputeLine(item, toQuantity ?? toDecimal(item.quantity));
-      keptLines.push(line);
-
-      if (toQuantity) {
-        await tx.salesOrderItem.update({
-          where: { id: item.id },
-          data: {
-            quantity: line.toQuantity,
-            discountAmount: line.discountAmount,
-            taxAmount: line.taxAmount,
-            lineTotal: line.lineTotal,
-          },
-        });
-      }
-    }
-
-    const totals = sumLines(keptLines);
-    const acceptedProposal: PartialFulfilmentInfo = {
-      ...proposal,
-      state: "ACCEPTED",
-      respondedAt: new Date().toISOString(),
-    };
-
-    let deliveryAddress = withPartialFulfilment(claimed.deliveryAddress, acceptedProposal);
-    const acceptedPayment = buildAcceptedPaymentBlock(claimed.deliveryAddress, acceptedProposal, revisedPayment);
-
-    if (acceptedPayment) {
-      deliveryAddress = withPaymentBlock(deliveryAddress, acceptedPayment);
-    }
-
-    await tx.salesOrder.update({
-      where: { id: orderId },
-      data: {
-        subtotal: totals.subtotal,
-        taxTotal: totals.taxTotal,
-        discountTotal: totals.discountTotal,
-        total: totals.total,
-        deliveryAddress: toNullableJsonValue(deliveryAddress),
-      },
-    });
-
-    const current = await tx.salesOrder.findUniqueOrThrow({
-      where: { id: orderId },
-      include: { items: { include: { variant: true } }, branch: true, customer: true },
-    });
-
-    await deductStockForSalesOrder(tx, { organizationId, order: current, actorUserId: null });
-
-    await createAuditLog(tx, {
-      organizationId,
-      action: AuditAction.ORDER_PARTIAL_ACCEPT,
-      entityType: "SalesOrder",
-      entityId: orderId,
-      before: order,
-      after: current,
-      meta: { source: "marketplace_bridge", note: "Customer accepted the revised order" },
-    });
-
-    return current;
-  }, INTERACTIVE_TRANSACTION_OPTIONS);
-
-  void notifyStaffOfPartialResponse(organizationId, confirmed, "ACCEPTED");
-
-  if (confirmed.externalOrderId) {
+  if (accepted.externalOrderId) {
     void notifyOrderEvent({
-      externalOrderId: confirmed.externalOrderId,
-      status: confirmed.status,
+      externalOrderId: accepted.externalOrderId,
+      status: accepted.status,
       eventType: "PARTIAL_ACCEPTED",
-      partialFulfilment: parsePartialFulfilment(confirmed.deliveryAddress),
+      partialFulfilment: parsePartialFulfilment(accepted.deliveryAddress),
     });
   }
 
-  return confirmed;
+  return accepted;
 }
 
 /**

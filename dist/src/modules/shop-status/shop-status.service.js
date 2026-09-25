@@ -123,6 +123,8 @@ async function updateShopStatus(organizationId, actorUserId, membershipBranchAcc
         ...(scope.branchId ? { branchId: scope.branchId } : {}),
         isOpen: input.isOpen,
         ...(reason ? { reason } : {}),
+        ...(input.isOpen && input.openingTime ? { openingTime: input.openingTime } : {}),
+        ...(input.isOpen && input.closingTime ? { closingTime: input.closingTime } : {}),
     });
     if (result.status === 404 || result.items.length === 0) {
         throw ApiError_1.ApiError.notFound(NOT_LINKED_MESSAGE);

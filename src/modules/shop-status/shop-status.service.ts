@@ -34,6 +34,8 @@ interface ShopStatusItem {
   isOpenToday: boolean | null;
   todayStatusReason: string | null;
   todayStatusUpdatedAt: string | null;
+  openingTime?: string | null;
+  closingTime?: string | null;
 }
 
 const NEARCART_TIMEOUT_MS = 8000;
@@ -186,6 +188,8 @@ export async function updateShopStatus(
       ...(scope.branchId ? { branchId: scope.branchId } : {}),
       isOpen: input.isOpen,
       ...(reason ? { reason } : {}),
+      ...(input.isOpen && input.openingTime ? { openingTime: input.openingTime } : {}),
+      ...(input.isOpen && input.closingTime ? { closingTime: input.closingTime } : {}),
     },
   );
 

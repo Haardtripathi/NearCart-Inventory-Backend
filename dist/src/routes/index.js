@@ -31,6 +31,8 @@ const drivers_route_1 = require("../modules/drivers/drivers.route");
 const driver_verification_route_1 = require("../modules/driver-verification/driver-verification.route");
 const analytics_route_1 = require("../modules/analytics/analytics.route");
 const notifications_route_1 = require("../modules/notifications/notifications.route");
+const shop_status_route_1 = require("../modules/shop-status/shop-status.route");
+const location_route_1 = require("../modules/location/location.route");
 exports.apiRouter = (0, express_1.Router)();
 exports.apiRouter.get("/health", (_req, res) => {
     return (0, ApiResponse_1.sendSuccess)(res, 200, "NearCart Inventory backend is healthy", {
@@ -61,8 +63,23 @@ exports.apiRouter.use("/translate-item", translation_route_1.translationRouter);
 exports.apiRouter.use("/uploads", uploads_route_1.uploadsRouter);
 exports.apiRouter.use("/internal/marketplace", marketplace_route_1.marketplaceRouter);
 exports.apiRouter.use("/driver-auth", driver_auth_route_1.driverAuthRouter);
-exports.apiRouter.use("/driver", driver_orders_route_1.driverOrdersRouter);
+// Bug fix: driverVerificationRouter must mount BEFORE driverOrdersRouter. Both share the "/driver"
+// prefix and each does a path-less `router.use(<authMiddleware>)` — that runs unconditionally for
+// EVERY request under the prefix the moment it enters that router, before Express even checks
+// whether any route further down matches. With driverOrdersRouter mounted first (as it was),
+// every /driver/verification/* request hit driverOrdersRouter's strict `authenticateDriver` FIRST
+// (rejecting any non-VERIFIED driver) and never reached driverVerificationRouter's own, more
+// permissive `authenticateDriverForVerification` at all — silently defeating the pending-driver
+// evidence-submission fix (see driverAuth.middleware.ts). Mounting verification first fixes this:
+// a /driver/verification/* request now matches a real route there and responds without ever
+// falling through to driverOrdersRouter. A /driver/orders (etc.) request still falls through
+// driverVerificationRouter (no matching route there) to driverOrdersRouter's own check, which
+// still gates it exactly as strictly as before — this only reorders which router's blanket
+// middleware runs first, not what either one allows.
 exports.apiRouter.use("/driver", driver_verification_route_1.driverVerificationRouter);
+exports.apiRouter.use("/driver", driver_orders_route_1.driverOrdersRouter);
 exports.apiRouter.use("/drivers", drivers_route_1.driversRouter);
 exports.apiRouter.use("/analytics", analytics_route_1.analyticsRouter);
 exports.apiRouter.use("/notifications", notifications_route_1.notificationsRouter);
+exports.apiRouter.use("/shop-status", shop_status_route_1.shopStatusRouter);
+exports.apiRouter.use("/location", location_route_1.locationRouter);

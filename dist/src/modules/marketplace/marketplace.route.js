@@ -34,3 +34,13 @@ exports.marketplaceRouter.get("/sales-orders/by-external/:externalOrderId", (0, 
 // cancelBridgedSalesOrder 404s if the externalOrderId resolves to a different organization.
 exports.marketplaceRouter.patch("/organizations/:organizationId/sales-orders/by-external/:externalOrderId/cancel", (0, validate_middleware_1.validateRequest)({ params: marketplace_validation_1.organizationExternalOrderIdParamSchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.cancelBridgedSalesOrderController));
 exports.marketplaceRouter.get("/organizations/:organizationId/branches/:branchId/active-order-count", (0, validate_middleware_1.validateRequest)({ params: marketplace_validation_1.organizationBranchParamSchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.getBranchActiveOrderCountController));
+// The customer's answer to a shop's partial-fulfilment proposal ("the shop can only supply 3 of
+// your 5 items — approve?"). Org-scoped in the path for the same reason as the cancel route
+// above. Accepting applies the reduced item set AND confirms the order (moving stock for the
+// final quantities only); declining cancels it. Idempotent — see respondToPartialFulfilment.
+exports.marketplaceRouter.post("/organizations/:organizationId/sales-orders/by-external/:externalOrderId/partial-response", (0, validate_middleware_1.validateRequest)({ params: marketplace_validation_1.organizationExternalOrderIdParamSchema, body: marketplace_validation_1.partialFulfilmentResponseSchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.respondToPartialFulfilmentController));
+// Daily nudge to this org's staff to confirm the shop is open today. NearCart runs the sweep
+// (it owns the flag and can find unconfirmed shops in one query) and calls here because the
+// staff device tokens live in this database. No body — the copy is fixed in the service so this
+// can't be used to push arbitrary text to a shop.
+exports.marketplaceRouter.post("/organizations/:organizationId/shop-open-reminder", (0, validate_middleware_1.validateRequest)({ params: marketplace_validation_1.organizationParamSchema }), (0, asyncHandler_1.asyncHandler)(marketplace_controller_1.sendShopOpenReminderController));

@@ -12,6 +12,7 @@ const pagination_1 = require("../../utils/pagination");
 const translations_1 = require("../../utils/translations");
 const autoTranslate_1 = require("../../utils/autoTranslate");
 const audit_service_1 = require("../audit/audit.service");
+const marketplace_metadata_cache_1 = require("../marketplace/marketplace-metadata.cache");
 function serializeUnit(unit, localeContext) {
     return (0, localization_1.serializeLocalizedEntity)(unit, localeContext);
 }
@@ -140,6 +141,12 @@ async function createUnit(organizationId, actorUserId, input, localeContext) {
         entityId: unit.id,
         after: unit,
     });
+    // The marketplace bridge serves category/brand/unit display data to the customer app from a
+    // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+    // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+    // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+    // its own.
+    await (0, marketplace_metadata_cache_1.invalidateOrgCatalogMetadata)(organizationId);
     return serializeUnit(await getUnitRecordById(organizationId, unit.id), localeContext);
 }
 async function getUnitById(organizationId, unitId, localeContext) {
@@ -212,5 +219,11 @@ async function updateUnit(organizationId, unitId, actorUserId, input, localeCont
         before: existing,
         after: updated,
     });
+    // The marketplace bridge serves category/brand/unit display data to the customer app from a
+    // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+    // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+    // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+    // its own.
+    await (0, marketplace_metadata_cache_1.invalidateOrgCatalogMetadata)(organizationId);
     return serializeUnit(updated, localeContext);
 }

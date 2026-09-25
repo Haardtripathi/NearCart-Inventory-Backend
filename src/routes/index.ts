@@ -30,6 +30,7 @@ import { driverVerificationRouter } from "../modules/driver-verification/driver-
 import { analyticsRouter } from "../modules/analytics/analytics.route";
 import { notificationsRouter } from "../modules/notifications/notifications.route";
 import { shopStatusRouter } from "../modules/shop-status/shop-status.route";
+import { locationRouter } from "../modules/location/location.route";
 
 export const apiRouter = Router();
 
@@ -82,3 +83,4 @@ apiRouter.use("/drivers", driversRouter);
 apiRouter.use("/analytics", analyticsRouter);
 apiRouter.use("/notifications", notificationsRouter);
 apiRouter.use("/shop-status", shopStatusRouter);
+apiRouter.use("/location", locationRouter);

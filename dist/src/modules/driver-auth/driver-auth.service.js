@@ -21,6 +21,7 @@ const mailer_1 = require("../../utils/mailer");
 const otp_1 = require("../../utils/otp");
 const prismaErrors_1 = require("../../utils/prismaErrors");
 const audit_service_1 = require("../audit/audit.service");
+const driver_shop_service_1 = require("../drivers/driver-shop.service");
 /**
  * Thrown when a driver's credentials are correct but their account status blocks login. The
  * driver-auth controller catches this and responds with the exact `403 { error: { code, message
@@ -30,9 +31,17 @@ const audit_service_1 = require("../audit/audit.service");
  */
 class DriverStatusError extends Error {
     code;
-    constructor(code, message) {
+    // Only ever set alongside DRIVER_NOT_VERIFIED — see loginDriver below. Lets a driver who is
+    // still PENDING_VERIFICATION (including one who registered before this token existed) obtain a
+    // fresh evidence-submission token from the same login call the app already makes, without a new
+    // endpoint. Additive on the existing locked `{error:{code,message}}` contract (see
+    // driver-auth.controller.ts) — an older client that doesn't know this field exists just ignores
+    // it, same login-rejected UX as before.
+    verificationToken;
+    constructor(code, message, verificationToken) {
         super(message);
         this.code = code;
+        this.verificationToken = verificationToken;
     }
 }
 exports.DriverStatusError = DriverStatusError;
@@ -82,18 +91,28 @@ async function registerDriver(input) {
     }
     const passwordHash = await bcrypt_1.default.hash(input.password, 12);
     let driver;
+    let shop = null;
     try {
-        driver = await prisma_1.prisma.driver.create({
-            data: {
-                fullName: input.fullName.trim(),
-                phone,
-                email: email ?? null,
-                passwordHash,
-                vehicleType: input.vehicleType.trim(),
-                vehicleNumber: input.vehicleNumber.trim(),
-                status: client_1.DriverStatus.PENDING_VERIFICATION,
-            },
-        });
+        // One transaction so a bad/expired store code rejects the whole signup instead of leaving an
+        // account that silently isn't linked to the shop the driver thinks they joined.
+        driver = await prisma_1.prisma.$transaction(async (tx) => {
+            const created = await tx.driver.create({
+                data: {
+                    fullName: input.fullName.trim(),
+                    phone,
+                    email: email ?? null,
+                    passwordHash,
+                    vehicleType: input.vehicleType.trim(),
+                    vehicleNumber: input.vehicleNumber.trim(),
+                    status: client_1.DriverStatus.PENDING_VERIFICATION,
+                },
+            });
+            if (input.storeCode) {
+                const redeemed = await (0, driver_shop_service_1.redeemDriverShopCode)(tx, created.id, input.storeCode);
+                shop = { branchName: redeemed.branch.name, shopName: redeemed.branch.organization.name };
+            }
+            return created;
+        }, { maxWait: 10_000, timeout: 30_000 });
     }
     catch (error) {
         // Narrow race: two concurrent registrations for the same phone/email both pass the
@@ -112,7 +131,13 @@ async function registerDriver(input) {
         entityId: driver.id,
         after: serializeDriver(driver),
     });
-    return serializeDriver(driver);
+    // See driverJwt.ts's signDriverVerificationPendingToken doc comment: a freshly-registered driver
+    // is PENDING_VERIFICATION and `loginDriver` won't issue a real session until a SUPER_ADMIN
+    // approves them, so without this they'd have no way to reach the vehicle-photo/license
+    // evidence-submission endpoints at all. Returned alongside `driver`, additive to this
+    // endpoint's existing response shape.
+    const verificationToken = (0, driverJwt_1.signDriverVerificationPendingToken)({ driverId: driver.id });
+    return { driver: serializeDriver(driver), verificationToken, shop };
 }
 async function loginDriver(input) {
     const phone = input.phone ? normalizePhone(input.phone) : undefined;
@@ -131,7 +156,13 @@ async function loginDriver(input) {
         throw new DriverStatusError("DRIVER_SUSPENDED", "Your driver account has been suspended.");
     }
     if (driver.status !== client_1.DriverStatus.VERIFIED) {
-        throw new DriverStatusError("DRIVER_NOT_VERIFIED", "Your driver account is still pending verification. We'll notify you once it's approved.");
+        // Reissue a fresh evidence-submission token on every pending login attempt (cheap — just a
+        // JWT sign, no DB write) rather than only at registration: covers a driver who registered
+        // before this token existed, or whose earlier one expired/was lost, without needing a new
+        // endpoint. Gated behind the bcrypt password check above, so this isn't a new enumeration
+        // surface — only the actual account owner can pull a token this way.
+        const verificationToken = (0, driverJwt_1.signDriverVerificationPendingToken)({ driverId: driver.id });
+        throw new DriverStatusError("DRIVER_NOT_VERIFIED", "Your driver account is still pending verification. We'll notify you once it's approved.", verificationToken);
     }
     const token = (0, driverJwt_1.signDriverAuthToken)({ driverId: driver.id });
     const refreshToken = await (0, driverRefreshToken_1.createDriverRefreshSession)(driver.id);

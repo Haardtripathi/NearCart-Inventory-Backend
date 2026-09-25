@@ -43,7 +43,11 @@ function handlePhotoUpload(req, res, next) {
 // is a locked contract shared with the separate NearCart-Driver / NearCart-Driver-Web client
 // repos; do not rename these paths without coordinating there.
 exports.driverVerificationRouter = (0, express_1.Router)();
-exports.driverVerificationRouter.use(driverAuth_middleware_1.authenticateDriver);
+// Bug fix: was plain `authenticateDriver`, which refuses any driver whose status isn't already
+// VERIFIED — making this router's own evidence-submission endpoints unreachable for the
+// PENDING_VERIFICATION driver they exist to serve. See authenticateDriverForVerification's doc
+// comment for the full fix.
+exports.driverVerificationRouter.use(driverAuth_middleware_1.authenticateDriverForVerification);
 // Pure read of what's currently on file — not gated by requireReplicateConfigured (no Replicate
 // call involved) unlike the three verify/OCR routes below. Backs the driver app's Documents screen.
 exports.driverVerificationRouter.get("/verification/status", (0, asyncHandler_1.asyncHandler)(driver_verification_controller_1.getDriverVerificationStatusController));

@@ -12,8 +12,14 @@ exports.parseDeclinedDriverIds = parseDeclinedDriverIds;
 exports.findNearestFreeDriver = findNearestFreeDriver;
 exports.findNearestUnassignedOrderForDriver = findNearestUnassignedOrderForDriver;
 exports.notifyStaffOfAutoAssignFailure = notifyStaffOfAutoAssignFailure;
+exports.notifyStaffOwnDriverNeeded = notifyStaffOwnDriverNeeded;
 exports.markSalesOrderReady = markSalesOrderReady;
+exports.dispatchSalesOrder = dispatchSalesOrder;
 exports.assignDriverToSalesOrder = assignDriverToSalesOrder;
+exports.proposePartialFulfilment = proposePartialFulfilment;
+exports.acceptPartialFulfilment = acceptPartialFulfilment;
+exports.declinePartialFulfilment = declinePartialFulfilment;
+exports.expirePartialFulfilment = expirePartialFulfilment;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../../config/prisma");
 const env_1 = require("../../config/env");
@@ -24,11 +30,14 @@ const guards_1 = require("../../utils/guards");
 const json_1 = require("../../utils/json");
 const numbering_1 = require("../../utils/numbering");
 const pagination_1 = require("../../utils/pagination");
+const orderPayment_1 = require("../../utils/orderPayment");
+const partialFulfilment_1 = require("../../utils/partialFulfilment");
 const audit_service_1 = require("../audit/audit.service");
 const inventory_service_1 = require("../inventory/inventory.service");
 const order_event_webhook_service_1 = require("../../services/order-event-webhook.service");
 const push_notification_service_1 = require("../../services/push-notification.service");
 const notifications_service_1 = require("../notifications/notifications.service");
+const STALE_READY_ORDER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const INTERACTIVE_TRANSACTION_OPTIONS = {
     maxWait: 10_000,
     timeout: 30_000,
@@ -105,6 +114,33 @@ const DELIVERABLE_ORDER_STATUSES = [
 function ensureEditableStatus(status) {
     if (!EDITABLE_ORDER_STATUSES.includes(status)) {
         throw ApiError_1.ApiError.badRequest("Only draft or pending sales orders can be edited");
+    }
+}
+/**
+ * The ONE place a sales order's stock is deducted. Extracted out of `confirmSalesOrder` (which
+ * still calls it, unchanged in behaviour) so the partial-fulfilment accept path — which confirms
+ * an order whose items have just been reduced, inside the very same transaction — can reuse it
+ * instead of growing a second, drifting copy of the same ledger write.
+ *
+ * Callers MUST pass items they read back inside their own transaction AFTER atomically claiming
+ * the status transition, never a pre-transaction snapshot: the quantities deducted here are what
+ * a later cancel reverses, so deducting a stale quantity silently desyncs the immutable ledger
+ * from the order (see confirmSalesOrder's own comment for the race this closes).
+ */
+async function deductStockForSalesOrder(tx, params) {
+    for (const item of params.order.items) {
+        await (0, inventory_service_1.applyStockMovement)(tx, {
+            organizationId: params.organizationId,
+            branchId: params.order.branchId,
+            variantId: item.variantId,
+            movementType: client_1.StockMovementType.SALE,
+            referenceType: client_1.ReferenceType.SALES_ORDER,
+            referenceId: params.order.id,
+            quantityDelta: (0, decimal_1.toDecimal)(item.quantity).negated(),
+            unitCost: item.variant.costPrice ?? undefined,
+            note: params.order.notes ?? undefined,
+            createdById: params.actorUserId ?? undefined,
+        });
     }
 }
 async function listSalesOrders(organizationId, query) {
@@ -256,8 +292,18 @@ async function updateSalesOrder(organizationId, orderId, actorUserId, input) {
     }
     const prepared = input.items ? await prepareSalesOrderItems(organizationId, input.items) : null;
     await prisma_1.prisma.$transaction(async (tx) => {
-        await tx.salesOrder.update({
-            where: { id: orderId },
+        // Bug fix: this used to be a plain `tx.salesOrder.update({where: {id: orderId}})` with no
+        // status predicate — so a concurrent confirm/reject/cancel that had already moved the order out
+        // of DRAFT/PENDING between the `ensureEditableStatus` check above and this write would be
+        // silently overridden: this transaction would still succeed, rewriting items/totals on an order
+        // that's no longer editable (e.g. already CONFIRMED, with stock already deducted for the OLD
+        // quantities). Guarded the same way every transition function in this file already guards its
+        // own status change: atomic `updateMany` re-checking status at write time, conflict if it
+        // no longer matches. Confirm/cancel/etc. additionally re-read items fresh inside their own
+        // transactions after their claim (see confirmSalesOrder/cancelSalesOrder) so this and those
+        // fixes close both directions of the same race.
+        const { count } = await tx.salesOrder.updateMany({
+            where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
             data: {
                 ...(input.branchId ? { branchId: input.branchId } : {}),
                 ...(input.customerId !== undefined ? { customerId: input.customerId || null } : {}),
@@ -275,6 +321,9 @@ async function updateSalesOrder(organizationId, orderId, actorUserId, input) {
                     : {}),
             },
         });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Order is no longer draft/pending — it may have changed status concurrently and can no longer be edited");
+        }
         if (prepared) {
             await tx.salesOrderItem.deleteMany({
                 where: {
@@ -326,6 +375,13 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
     if (!EDITABLE_ORDER_STATUSES.includes(order.status)) {
         throw ApiError_1.ApiError.badRequest("Only draft or pending orders can be confirmed");
     }
+    const proposal = (0, partialFulfilment_1.parsePartialFulfilment)(order.deliveryAddress);
+    // A proposal the customer has not answered yet must not be confirmable. Without this, a shop
+    // that proposed "3 of the 5" and then hit Confirm would commit — and deduct stock for — the
+    // ORIGINAL five it had just said it could not supply.
+    if (proposal?.state === "AWAITING_CUSTOMER") {
+        throw ApiError_1.ApiError.conflict("This order is waiting for the customer to accept or decline your revised order");
+    }
     const confirmed = await prisma_1.prisma.$transaction(async (tx) => {
         // Guard against a concurrent confirm racing this same transition (e.g. a double-click or a
         // duplicated webhook retry): claim the row atomically before touching stock. `updateMany`
@@ -346,44 +402,50 @@ async function confirmSalesOrder(organizationId, orderId, actorUserId) {
         if (count === 0) {
             throw ApiError_1.ApiError.conflict("Order is no longer draft/pending — it may have already been confirmed");
         }
-        for (const item of order.items) {
-            await (0, inventory_service_1.applyStockMovement)(tx, {
-                organizationId,
-                branchId: order.branchId,
-                variantId: item.variantId,
-                movementType: client_1.StockMovementType.SALE,
-                referenceType: client_1.ReferenceType.SALES_ORDER,
-                referenceId: order.id,
-                quantityDelta: (0, decimal_1.toDecimal)(item.quantity).negated(),
-                unitCost: item.variant.costPrice,
-                note: order.notes ?? undefined,
-                createdById: actorUserId,
-            });
+        // Bug fix: re-read the order's CURRENT items/branch inside the transaction, right after the
+        // atomic claim above, instead of using `order` (read before this transaction even started —
+        // and, worse, before this function's own two status checks above it). If a concurrent
+        // PATCH /sales-orders/:id changed quantities/branch between that outer read and this claim
+        // succeeding, `order.items`/`order.branchId` would be stale — deducting stock for quantities
+        // that no longer match what SalesOrderItem actually holds, silently desyncing the immutable
+        // ledger from the order (and, on a later cancel, reversing the WRONG — edited — quantity,
+        // inflating InventoryBalance.onHand). See updateSalesOrder's own atomic CAS guard for the other
+        // half of this race: an edit landing AFTER this claim now correctly fails with a conflict
+        // instead of silently overwriting an already-CONFIRMED order's items post-hoc.
+        // The customer already approved a reduced order: apply it HERE, inside the same transaction
+        // and before the re-read below, so the items and money this confirm commits — and the stock
+        // it deducts — are the revised ones. This is the only place a revised order becomes real.
+        if (proposal?.state === "CUSTOMER_ACCEPTED") {
+            await applyAcceptedPartialFulfilment(tx, orderId, proposal);
         }
-        const updated = await tx.salesOrder.findUniqueOrThrow({
+        const current = await tx.salesOrder.findUniqueOrThrow({
             where: { id: orderId },
             include: {
-                items: true,
+                items: { include: { variant: true } },
                 branch: true,
                 customer: true,
             },
         });
+        await deductStockForSalesOrder(tx, { organizationId, order: current, actorUserId });
         await (0, audit_service_1.createAuditLog)(tx, {
             organizationId,
             actorUserId,
-            action: client_1.AuditAction.ORDER_CONFIRM,
+            action: proposal?.state === "CUSTOMER_ACCEPTED" ? client_1.AuditAction.ORDER_PARTIAL_ACCEPT : client_1.AuditAction.ORDER_CONFIRM,
             entityType: "SalesOrder",
             entityId: order.id,
             before: order,
-            after: updated,
+            after: current,
         });
-        return updated;
+        return current;
     }, INTERACTIVE_TRANSACTION_OPTIONS);
     if (confirmed.externalOrderId) {
         void (0, order_event_webhook_service_1.notifyOrderEvent)({
             externalOrderId: confirmed.externalOrderId,
             status: confirmed.status,
             eventType: "CONFIRMED",
+            // Carries the now-ACCEPTED proposal so NearCart can settle its own copy of the order to the
+            // revised lines in the same beat it learns the order was confirmed.
+            partialFulfilment: (0, partialFulfilment_1.parsePartialFulfilment)(confirmed.deliveryAddress),
         });
     }
     return confirmed;
@@ -498,11 +560,21 @@ async function cancelSalesOrder(organizationId, orderId, actorUserId) {
                 throw ApiError_1.ApiError.conflict("Order can no longer be cancelled — its status changed concurrently");
             }
         }
+        // Bug fix: re-read current items (with variant costPrice) inside the tx, AFTER whichever claim
+        // above succeeded, instead of the pre-transaction `order.items` snapshot — see
+        // confirmSalesOrder's fuller rationale for this same pattern. Matters here specifically because
+        // the quantity being reversed must match what was actually deducted at confirm time, which
+        // reflects the CURRENT SalesOrderItem rows, not whatever this function's own outer read
+        // happened to see before a concurrent edit (now itself guarded — see updateSalesOrder) landed.
+        const updated = await tx.salesOrder.findUniqueOrThrow({
+            where: { id: orderId },
+            include: { items: { include: { variant: true } } },
+        });
         if (stockWasDeducted) {
-            for (const item of order.items) {
+            for (const item of updated.items) {
                 await (0, inventory_service_1.applyStockMovement)(tx, {
                     organizationId,
-                    branchId: order.branchId,
+                    branchId: updated.branchId,
                     variantId: item.variantId,
                     movementType: client_1.StockMovementType.SALE_CANCEL,
                     referenceType: client_1.ReferenceType.SALES_ORDER,
@@ -514,7 +586,6 @@ async function cancelSalesOrder(organizationId, orderId, actorUserId) {
                 });
             }
         }
-        const updated = await tx.salesOrder.findUniqueOrThrow({ where: { id: orderId } });
         await (0, audit_service_1.createAuditLog)(tx, {
             organizationId,
             actorUserId,
@@ -731,6 +802,9 @@ async function findNearestFreeDriver(branchId, excludeDriverIds = []) {
             // the single most recent decliner, so a small pool of drivers can't get bounced the same
             // order back and forth indefinitely.
             ...(excludeDriverIds.length > 0 ? { id: { notIn: excludeDriverIds } } : {}),
+            // Shop-owned drivers (2026-09-24) only ever carry their own branch's orders; for that branch
+            // they compete with general drivers on distance like anyone else.
+            OR: [{ shopBranchId: null }, { shopBranchId: branchId }],
             assignedOrders: {
                 none: {
                     status: { in: ACTIVE_DRIVER_ORDER_STATUSES },
@@ -775,10 +849,19 @@ async function findNearestFreeDriver(branchId, excludeDriverIds = []) {
  * handed an order they already turned down).
  */
 async function findNearestUnassignedOrderForDriver(driverId, driverLocation) {
+    const driver = await prisma_1.prisma.driver.findUnique({ where: { id: driverId }, select: { shopBranchId: true } });
     const candidates = await prisma_1.prisma.salesOrder.findMany({
         where: {
             status: client_1.SalesOrderStatus.READY,
             assignedDriverId: null,
+            // OWN_DRIVER orders wait for the shop to pick; nothing is auto-assigned to them.
+            OR: [{ driverDispatchMode: null }, { driverDispatchMode: client_1.DriverDispatchMode.NEARCART }],
+            // A shop-owned driver only ever gets their own branch's orders.
+            ...(driver?.shopBranchId ? { branchId: driver.shopBranchId } : {}),
+            // Hyperlocal orders are same-day. Without an age cap, a READY order nobody ever collected
+            // was pushed to whichever driver next came online — on-device 2026-09-20 a driver going
+            // online was handed a 5-week-old order. Older ones need a human (shop cancels/reassigns).
+            createdAt: { gte: new Date(Date.now() - STALE_READY_ORDER_MAX_AGE_MS) },
             branch: {
                 latitude: { not: null },
                 longitude: { not: null },
@@ -880,16 +963,95 @@ async function notifyStaffOfAutoAssignFailure(organizationId, order) {
     }
 }
 /**
+ * OWN_DRIVER orders are never auto-reassigned: when the picked driver can't take it, declines, or
+ * times out, the order goes back to the shop to choose again (owner's rule, 2026-09-24). Same
+ * audit + push + NotificationLog trail as notifyStaffOfAutoAssignFailure, so the partner app's
+ * existing alert (which opens the order) just works. Best-effort, never throws.
+ */
+async function notifyStaffOwnDriverNeeded(organizationId, order, reason, driverName) {
+    try {
+        await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+            organizationId,
+            action: client_1.AuditAction.ORDER_AUTOASSIGN_FAILED,
+            entityType: "SalesOrder",
+            entityId: order.id,
+            meta: { reason: `OWN_DRIVER_${reason}` },
+        });
+        const who = driverName ?? "Your driver";
+        const title = "Pick a driver";
+        const body = reason === "DECLINED"
+            ? `${who} declined order #${order.orderNumber}. Pick another of your drivers or let NearCart choose.`
+            : reason === "TIMED_OUT"
+                ? `${who} didn't respond to order #${order.orderNumber}. Pick another of your drivers or let NearCart choose.`
+                : `Order #${order.orderNumber} is packed but your driver couldn't take it. Pick another driver or let NearCart choose.`;
+        const data = { salesOrderId: order.id, reason: `OWN_DRIVER_${reason}` };
+        void (0, push_notification_service_1.sendPushToOrgStaff)(organizationId, { title, body, data, channelId: "order_alert" }).catch((error) => {
+            console.warn(`[sales-orders] Failed to push own-driver alert for order ${order.id}`, error);
+        });
+        await (0, notifications_service_1.recordNotificationLog)(prisma_1.prisma, {
+            organizationId,
+            type: client_1.NotificationLogType.ORDER_AUTOASSIGN_FAILED,
+            title,
+            body,
+            data,
+        });
+    }
+    catch (error) {
+        console.warn(`[sales-orders] Failed to record own-driver notification for order ${order.id}`, error);
+    }
+}
+/**
+ * The shop's pick for an OWN_DRIVER order must be one of that branch's own drivers, approved, and
+ * online and free right now — the same things the picker greys out, re-checked here because the
+ * list can be seconds stale. Checked BEFORE any state change so a bad pick leaves the order as-is.
+ */
+async function assertOwnDriverAvailable(branchId, driverId) {
+    const driver = await prisma_1.prisma.driver.findUnique({
+        where: { id: driverId },
+        select: {
+            fullName: true,
+            status: true,
+            shopBranchId: true,
+            isAvailableForAssignment: true,
+            lastLocationAt: true,
+            _count: { select: { assignedOrders: { where: { status: { in: ACTIVE_DRIVER_ORDER_STATUSES } } } } },
+        },
+    });
+    if (!driver || driver.shopBranchId !== branchId) {
+        throw ApiError_1.ApiError.badRequest("That driver isn't one of this branch's drivers.");
+    }
+    if (driver.status !== client_1.DriverStatus.VERIFIED) {
+        throw ApiError_1.ApiError.badRequest(`${driver.fullName} hasn't been approved by NearCart yet.`);
+    }
+    const isFresh = driver.lastLocationAt != null &&
+        driver.lastLocationAt.getTime() >= Date.now() - env_1.env.DRIVER_LOCATION_STALE_MINUTES * 60_000;
+    if (!driver.isAvailableForAssignment || !isFresh) {
+        throw ApiError_1.ApiError.conflict(`${driver.fullName} is offline right now. Pick another driver or let NearCart choose.`);
+    }
+    if (driver._count.assignedOrders > 0) {
+        throw ApiError_1.ApiError.conflict(`${driver.fullName} is already on a delivery. Pick another driver or let NearCart choose.`);
+    }
+}
+/**
  * Transitions CONFIRMED -> READY, the first of the two previously-dead SalesOrderStatus
  * transitions to get wired up. Separate step from assign-driver (below) since the shop may mark
  * an order ready for pickup before a driver has been assigned — matching the locked
  * PHASE1_REQUIREMENTS.md contract (`PATCH /:id/mark-ready` is distinct from
  * `POST /:id/assign-driver`).
  */
-async function markSalesOrderReady(organizationId, orderId, actorUserId) {
+async function markSalesOrderReady(organizationId, orderId, actorUserId, dispatch = {}) {
     const order = await getSalesOrderById(organizationId, orderId);
     if (order.status !== client_1.SalesOrderStatus.CONFIRMED) {
         throw ApiError_1.ApiError.badRequest("Only confirmed orders can be marked ready");
+    }
+    // "Let NearCart choose" is the default, so callers that send no choice (the web dashboard, older
+    // app builds) keep today's behaviour exactly.
+    const dispatchMode = dispatch.mode ?? client_1.DriverDispatchMode.NEARCART;
+    if (dispatchMode === client_1.DriverDispatchMode.OWN_DRIVER) {
+        if (!dispatch.driverId) {
+            throw ApiError_1.ApiError.badRequest("Pick one of your drivers.");
+        }
+        await assertOwnDriverAvailable(order.branchId, dispatch.driverId);
     }
     // Distance-based driver fare (branch pickup-point <-> delivery address), computed here — before
     // entering the transaction — so it can be written as literal data in the same atomic
@@ -916,6 +1078,7 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
                 readyById: actorUserId,
                 estimatedDistanceKm,
                 driverDeliveryFee: driverDeliveryFee != null ? (0, decimal_1.toDecimal)(driverDeliveryFee) : null,
+                driverDispatchMode: dispatchMode,
             },
         });
         if (count === 0) {
@@ -939,6 +1102,18 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
             status: updated.status,
             eventType: "READY",
         });
+    }
+    if (dispatchMode === client_1.DriverDispatchMode.OWN_DRIVER) {
+        try {
+            return await assignDriverToSalesOrder(organizationId, updated.id, actorUserId, dispatch.driverId);
+        }
+        catch (error) {
+            // Lost a race since the pre-check (the driver just took another order or went offline).
+            // The order is packed either way; leave it READY and ask the shop to pick again.
+            console.warn(`[sales-orders] Own-driver assignment failed for order ${updated.id}`, error);
+            void notifyStaffOwnDriverNeeded(organizationId, updated, "UNAVAILABLE");
+            return updated;
+        }
     }
     // Nearest-free-driver auto-assignment: fires right after the READY transition commits, on a
     // best-effort basis. A failure here must never turn a successful mark-ready into an error
@@ -968,6 +1143,45 @@ async function markSalesOrderReady(organizationId, orderId, actorUserId) {
     return updated;
 }
 /**
+ * Re-dispatch a READY order that has no driver — after an own driver declined/timed out, or when
+ * the shop changes its mind. OWN_DRIVER assigns the picked driver (or fails with the reason, order
+ * untouched); NEARCART runs the same nearest-free-driver match as mark-ready.
+ */
+async function dispatchSalesOrder(organizationId, orderId, actorUserId, dispatch) {
+    const order = await getSalesOrderById(organizationId, orderId);
+    if (order.status !== client_1.SalesOrderStatus.READY) {
+        throw ApiError_1.ApiError.badRequest("Only packed orders waiting for a driver can be dispatched");
+    }
+    if (order.assignedDriverId) {
+        throw ApiError_1.ApiError.conflict("This order already has a driver");
+    }
+    if (dispatch.mode === client_1.DriverDispatchMode.OWN_DRIVER) {
+        if (!dispatch.driverId) {
+            throw ApiError_1.ApiError.badRequest("Pick one of your drivers.");
+        }
+        await assertOwnDriverAvailable(order.branchId, dispatch.driverId);
+    }
+    await prisma_1.prisma.salesOrder.updateMany({
+        where: { id: orderId, organizationId, status: client_1.SalesOrderStatus.READY, assignedDriverId: null },
+        data: { driverDispatchMode: dispatch.mode },
+    });
+    if (dispatch.mode === client_1.DriverDispatchMode.OWN_DRIVER) {
+        return assignDriverToSalesOrder(organizationId, orderId, actorUserId, dispatch.driverId);
+    }
+    try {
+        const nearestDriver = await findNearestFreeDriver(order.branchId, parseDeclinedDriverIds(order.declinedByDriverIds));
+        if (nearestDriver) {
+            return await assignDriverToSalesOrder(organizationId, orderId, null, nearestDriver.id);
+        }
+    }
+    catch (error) {
+        console.warn(`[sales-orders] Nearest-free-driver match on re-dispatch failed for order ${orderId}`, error);
+    }
+    const current = await getSalesOrderById(organizationId, orderId);
+    void notifyStaffOfAutoAssignFailure(organizationId, current);
+    return current;
+}
+/**
  * Assigns a driver to a READY order. Drivers are a platform-wide pool (a standalone `Driver`
  * model, not an OrganizationMembership) — see PHASE1_REQUIREMENTS.md's locked 2026-07-24 decision
  * — so any org's staff may assign any VERIFIED driver, without an organization-membership check
@@ -988,13 +1202,21 @@ async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, dr
     }
     const driver = await prisma_1.prisma.driver.findUnique({
         where: { id: driverId },
-        select: { id: true, status: true },
+        select: { id: true, status: true, shopBranchId: true },
     });
     if (!driver) {
         throw ApiError_1.ApiError.notFound("Driver not found");
     }
     if (driver.status !== client_1.DriverStatus.VERIFIED) {
         throw ApiError_1.ApiError.badRequest("Only verified drivers can be assigned to orders");
+    }
+    // Shop-owned drivers (2026-09-24): never another shop's orders; and an OWN_DRIVER order only
+    // ever goes to the branch's own drivers.
+    if (driver.shopBranchId && driver.shopBranchId !== order.branchId) {
+        throw ApiError_1.ApiError.badRequest("This driver works only for another shop");
+    }
+    if (order.driverDispatchMode === client_1.DriverDispatchMode.OWN_DRIVER && driver.shopBranchId !== order.branchId) {
+        throw ApiError_1.ApiError.badRequest("This order is set to use your own drivers. Pick one of them or let NearCart choose.");
     }
     const updated = await prisma_1.prisma.$transaction(async (tx) => {
         // Bug fixed 2026-07-28: this previously took a Postgres row lock via
@@ -1089,4 +1311,494 @@ async function assignDriverToSalesOrder(organizationId, orderId, actorUserId, dr
         console.warn(`[sales-orders] Failed to notify driver ${driverId} of assignment for order ${updated.id}`, error);
     });
     return updated;
+}
+/* ────────────────────────────────────────────────────────────────────────────────────────────
+ * Shop-side PARTIAL FULFILMENT with customer approval.
+ *
+ * "The customer ordered 5 things, I only have 3 of them." Instead of confirming (which would
+ * deduct stock the shop doesn't have and hand the customer an order they never agreed to) or
+ * rejecting outright (which loses the sale), the shop proposes a REDUCED order and the customer
+ * approves or refuses it in the NearCart app.
+ *
+ * Three invariants hold this together, and all three are load-bearing:
+ *
+ *  1. The order STAYS `PENDING` for the whole negotiation. Nothing is committed until the
+ *     customer says yes, so `SalesOrderStatus` needs no new value — and therefore this feature
+ *     needs no migration, which matters a lot on this repo's hand-applied-DDL Turso database.
+ *     The proposal lives in the existing `SalesOrder.deliveryAddress` Json column, the same
+ *     precedent the `payment` block already set (see utils/orderPayment.ts).
+ *  2. STOCK ONLY MOVES ON ACCEPTANCE, for the FINAL quantities, exactly once — through the same
+ *     `deductStockForSalesOrder` helper `confirmSalesOrder` uses. Proposing touches neither
+ *     `InventoryLedger` nor `SalesOrderItem`: a proposal the customer refuses must leave the
+ *     order's books completely untouched.
+ *  3. The order-confirmation sweep must NOT auto-cancel an order that is waiting on a customer.
+ *     Proposing pushes `confirmationDeadlineAt` out to the proposal's own `expiresAt`, and the
+ *     sweep additionally skips any order still legitimately AWAITING_CUSTOMER — see
+ *     jobs/order-confirmation-sweep.ts. Getting that wrong silently kills live orders.
+ * ──────────────────────────────────────────────────────────────────────────────────────────── */
+const PARTIAL_DECLINE_REASON = "Customer declined the revised order";
+const PARTIAL_EXPIRY_REASON = "Customer did not respond to the revised order";
+/**
+ * How long the shop gets to confirm a revised order the customer has already approved. The
+ * customer has said yes and is waiting, so this is deliberately tighter than a fresh order's SLA
+ * — the sweep's normal auto-cancel then applies, which is the correct outcome: a shop that has
+ * gone quiet after promising a reduced order should release the customer, not hold them.
+ */
+const PARTIAL_SHOP_CONFIRM_WINDOW_MS = 30 * 60 * 1000;
+function decimalToNumber(value) {
+    return Number((0, decimal_1.toDecimal)(value).toString());
+}
+/** Money is stored as `Decimal` but travels to the clients as JSON numbers — keep it to paise. */
+function roundMoney(value) {
+    return Math.round(value * 100) / 100;
+}
+/**
+ * Re-derives one line's money at a reduced quantity, following `prepareSalesOrderItems`' formula
+ * exactly (lineBase - discount + tax). The per-line `discountAmount` is an absolute figure, so it
+ * is scaled by the quantity ratio — the only sane reading of "half the units, half the line
+ * discount". Bridged NearCart orders carry `taxRate`/`discountAmount` of 0 on every line (see
+ * createBridgedSalesOrder), so for them this reduces to quantity × unitPrice.
+ */
+function recomputeLine(item, toQuantity) {
+    const originalQuantity = (0, decimal_1.toDecimal)(item.quantity);
+    const lineBase = toQuantity.mul(item.unitPrice);
+    const discountAmount = originalQuantity.isZero()
+        ? (0, decimal_1.toDecimal)(0)
+        : (0, decimal_1.toDecimal)(item.discountAmount).mul(toQuantity).div(originalQuantity);
+    const taxAmount = lineBase.mul(item.taxRate).div(100);
+    return {
+        item,
+        toQuantity,
+        lineBase,
+        discountAmount,
+        taxAmount,
+        lineTotal: lineBase.minus(discountAmount).plus(taxAmount),
+    };
+}
+function sumLines(lines) {
+    return lines.reduce((totals, line) => ({
+        subtotal: totals.subtotal.plus(line.lineBase),
+        taxTotal: totals.taxTotal.plus(line.taxAmount),
+        discountTotal: totals.discountTotal.plus(line.discountAmount),
+        total: totals.total.plus(line.lineTotal),
+    }), { subtotal: (0, decimal_1.toDecimal)(0), taxTotal: (0, decimal_1.toDecimal)(0), discountTotal: (0, decimal_1.toDecimal)(0), total: (0, decimal_1.toDecimal)(0) });
+}
+/**
+ * What the customer would owe if they accept. Only the ITEM total changes — the delivery fee and
+ * any weather surcharge stay exactly as they were, because a driver still makes the same ride to
+ * the same address. Returns null when the order has no `payment` block at all (a walk-in/phone
+ * order, or a push from a NearCart old enough to predate that block): there is no
+ * "amount payable" concept for those, and inventing one would be worse than saying nothing.
+ */
+function computeProposedAmountPayable(payment, proposedItemTotal) {
+    if (!payment || payment.amountPayable == null) {
+        return null;
+    }
+    const gross = proposedItemTotal + (payment.deliveryFee ?? 0) + (payment.weatherSurchargeFee ?? 0);
+    // A discount can never exceed what is left of the order — otherwise a big enough coupon on a
+    // heavily-reduced basket would hand the customer money. NearCart re-checks its own coupon
+    // minimum-spend rules on top of this (see its partial-response service); this is the backstop.
+    return roundMoney(Math.max(0, gross - Math.min(payment.discountTotal ?? 0, gross)));
+}
+/**
+ * Builds the proposal payload from a shop's `{ salesOrderItemId, availableQuantity }` list.
+ * Validation-only — it writes nothing.
+ */
+function buildPartialFulfilmentProposal(order, input) {
+    const itemsById = new Map(order.items.map((item) => [item.id, item]));
+    const requestedById = new Map();
+    for (const requested of input.items) {
+        const item = itemsById.get(requested.salesOrderItemId);
+        if (!item) {
+            throw ApiError_1.ApiError.badRequest("One of the items in this proposal is not part of this order");
+        }
+        if (requestedById.has(requested.salesOrderItemId)) {
+            throw ApiError_1.ApiError.badRequest("Each item can only appear once in a partial-fulfilment proposal");
+        }
+        const availableQuantity = (0, decimal_1.toDecimal)(requested.availableQuantity);
+        if (availableQuantity.isNegative()) {
+            throw ApiError_1.ApiError.badRequest("Available quantity cannot be negative");
+        }
+        if (availableQuantity.greaterThan(item.quantity)) {
+            throw ApiError_1.ApiError.badRequest(`You cannot supply more ${item.productNameSnapshot} than the customer ordered — use the ordered quantity or less`);
+        }
+        requestedById.set(requested.salesOrderItemId, availableQuantity);
+    }
+    // Items the shop said nothing about are unchanged — a proposal only ever has to name what it
+    // is changing.
+    const lines = order.items.map((item) => recomputeLine(item, requestedById.get(item.id) ?? (0, decimal_1.toDecimal)(item.quantity)));
+    const keptLines = lines.filter((line) => line.toQuantity.greaterThan(0));
+    if (keptLines.length === 0) {
+        throw ApiError_1.ApiError.badRequest("You cannot supply any of this order — reject the order instead of proposing a partial fulfilment");
+    }
+    const changedLines = lines.filter((line) => !line.toQuantity.equals((0, decimal_1.toDecimal)(line.item.quantity)));
+    if (changedLines.length === 0) {
+        throw ApiError_1.ApiError.badRequest("This proposal does not change the order — confirm it instead of asking the customer to approve it");
+    }
+    const removedItems = changedLines
+        .filter((line) => line.toQuantity.isZero())
+        .map((line) => ({
+        itemId: line.item.id,
+        productId: line.item.productId,
+        variantId: line.item.variantId,
+        name: line.item.productNameSnapshot,
+        variantName: line.item.variantNameSnapshot,
+        quantity: decimalToNumber(line.item.quantity),
+        lineTotal: roundMoney(decimalToNumber(line.item.lineTotal)),
+        reason: null,
+    }));
+    const reducedItems = changedLines
+        .filter((line) => line.toQuantity.greaterThan(0))
+        .map((line) => ({
+        itemId: line.item.id,
+        productId: line.item.productId,
+        variantId: line.item.variantId,
+        name: line.item.productNameSnapshot,
+        variantName: line.item.variantNameSnapshot,
+        fromQuantity: decimalToNumber(line.item.quantity),
+        toQuantity: decimalToNumber(line.toQuantity),
+        lineTotal: roundMoney(decimalToNumber(line.lineTotal)),
+    }));
+    const totals = sumLines(keptLines);
+    const proposedTotal = roundMoney(decimalToNumber(totals.total));
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + env_1.env.PARTIAL_FULFILMENT_TIMEOUT_MINUTES * 60_000);
+    const partialFulfilment = {
+        state: "AWAITING_CUSTOMER",
+        proposedAt: now.toISOString(),
+        respondedAt: null,
+        expiresAt: expiresAt.toISOString(),
+        note: input.note?.trim() || null,
+        removedItems,
+        reducedItems,
+        originalTotal: roundMoney(decimalToNumber(order.total)),
+        proposedTotal,
+        proposedAmountPayable: computeProposedAmountPayable((0, orderPayment_1.parseOrderPayment)(order.deliveryAddress), proposedTotal),
+    };
+    return { partialFulfilment, expiresAt, keptLines, totals };
+}
+/**
+ * `POST /api/sales-orders/:id/propose-partial` — the shop's half of the flow.
+ *
+ * Deliberately writes NOTHING except the proposal itself: no stock movement, no SalesOrderItem
+ * change, no status change. Everything is applied in one shot if (and only if) the customer
+ * accepts — see `acceptPartialFulfilment`.
+ */
+async function proposePartialFulfilment(organizationId, orderId, actorUserId, input) {
+    const order = await getSalesOrderById(organizationId, orderId);
+    if (!EDITABLE_ORDER_STATUSES.includes(order.status)) {
+        throw ApiError_1.ApiError.badRequest(order.status === client_1.SalesOrderStatus.CONFIRMED
+            ? "This order is already confirmed — a partial fulfilment can only be proposed before you confirm it"
+            : `This order can no longer be changed (it is ${order.status.toLowerCase().replace(/_/g, " ")})`);
+    }
+    const existing = (0, partialFulfilment_1.parsePartialFulfilment)(order.deliveryAddress);
+    if (existing?.state === "AWAITING_CUSTOMER") {
+        throw ApiError_1.ApiError.conflict("This order is already waiting for the customer to review a revised order");
+    }
+    const { partialFulfilment, expiresAt } = buildPartialFulfilmentProposal(order, input);
+    // Atomic compare-and-swap on status, the same guard every other transition in this file uses:
+    // a concurrent confirm/reject/cancel that lands between the checks above and this write must
+    // win, not be silently overwritten by a proposal on an order that is no longer open.
+    const { count } = await prisma_1.prisma.salesOrder.updateMany({
+        where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
+        data: {
+            deliveryAddress: (0, json_1.toNullableJsonValue)((0, partialFulfilment_1.withPartialFulfilment)(order.deliveryAddress, partialFulfilment)),
+            // The order is now waiting on a HUMAN, not on the shop, so the shop-SLA deadline the
+            // order-confirmation sweep enforces no longer applies — it is replaced by the proposal's
+            // own expiry. The sweep reads `partialFulfilment.state` too and skips anything still
+            // legitimately awaiting a customer, so both halves of the guard agree.
+            confirmationDeadlineAt: expiresAt,
+        },
+    });
+    if (count === 0) {
+        throw ApiError_1.ApiError.conflict("Order is no longer draft/pending — it may have been confirmed or rejected concurrently");
+    }
+    const updated = await getSalesOrderById(organizationId, orderId);
+    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+        organizationId,
+        actorUserId,
+        action: client_1.AuditAction.ORDER_PARTIAL_PROPOSE,
+        entityType: "SalesOrder",
+        entityId: updated.id,
+        before: order,
+        after: updated,
+        meta: {
+            removedItemCount: partialFulfilment.removedItems.length,
+            reducedItemCount: partialFulfilment.reducedItems.length,
+            originalTotal: partialFulfilment.originalTotal,
+            proposedTotal: partialFulfilment.proposedTotal,
+        },
+    });
+    if (updated.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: updated.externalOrderId,
+            // Unchanged on purpose — the order really is still PENDING. NearCart maps that to
+            // PENDING_CONFIRMATION, i.e. no local status move, and reacts to the eventType instead.
+            status: updated.status,
+            eventType: "PARTIAL_PROPOSED",
+            partialFulfilment,
+        });
+    }
+    return updated;
+}
+/**
+ * Staff-facing alert for whatever the customer decided. Best-effort/never-throws, matching
+ * `notifyStaffOfAutoAssignFailure`: the decision itself has already been committed by the time
+ * this runs, so a push/log failure must not turn it into an error.
+ */
+async function notifyStaffOfPartialResponse(organizationId, order, outcome) {
+    try {
+        const copy = {
+            // NOT "confirmed", and stock has NOT moved: the customer's yes hands the order back to this
+            // shop, which still has to confirm it. This push is the shop's cue to act, so it has to say
+            // so — the old wording told staff the job was done and nothing needed doing.
+            ACCEPTED: {
+                title: "Customer accepted — confirm to start packing",
+                body: `Order #${order.orderNumber}: the customer agreed to the items you can supply. Confirm the order to commit it and update stock.`,
+            },
+            DECLINED: {
+                title: "Customer declined — order cancelled",
+                body: `Order #${order.orderNumber} was cancelled because the customer did not want the revised order.`,
+            },
+            EXPIRED: {
+                title: "Revised order expired — order cancelled",
+                body: `Order #${order.orderNumber} was cancelled because the customer never responded to your revised order.`,
+            },
+        }[outcome];
+        const data = { salesOrderId: order.id, outcome };
+        void (0, push_notification_service_1.sendPushToOrgStaff)(organizationId, {
+            title: copy.title,
+            body: copy.body,
+            data,
+            channelId: "order_alert",
+        }).catch((error) => {
+            console.warn(`[sales-orders] Failed to push partial-fulfilment ${outcome} alert for order ${order.id}`, error);
+        });
+        await (0, notifications_service_1.recordNotificationLog)(prisma_1.prisma, {
+            organizationId,
+            type: client_1.NotificationLogType.ORDER_PARTIAL_RESPONSE,
+            title: copy.title,
+            body: copy.body,
+            data,
+        });
+    }
+    catch (error) {
+        console.warn(`[sales-orders] Failed to record partial-fulfilment ${outcome} notification for order ${order.id}`, error);
+    }
+}
+function buildAcceptedPaymentBlock(deliveryAddress, proposal, revisedPayment) {
+    const address = (0, partialFulfilment_1.parseDeliveryAddressObject)(deliveryAddress);
+    const existing = address?.payment;
+    if (typeof existing !== "object" || existing === null || Array.isArray(existing)) {
+        return null;
+    }
+    const next = { ...existing };
+    next.itemTotal = proposal.proposedTotal;
+    if (revisedPayment?.discountTotal != null) {
+        next.discountTotal = revisedPayment.discountTotal;
+    }
+    if (revisedPayment?.loyaltyDiscount != null) {
+        next.loyaltyDiscount = revisedPayment.loyaltyDiscount;
+    }
+    if (revisedPayment?.couponCode !== undefined) {
+        if (revisedPayment.couponCode) {
+            next.couponCode = revisedPayment.couponCode;
+        }
+        else {
+            delete next.couponCode;
+        }
+    }
+    next.amountPayable =
+        revisedPayment?.amountPayable != null ? revisedPayment.amountPayable : (proposal.proposedAmountPayable ?? next.amountPayable);
+    return next;
+}
+/**
+ * Applies a revised order the customer has already approved: drops the removed lines, reduces the
+ * reduced ones, recomputes the order's money (including the bill NearCart re-derived and sent with
+ * the acceptance) and marks the proposal ACCEPTED.
+ *
+ * Deliberately takes the transaction client and no status handling of its own — it is called from
+ * inside `confirmSalesOrder`'s transaction, AFTER that function's atomic status claim and BEFORE
+ * it re-reads the order to deduct stock. That ordering is the whole point: the deduction then
+ * happens against the revised quantities through the one shared `deductStockForSalesOrder` path,
+ * so there is no second copy of the ledger logic and no way to deduct the original quantities.
+ */
+async function applyAcceptedPartialFulfilment(tx, orderId, proposal) {
+    const claimed = await tx.salesOrder.findUniqueOrThrow({
+        where: { id: orderId },
+        include: { items: true },
+    });
+    const removedIds = new Set(proposal.removedItems.map((entry) => entry.itemId));
+    const reducedById = new Map(proposal.reducedItems.map((entry) => [entry.itemId, (0, decimal_1.toDecimal)(entry.toQuantity)]));
+    const keptLines = [];
+    for (const item of claimed.items) {
+        if (removedIds.has(item.id)) {
+            await tx.salesOrderItem.delete({ where: { id: item.id } });
+            continue;
+        }
+        const toQuantity = reducedById.get(item.id);
+        // An item the proposal never mentioned is unchanged; recomputing it at its own quantity is
+        // a no-op that keeps the totals below derived from one single code path.
+        const line = recomputeLine(item, toQuantity ?? (0, decimal_1.toDecimal)(item.quantity));
+        keptLines.push(line);
+        if (toQuantity) {
+            await tx.salesOrderItem.update({
+                where: { id: item.id },
+                data: {
+                    quantity: line.toQuantity,
+                    discountAmount: line.discountAmount,
+                    taxAmount: line.taxAmount,
+                    lineTotal: line.lineTotal,
+                },
+            });
+        }
+    }
+    const totals = sumLines(keptLines);
+    const settledProposal = {
+        ...proposal,
+        state: "ACCEPTED",
+    };
+    let deliveryAddress = (0, partialFulfilment_1.withPartialFulfilment)(claimed.deliveryAddress, settledProposal);
+    const acceptedPayment = buildAcceptedPaymentBlock(claimed.deliveryAddress, settledProposal, proposal.customerPayment);
+    if (acceptedPayment) {
+        deliveryAddress = (0, partialFulfilment_1.withPaymentBlock)(deliveryAddress, acceptedPayment);
+    }
+    await tx.salesOrder.update({
+        where: { id: orderId },
+        data: {
+            subtotal: totals.subtotal,
+            taxTotal: totals.taxTotal,
+            discountTotal: totals.discountTotal,
+            total: totals.total,
+            deliveryAddress: (0, json_1.toNullableJsonValue)(deliveryAddress),
+        },
+    });
+}
+/**
+ * The customer said yes — which parks the order for the SHOP, and commits nothing.
+ *
+ * This used to confirm the order and deduct stock outright. It no longer does, because the shop
+ * has to get the last word: minutes can pass while the customer decides, and a walk-in can buy
+ * the very stock the proposal promised in the meantime. So this records `CUSTOMER_ACCEPTED`,
+ * leaves the order PENDING with its items untouched, and tells the shop it can now confirm.
+ * `confirmSalesOrder` is what applies the revision and moves stock, so there is exactly one code
+ * path where a revised order becomes real — and it is the shop's own Confirm action.
+ *
+ * `revisedPayment` is stashed on the proposal rather than applied, for the same reason: the bill
+ * only becomes fact when the shop confirms.
+ */
+async function acceptPartialFulfilment(organizationId, orderId, revisedPayment) {
+    const order = await getSalesOrderById(organizationId, orderId);
+    const proposal = (0, partialFulfilment_1.parsePartialFulfilment)(order.deliveryAddress);
+    if (!proposal || proposal.state !== "AWAITING_CUSTOMER") {
+        throw ApiError_1.ApiError.conflict("This order is not waiting for a customer response");
+    }
+    const acceptedProposal = {
+        ...proposal,
+        state: "CUSTOMER_ACCEPTED",
+        respondedAt: new Date().toISOString(),
+        customerPayment: revisedPayment ?? null,
+    };
+    // Same atomic compare-and-swap every other transition in this file uses: a concurrent
+    // confirm/reject/cancel that lands first must win rather than be overwritten by a late yes.
+    const { count } = await prisma_1.prisma.salesOrder.updateMany({
+        where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
+        data: {
+            deliveryAddress: (0, json_1.toNullableJsonValue)((0, partialFulfilment_1.withPartialFulfilment)(order.deliveryAddress, acceptedProposal)),
+            // The clock is the shop's again, so the order-confirmation sweep's normal SLA applies from
+            // here rather than the proposal's own (now spent) customer window.
+            confirmationDeadlineAt: new Date(Date.now() + PARTIAL_SHOP_CONFIRM_WINDOW_MS),
+        },
+    });
+    if (count === 0) {
+        throw ApiError_1.ApiError.conflict("Order is no longer draft/pending — it may have been confirmed or cancelled concurrently");
+    }
+    const accepted = await getSalesOrderById(organizationId, orderId);
+    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+        organizationId,
+        action: client_1.AuditAction.ORDER_PARTIAL_ACCEPT,
+        entityType: "SalesOrder",
+        entityId: orderId,
+        before: order,
+        after: accepted,
+        meta: {
+            source: "marketplace_bridge",
+            note: "Customer accepted the revised order — awaiting the shop's confirmation",
+        },
+    });
+    void notifyStaffOfPartialResponse(organizationId, accepted, "ACCEPTED");
+    if (accepted.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: accepted.externalOrderId,
+            status: accepted.status,
+            eventType: "PARTIAL_ACCEPTED",
+            partialFulfilment: (0, partialFulfilment_1.parsePartialFulfilment)(accepted.deliveryAddress),
+        });
+    }
+    return accepted;
+}
+/**
+ * The customer said no, or never answered. Shared by the bridge's decline path and the sweep's
+ * expiry path — the only differences are the recorded state, the reason and who gets told.
+ *
+ * Routes through the existing `cancelSalesOrder` rather than duplicating its logic. Nothing was
+ * ever deducted for a PENDING order, so that path correctly performs no stock reversal; it also
+ * fires no webhook of its own for a null actor (it assumes NearCart already knows), which is why
+ * the explicit `notifyOrderEvent` below is not optional — the expiry case in particular is
+ * something only this backend can know about.
+ */
+async function closePartialFulfilment(organizationId, orderId, outcome) {
+    const order = await getSalesOrderById(organizationId, orderId);
+    const proposal = (0, partialFulfilment_1.parsePartialFulfilment)(order.deliveryAddress);
+    if (!proposal || proposal.state !== "AWAITING_CUSTOMER") {
+        throw ApiError_1.ApiError.conflict("This order is not waiting for a customer response");
+    }
+    const reason = outcome === "DECLINED" ? PARTIAL_DECLINE_REASON : PARTIAL_EXPIRY_REASON;
+    const closedProposal = {
+        ...proposal,
+        state: outcome,
+        respondedAt: new Date().toISOString(),
+    };
+    const { count } = await prisma_1.prisma.salesOrder.updateMany({
+        where: { id: orderId, organizationId, status: { in: EDITABLE_ORDER_STATUSES } },
+        data: {
+            deliveryAddress: (0, json_1.toNullableJsonValue)((0, partialFulfilment_1.withPartialFulfilment)(order.deliveryAddress, closedProposal)),
+            // `cancelSalesOrder` has no reason parameter (unlike reject) — recording it here, on the
+            // same row, is what makes a cancelled order self-explaining in the Partner app.
+            rejectionReason: reason,
+        },
+    });
+    if (count === 0) {
+        throw ApiError_1.ApiError.conflict("Order is no longer draft/pending — it may have been confirmed or cancelled concurrently");
+    }
+    const cancelled = await cancelSalesOrder(organizationId, orderId, null);
+    await (0, audit_service_1.createAuditLog)(prisma_1.prisma, {
+        organizationId,
+        action: outcome === "DECLINED" ? client_1.AuditAction.ORDER_PARTIAL_DECLINE : client_1.AuditAction.ORDER_PARTIAL_EXPIRE,
+        entityType: "SalesOrder",
+        entityId: orderId,
+        meta: { source: "marketplace_bridge", reason },
+    });
+    void notifyStaffOfPartialResponse(organizationId, cancelled, outcome);
+    if (cancelled.externalOrderId) {
+        void (0, order_event_webhook_service_1.notifyOrderEvent)({
+            externalOrderId: cancelled.externalOrderId,
+            status: cancelled.status,
+            eventType: outcome === "DECLINED" ? "PARTIAL_DECLINED" : "PARTIAL_EXPIRED",
+            partialFulfilment: closedProposal,
+        });
+    }
+    return cancelled;
+}
+/** The customer refused the revised order — cancel it. */
+async function declinePartialFulfilment(organizationId, orderId) {
+    return closePartialFulfilment(organizationId, orderId, "DECLINED");
+}
+/**
+ * The customer never answered within `PARTIAL_FULFILMENT_TIMEOUT_MINUTES` — cancel it. Called
+ * only from the order-confirmation sweep (jobs/order-confirmation-sweep.ts); a proposal must not
+ * be able to hang an order forever.
+ */
+async function expirePartialFulfilment(organizationId, orderId) {
+    return closePartialFulfilment(organizationId, orderId, "EXPIRED");
 }

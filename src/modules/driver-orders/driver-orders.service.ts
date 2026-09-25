@@ -1,4 +1,4 @@
-import { AuditAction, NotificationLogType, Prisma, SalesOrderStatus } from "@prisma/client";
+import { AuditAction, DriverDispatchMode, NotificationLogType, Prisma, SalesOrderStatus } from "@prisma/client";
 
 import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
@@ -15,6 +15,7 @@ import {
   findNearestFreeDriver,
   findNearestUnassignedOrderForDriver,
   notifyStaffOfAutoAssignFailure,
+  notifyStaffOwnDriverNeeded,
   parseDeclinedDriverIds,
 } from "../sales-orders/sales-orders.service";
 
@@ -452,6 +453,20 @@ export async function declineDriverOrder(driverId: string, orderId: string) {
 
     return result;
   });
+
+  // The shop chose its own driver for this order: never auto-reassign — the shop picks again.
+  if (updated.driverDispatchMode === DriverDispatchMode.OWN_DRIVER) {
+    if (updated.externalOrderId) {
+      void notifyOrderEvent({
+        externalOrderId: updated.externalOrderId,
+        status: updated.status,
+        eventType: "DRIVER_UNASSIGNED",
+      });
+    }
+    const decliner = await prisma.driver.findUnique({ where: { id: driverId }, select: { fullName: true } });
+    void notifyStaffOwnDriverNeeded(updated.organizationId, updated, "DECLINED", decliner?.fullName);
+    return serializeDriverOrder(updated);
+  }
 
   try {
     const nearestDriver = await findNearestFreeDriver(
@@ -1031,6 +1046,21 @@ export async function sweepStaleDriverAssignments(): Promise<{
         // Raced with a genuine pickup/decline/cancel between the query above and this
         // transaction — nothing to do, the order is no longer in the stale state this tick
         // detected.
+        continue;
+      }
+
+      // Own-driver orders go back to the shop to pick again, never to the pool.
+      if (updated.driverDispatchMode === DriverDispatchMode.OWN_DRIVER) {
+        unassigned += 1;
+        if (updated.externalOrderId) {
+          void notifyOrderEvent({
+            externalOrderId: updated.externalOrderId,
+            status: updated.status,
+            eventType: "DRIVER_UNASSIGNED",
+          });
+        }
+        const staleDriver = await prisma.driver.findUnique({ where: { id: staleDriverId }, select: { fullName: true } });
+        void notifyStaffOwnDriverNeeded(updated.organizationId, updated, "TIMED_OUT", staleDriver?.fullName);
         continue;
       }
 

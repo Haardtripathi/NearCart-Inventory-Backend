@@ -209,8 +209,13 @@ function serializeDriver(driver: {
   licenseVerified: boolean;
   licenseMatchScore: number | null;
   onboardingVerificationStatus: string;
+  // Shop-owned drivers (2026-09-24): only the list query includes it.
+  shopBranch?: { name: string; organization: { name: string } } | null;
 }) {
   return {
+    shop: driver.shopBranch
+      ? { branchName: driver.shopBranch.name, shopName: driver.shopBranch.organization.name }
+      : null,
     id: driver.id,
     fullName: driver.fullName,
     phone: driver.phone,
@@ -245,6 +250,7 @@ export async function listPlatformDrivers(query: { page: number; limit: number; 
       orderBy: { createdAt: "desc" },
       skip,
       take: limit,
+      include: { shopBranch: { select: { name: true, organization: { select: { name: true } } } } },
     }),
     prisma.driver.count({ where }),
   ]);

@@ -14,6 +14,7 @@ import { renderOtpEmail, sendMail } from "../../utils/mailer";
 import { issueOtp, verifyOtp } from "../../utils/otp";
 import { isUniqueConstraintError } from "../../utils/prismaErrors";
 import { createAuditLog } from "../audit/audit.service";
+import { redeemDriverShopCode } from "../drivers/driver-shop.service";
 
 interface RegisterDriverInput {
   fullName: string;
@@ -22,6 +23,7 @@ interface RegisterDriverInput {
   password: string;
   vehicleType: string;
   vehicleNumber: string;
+  storeCode?: string;
 }
 
 interface LoginDriverInput {
@@ -119,19 +121,34 @@ export async function registerDriver(input: RegisterDriverInput) {
   const passwordHash = await bcrypt.hash(input.password, 12);
 
   let driver;
+  let shop: { branchName: string; shopName: string } | null = null;
 
   try {
-    driver = await prisma.driver.create({
-      data: {
-        fullName: input.fullName.trim(),
-        phone,
-        email: email ?? null,
-        passwordHash,
-        vehicleType: input.vehicleType.trim(),
-        vehicleNumber: input.vehicleNumber.trim(),
-        status: DriverStatus.PENDING_VERIFICATION,
+    // One transaction so a bad/expired store code rejects the whole signup instead of leaving an
+    // account that silently isn't linked to the shop the driver thinks they joined.
+    driver = await prisma.$transaction(
+      async (tx) => {
+        const created = await tx.driver.create({
+          data: {
+            fullName: input.fullName.trim(),
+            phone,
+            email: email ?? null,
+            passwordHash,
+            vehicleType: input.vehicleType.trim(),
+            vehicleNumber: input.vehicleNumber.trim(),
+            status: DriverStatus.PENDING_VERIFICATION,
+          },
+        });
+
+        if (input.storeCode) {
+          const redeemed = await redeemDriverShopCode(tx, created.id, input.storeCode);
+          shop = { branchName: redeemed.branch.name, shopName: redeemed.branch.organization.name };
+        }
+
+        return created;
       },
-    });
+      { maxWait: 10_000, timeout: 30_000 },
+    );
   } catch (error) {
     // Narrow race: two concurrent registrations for the same phone/email both pass the
     // findUnique checks above before either commits. The @unique DB constraints already prevent
@@ -159,7 +176,7 @@ export async function registerDriver(input: RegisterDriverInput) {
   // endpoint's existing response shape.
   const verificationToken = signDriverVerificationPendingToken({ driverId: driver.id });
 
-  return { driver: serializeDriver(driver), verificationToken };
+  return { driver: serializeDriver(driver), verificationToken, shop };
 }
 
 export async function loginDriver(input: LoginDriverInput) {

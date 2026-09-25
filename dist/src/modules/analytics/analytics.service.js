@@ -49,6 +49,34 @@ function dayKey(date) {
 function addDays(date, days) {
     return new Date(date.getTime() + days * 86_400_000);
 }
+/**
+ * How many of this organization's stock balances are at or below their reorder threshold.
+ *
+ * This used to load EVERY InventoryBalance row the organization has — across every branch and
+ * every SKU — select onHand plus the variant's thresholds for each, and then take `.length` of a
+ * JavaScript `.filter()`. The answer is a single integer, and the work to produce it grew with
+ * catalogue size times branch count: a shop with 50,000 SKUs across three branches pulled 150,000
+ * rows over the network to compute one number on a dashboard.
+ *
+ * Raw SQL because the predicate compares two columns of a JOINED row against a third
+ * (`onHand <= max(reorderLevel, minStockLevel)`), which Prisma's query API cannot express. It is a
+ * read-only COUNT; it moves no stock and writes nothing. The comparison mirrors
+ * utils/stock.ts's isLowStock exactly, including decimalMax's floor at 0 for null thresholds.
+ */
+async function countLowStockBalances(organizationId, branchId) {
+    const rows = await prisma_1.prisma.$queryRawUnsafe(`SELECT COUNT(*) AS "lowStockCount"
+       FROM "InventoryBalance" ib
+       JOIN "ProductVariant" v ON v."id" = ib."variantId"
+       JOIN "Product" p ON p."id" = ib."productId"
+      WHERE ib."organizationId" = ?
+        ${branchId ? `AND ib."branchId" = ?` : ""}
+        -- Same soft-delete guard the Prisma version carried: an archived product's stale balance
+        -- row must not keep inflating this count forever (confirmed live 2026-08-08).
+        AND p."deletedAt" IS NULL
+        AND v."deletedAt" IS NULL
+        AND ib."onHand" <= MAX(COALESCE(v."reorderLevel", 0), COALESCE(v."minStockLevel", 0), 0)`, ...(branchId ? [organizationId, branchId] : [organizationId]));
+    return Number(rows[0]?.lowStockCount ?? 0);
+}
 async function getAnalyticsOverview(organizationId, branchId) {
     const now = new Date();
     const trendStart = startOfDay(addDays(now, -(TREND_DAYS - 1)));
@@ -67,7 +95,7 @@ async function getAnalyticsOverview(organizationId, branchId) {
     // `topProductsStart` (30 days back, the wider of the two windows) whenever
     // TOP_PRODUCTS_WINDOW_DAYS >= TREND_DAYS, `recentOrders` below already holds exactly the rows
     // both figures need — derive them from it instead of running two additional unscoped queries.
-    const [recentOrders, lowStockBalances] = await Promise.all([
+    const [recentOrders, lowStockCount] = await Promise.all([
         prisma_1.prisma.salesOrder.findMany({
             where: {
                 organizationId,
@@ -88,17 +116,7 @@ async function getAnalyticsOverview(organizationId, branchId) {
                 },
             },
         }),
-        prisma_1.prisma.inventoryBalance.findMany({
-            // Every other product query in this codebase filters `deletedAt: null` (see
-            // products.service.ts); this one didn't, so a soft-deleted/archived product's stale
-            // InventoryBalance row kept inflating `lowStockCount` forever — confirmed live 2026-08-08:
-            // archiving 5 low-stock test products left the count unchanged until this filter was added.
-            where: { organizationId, ...branchFilter, product: { deletedAt: null }, variant: { deletedAt: null } },
-            select: {
-                onHand: true,
-                variant: { select: { reorderLevel: true, minStockLevel: true } },
-            },
-        }),
+        countLowStockBalances(organizationId, branchId),
     ]);
     const trendBuckets = new Map();
     for (let i = 0; i < TREND_DAYS; i += 1) {
@@ -165,7 +183,6 @@ async function getAnalyticsOverview(organizationId, branchId) {
     for (const order of recentOrders) {
         orderStatusCounts[order.status] = (orderStatusCounts[order.status] ?? 0) + 1;
     }
-    const lowStockCount = lowStockBalances.filter((balance) => (0, stock_1.isLowStock)(balance.onHand, balance.variant.reorderLevel, balance.variant.minStockLevel)).length;
     return {
         salesTrend,
         topProducts: topProductsList,
@@ -214,7 +231,30 @@ async function getReorderSuggestions(organizationId, branchId) {
             // Same soft-delete gap as getAnalyticsOverview above — without this, a variant sold before
             // being archived could keep surfacing as a "reorder" suggestion for a product the shop no
             // longer carries.
-            where: { organizationId, ...branchFilter, product: { deletedAt: null }, variant: { deletedAt: null } },
+            where: {
+                organizationId,
+                ...branchFilter,
+                product: { deletedAt: null },
+                variant: {
+                    deletedAt: null,
+                    // A balance whose variant sold nothing in the window is discarded below anyway
+                    // (`if (!sales) return null`), so loading every balance the organization has just to
+                    // throw almost all of them away is wasted work that grows with catalogue size times
+                    // branch count. Expressing "sold in the window" as a relation filter keeps the result
+                    // set proportional to what actually sold, and keeps this query parallel with the
+                    // velocity query above instead of having to wait for its variant ids.
+                    salesOrderItems: {
+                        some: {
+                            salesOrder: {
+                                organizationId,
+                                ...branchFilter,
+                                status: { in: REVENUE_STATUSES },
+                                createdAt: { gte: windowStart },
+                            },
+                        },
+                    },
+                },
+            },
             select: {
                 id: true,
                 branchId: true,

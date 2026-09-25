@@ -1,0 +1,629 @@
+{
+ "products": {
+  "grocery": [
+   {
+    "name": "Aashirvaad Whole Wheat Atta",
+    "variantName": "5 kg",
+    "category": "Atta & Flours",
+    "brand": "Aashirvaad",
+    "costPrice": 230,
+    "sellingPrice": 265,
+    "mrp": 285,
+    "sku": "GRO-01",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/908/100/1567/front_en.7.400.jpg"
+   },
+   {
+    "name": "Tata Salt",
+    "variantName": "1 kg",
+    "category": "Salt & Spices",
+    "brand": "Tata",
+    "costPrice": 22,
+    "sellingPrice": 27,
+    "mrp": 28,
+    "sku": "GRO-02",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/404/390/1015/front_en.10.400.jpg"
+   },
+   {
+    "name": "Fortune Sunflower Oil",
+    "variantName": "1 L",
+    "category": "Edible Oils",
+    "brand": "Fortune",
+    "costPrice": 125,
+    "sellingPrice": 145,
+    "mrp": 160,
+    "sku": "GRO-03",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/600/728/0280/front_en.3.400.jpg"
+   },
+   {
+    "name": "India Gate Basmati Rice",
+    "variantName": "1 kg",
+    "category": "Rice & Dals",
+    "brand": "India Gate",
+    "costPrice": 110,
+    "sellingPrice": 135,
+    "mrp": 150,
+    "sku": "GRO-04",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/069/022/510/1134/front_en.16.400.jpg"
+   },
+   {
+    "name": "Tata Sampann Chana Dal",
+    "variantName": "1 kg",
+    "category": "Rice & Dals",
+    "brand": "Tata Sampann",
+    "costPrice": 140,
+    "sellingPrice": 165,
+    "mrp": 180,
+    "sku": "GRO-05",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/404/392/6629/front_en.5.400.jpg"
+   },
+   {
+    "name": "Maggi 2-Minute Masala Noodles",
+    "variantName": "280 g",
+    "category": "Noodles & Pasta",
+    "brand": "Maggi",
+    "costPrice": 42,
+    "sellingPrice": 52,
+    "mrp": 56,
+    "sku": "GRO-06",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/105/800/4144/front_en.3.400.jpg"
+   },
+   {
+    "name": "Parle-G Biscuits",
+    "variantName": "800 g",
+    "category": "Biscuits & Snacks",
+    "brand": "Parle",
+    "costPrice": 70,
+    "sellingPrice": 82,
+    "mrp": 90,
+    "sku": "GRO-07",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/171/910/0956/front_en.8.400.jpg"
+   },
+   {
+    "name": "Britannia Good Day Choco Chip Cookies",
+    "variantName": "200 g",
+    "category": "Biscuits & Snacks",
+    "brand": "Britannia",
+    "costPrice": 35,
+    "sellingPrice": 42,
+    "mrp": 45,
+    "sku": "GRO-08",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/106/300/4207/front_en.3.400.jpg"
+   },
+   {
+    "name": "Tata Tea Premium",
+    "variantName": "500 g",
+    "category": "Tea & Coffee",
+    "brand": "Tata Tea",
+    "costPrice": 230,
+    "sellingPrice": 270,
+    "mrp": 290,
+    "sku": "GRO-09",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/105/201/0417/front_fr.7.400.jpg"
+   },
+   {
+    "name": "Nescafe Classic Coffee",
+    "variantName": "50 g",
+    "category": "Tea & Coffee",
+    "brand": "Nescafe",
+    "costPrice": 150,
+    "sellingPrice": 175,
+    "mrp": 190,
+    "sku": "GRO-10",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/105/890/4338/front_en.3.400.jpg"
+   },
+   {
+    "name": "Kissan Fresh Tomato Ketchup",
+    "variantName": "950 g",
+    "category": "Sauces & Spreads",
+    "brand": "Kissan",
+    "costPrice": 110,
+    "sellingPrice": 135,
+    "mrp": 150,
+    "sku": "GRO-11",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/103/089/7542/front_en.3.400.jpg"
+   },
+   {
+    "name": "Haldiram's Aloo Bhujia",
+    "variantName": "400 g",
+    "category": "Biscuits & Snacks",
+    "brand": "Haldiram's",
+    "costPrice": 85,
+    "sellingPrice": 102,
+    "mrp": 110,
+    "sku": "GRO-12",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/406/321/8124/front_en.4.400.jpg"
+   },
+   {
+    "name": "Kellogg's Corn Flakes",
+    "variantName": "475 g",
+    "category": "Breakfast Cereals",
+    "brand": "Kellogg's",
+    "costPrice": 160,
+    "sellingPrice": 190,
+    "mrp": 210,
+    "sku": "GRO-13",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/149/900/9661/front_en.3.400.jpg"
+   },
+   {
+    "name": "Cadbury Dairy Milk Silk",
+    "variantName": "150 g",
+    "category": "Chocolates",
+    "brand": "Cadbury",
+    "costPrice": 150,
+    "sellingPrice": 175,
+    "mrp": 190,
+    "sku": "GRO-14",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/123/303/4300/front_en.6.400.jpg"
+   }
+  ],
+  "pharmacy": [
+   {
+    "name": "Dettol Original Soap",
+    "variantName": "125 g",
+    "category": "Hygiene",
+    "brand": "Dettol",
+    "costPrice": 45,
+    "sellingPrice": 52,
+    "mrp": 56,
+    "sku": "PHA-01",
+    "imageUrl": "https://images.openbeautyfacts.org/images/products/000/005/015/8980/front_en.3.400.jpg"
+   },
+   {
+    "name": "Vicks VapoRub",
+    "variantName": "50 ml",
+    "category": "Cold & Cough",
+    "brand": "Vicks",
+    "costPrice": 135,
+    "sellingPrice": 155,
+    "mrp": 165,
+    "sku": "PHA-02",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1c/Vicks_VapoRub_%2851013600352%29_%28cropped%29.jpg/960px-Vicks_VapoRub_%2851013600352%29_%28cropped%29.jpg"
+   },
+   {
+    "name": "Dabur Chyawanprash",
+    "variantName": "1 kg",
+    "category": "Health & Immunity",
+    "brand": "Dabur",
+    "costPrice": 330,
+    "sellingPrice": 375,
+    "mrp": 399,
+    "sku": "PHA-03",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/120/700/6241/front_en.5.400.jpg"
+   },
+   {
+    "name": "Dabur Honey",
+    "variantName": "500 g",
+    "category": "Health & Immunity",
+    "brand": "Dabur",
+    "costPrice": 180,
+    "sellingPrice": 215,
+    "mrp": 235,
+    "sku": "PHA-04",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cc/Runny_hunny.jpg/960px-Runny_hunny.jpg"
+   },
+   {
+    "name": "Himalaya Purifying Neem Face Wash",
+    "variantName": "150 ml",
+    "category": "Skin Care",
+    "brand": "Himalaya",
+    "costPrice": 150,
+    "sellingPrice": 175,
+    "mrp": 190,
+    "sku": "PHA-05",
+    "imageUrl": "https://images.openbeautyfacts.org/images/products/890/113/885/1248/front_en.3.400.jpg"
+   },
+   {
+    "name": "Glucon-D Instant Energy Drink",
+    "variantName": "500 g",
+    "category": "Health Drinks",
+    "brand": "Glucon-D",
+    "costPrice": 170,
+    "sellingPrice": 195,
+    "mrp": 210,
+    "sku": "PHA-06",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/154/201/3140/front_en.3.400.jpg"
+   },
+   {
+    "name": "Horlicks Health Drink",
+    "variantName": "500 g",
+    "category": "Health Drinks",
+    "brand": "Horlicks",
+    "costPrice": 240,
+    "sellingPrice": 275,
+    "mrp": 290,
+    "sku": "PHA-07",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/157/100/1354/front_en.3.400.jpg"
+   },
+   {
+    "name": "Vaseline Petroleum Jelly",
+    "variantName": "85 g",
+    "category": "Skin Care",
+    "brand": "Vaseline",
+    "costPrice": 85,
+    "sellingPrice": 99,
+    "mrp": 110,
+    "sku": "PHA-08",
+    "imageUrl": "https://images.openbeautyfacts.org/images/products/000/004/218/2634/front_en.88.400.jpg"
+   },
+   {
+    "name": "Colgate Total Toothpaste",
+    "variantName": "120 g",
+    "category": "Oral Care",
+    "brand": "Colgate",
+    "costPrice": 110,
+    "sellingPrice": 128,
+    "mrp": 140,
+    "sku": "PHA-09",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/871/478/955/4273/front_de.3.400.jpg"
+   },
+   {
+    "name": "Dettol Liquid Handwash",
+    "variantName": "200 ml",
+    "category": "Hygiene",
+    "brand": "Dettol",
+    "costPrice": 85,
+    "sellingPrice": 99,
+    "mrp": 105,
+    "sku": "PHA-10",
+    "imageUrl": "https://images.openbeautyfacts.org/images/products/890/139/632/4584/front_en.9.400.jpg"
+   },
+   {
+    "name": "Nivea Soft Moisturising Cream",
+    "variantName": "100 ml",
+    "category": "Skin Care",
+    "brand": "Nivea",
+    "costPrice": 170,
+    "sellingPrice": 199,
+    "mrp": 215,
+    "sku": "PHA-11",
+    "imageUrl": "https://images.openbeautyfacts.org/images/products/400/580/889/0507/front_en.19.400.jpg"
+   },
+   {
+    "name": "Himalaya Baby Lotion",
+    "variantName": "200 ml",
+    "category": "Baby Care",
+    "brand": "Himalaya",
+    "costPrice": 150,
+    "sellingPrice": 175,
+    "mrp": 189,
+    "sku": "PHA-12",
+    "imageUrl": "https://images.openbeautyfacts.org/images/products/890/113/851/1463/front_en.3.400.jpg"
+   },
+   {
+    "name": "Complan Nutrition Drink",
+    "variantName": "500 g",
+    "category": "Health Drinks",
+    "brand": "Complan",
+    "costPrice": 260,
+    "sellingPrice": 299,
+    "mrp": 320,
+    "sku": "PHA-13",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/154/200/3158/front_en.3.400.jpg"
+   },
+   {
+    "name": "Savlon Antiseptic Cream",
+    "variantName": "15 g",
+    "category": "First Aid",
+    "brand": "Savlon",
+    "costPrice": 40,
+    "sellingPrice": 48,
+    "mrp": 52,
+    "sku": "PHA-14",
+    "imageUrl": "https://images.openbeautyfacts.org/images/products/501/130/901/8110/front_en.3.400.jpg"
+   }
+  ],
+  "dairy": [
+   {
+    "name": "Amul Butter",
+    "variantName": "500 g",
+    "category": "Butter & Ghee",
+    "brand": "Amul",
+    "costPrice": 250,
+    "sellingPrice": 275,
+    "mrp": 285,
+    "sku": "DAI-01",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/201/0153/front_en.3.400.jpg"
+   },
+   {
+    "name": "Amul Taaza Toned Milk",
+    "variantName": "1 L",
+    "category": "Milk",
+    "brand": "Amul",
+    "costPrice": 58,
+    "sellingPrice": 66,
+    "mrp": 68,
+    "sku": "DAI-02",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/215/0088/front_en.19.400.jpg"
+   },
+   {
+    "name": "Amul Masti Dahi",
+    "variantName": "400 g",
+    "category": "Curd & Yogurt",
+    "brand": "Amul",
+    "costPrice": 30,
+    "sellingPrice": 35,
+    "mrp": 37,
+    "sku": "DAI-03",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/220/1124/front_en.4.400.jpg"
+   },
+   {
+    "name": "Amul Cheese Slices",
+    "variantName": "200 g",
+    "category": "Cheese & Paneer",
+    "brand": "Amul",
+    "costPrice": 125,
+    "sellingPrice": 145,
+    "mrp": 150,
+    "sku": "DAI-04",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/202/0305/front_en.3.400.jpg"
+   },
+   {
+    "name": "Amul Pure Ghee",
+    "variantName": "1 L",
+    "category": "Butter & Ghee",
+    "brand": "Amul",
+    "costPrice": 560,
+    "sellingPrice": 620,
+    "mrp": 650,
+    "sku": "DAI-05",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/203/1059/front_en.3.400.jpg"
+   },
+   {
+    "name": "Amul Kool Café",
+    "variantName": "200 ml",
+    "category": "Milk",
+    "brand": "Amul",
+    "costPrice": 22,
+    "sellingPrice": 25,
+    "mrp": 25,
+    "sku": "DAI-06",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/215/1429/front_en.7.400.jpg"
+   },
+   {
+    "name": "Amul Lassi",
+    "variantName": "250 ml",
+    "category": "Curd & Yogurt",
+    "brand": "Amul",
+    "costPrice": 18,
+    "sellingPrice": 20,
+    "mrp": 20,
+    "sku": "DAI-07",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/220/2046/front_en.3.400.jpg"
+   },
+   {
+    "name": "Britannia Milk Bread",
+    "variantName": "400 g",
+    "category": "Bread & Buns",
+    "brand": "Britannia",
+    "costPrice": 40,
+    "sellingPrice": 48,
+    "mrp": 50,
+    "sku": "DAI-08",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2c/Wei%C3%9Fbrot-1.jpg/960px-Wei%C3%9Fbrot-1.jpg"
+   },
+   {
+    "name": "Britannia Toastea Rusk",
+    "variantName": "300 g",
+    "category": "Rusk & Toast",
+    "brand": "Britannia",
+    "costPrice": 45,
+    "sellingPrice": 55,
+    "mrp": 60,
+    "sku": "DAI-09",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/106/316/5861/front_en.3.400.jpg"
+   },
+   {
+    "name": "Britannia Gobbles Cake",
+    "variantName": "110 g",
+    "category": "Cakes",
+    "brand": "Britannia",
+    "costPrice": 38,
+    "sellingPrice": 45,
+    "mrp": 50,
+    "sku": "DAI-10",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/106/336/3779/front_en.4.400.jpg"
+   },
+   {
+    "name": "Nestle Milkmaid",
+    "variantName": "380 g",
+    "category": "Condensed Milk",
+    "brand": "Nestle",
+    "costPrice": 125,
+    "sellingPrice": 145,
+    "mrp": 155,
+    "sku": "DAI-11",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/400/349/009/5101/front_en.3.400.jpg"
+   },
+   {
+    "name": "Amul Cheese Spread",
+    "variantName": "200 g",
+    "category": "Cheese & Paneer",
+    "brand": "Amul",
+    "costPrice": 95,
+    "sellingPrice": 110,
+    "mrp": 115,
+    "sku": "DAI-12",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/206/0097/front_en.3.400.jpg"
+   },
+   {
+    "name": "Mother Dairy Classic Dahi",
+    "variantName": "400 g",
+    "category": "Curd & Yogurt",
+    "brand": "Mother Dairy",
+    "costPrice": 32,
+    "sellingPrice": 38,
+    "mrp": 40,
+    "sku": "DAI-13",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/164/809/7983/front_en.12.400.jpg"
+   },
+   {
+    "name": "Amul Fresh Cream",
+    "variantName": "250 ml",
+    "category": "Butter & Ghee",
+    "brand": "Amul",
+    "costPrice": 58,
+    "sellingPrice": 67,
+    "mrp": 70,
+    "sku": "DAI-14",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/215/1863/front_en.6.400.jpg"
+   }
+  ],
+  "fruitveg": [
+   {
+    "name": "Banana (Robusta)",
+    "variantName": "1 dozen",
+    "category": "Fruits",
+    "brand": "Farm Fresh",
+    "costPrice": 45,
+    "sellingPrice": 60,
+    "mrp": 70,
+    "sku": "FNV-01",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/de/Bananavarieties.jpg"
+   },
+   {
+    "name": "Apple (Shimla)",
+    "variantName": "1 kg",
+    "category": "Fruits",
+    "brand": "Farm Fresh",
+    "costPrice": 140,
+    "sellingPrice": 180,
+    "mrp": 200,
+    "sku": "FNV-02",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a6/Pink_lady_and_cross_section.jpg/960px-Pink_lady_and_cross_section.jpg"
+   },
+   {
+    "name": "Alphonso Mango",
+    "variantName": "1 kg",
+    "category": "Fruits",
+    "brand": "Farm Fresh",
+    "costPrice": 220,
+    "sellingPrice": 280,
+    "mrp": 320,
+    "sku": "FNV-03",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/74/Mangos_-_single_and_halved.jpg/960px-Mangos_-_single_and_halved.jpg"
+   },
+   {
+    "name": "Orange (Nagpur)",
+    "variantName": "1 kg",
+    "category": "Fruits",
+    "brand": "Farm Fresh",
+    "costPrice": 70,
+    "sellingPrice": 95,
+    "mrp": 110,
+    "sku": "FNV-04",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e3/Oranges_-_whole-halved-segment.jpg/960px-Oranges_-_whole-halved-segment.jpg"
+   },
+   {
+    "name": "Pomegranate",
+    "variantName": "1 kg",
+    "category": "Fruits",
+    "brand": "Farm Fresh",
+    "costPrice": 150,
+    "sellingPrice": 190,
+    "mrp": 220,
+    "sku": "FNV-05",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/6a/Pomegranate_Juice_%282019%29.jpg/960px-Pomegranate_Juice_%282019%29.jpg"
+   },
+   {
+    "name": "Green Grapes",
+    "variantName": "500 g",
+    "category": "Fruits",
+    "brand": "Farm Fresh",
+    "costPrice": 50,
+    "sellingPrice": 70,
+    "mrp": 80,
+    "sku": "FNV-06",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/53/Grapes%2C_Rostov-on-Don%2C_Russia.jpg/960px-Grapes%2C_Rostov-on-Don%2C_Russia.jpg"
+   },
+   {
+    "name": "Guava (Amrood)",
+    "variantName": "500 g",
+    "category": "Fruits",
+    "brand": "Farm Fresh",
+    "costPrice": 30,
+    "sellingPrice": 45,
+    "mrp": 50,
+    "sku": "FNV-07",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/Guava_pink_fruit.jpg/960px-Guava_pink_fruit.jpg"
+   },
+   {
+    "name": "Tomato",
+    "variantName": "1 kg",
+    "category": "Vegetables",
+    "brand": "Farm Fresh",
+    "costPrice": 25,
+    "sellingPrice": 35,
+    "mrp": 40,
+    "sku": "FNV-08",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/89/Tomato_je.jpg/960px-Tomato_je.jpg"
+   },
+   {
+    "name": "Onion",
+    "variantName": "1 kg",
+    "category": "Vegetables",
+    "brand": "Farm Fresh",
+    "costPrice": 28,
+    "sellingPrice": 38,
+    "mrp": 45,
+    "sku": "FNV-09",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a2/Mixed_onions.jpg/960px-Mixed_onions.jpg"
+   },
+   {
+    "name": "Potato",
+    "variantName": "1 kg",
+    "category": "Vegetables",
+    "brand": "Farm Fresh",
+    "costPrice": 22,
+    "sellingPrice": 32,
+    "mrp": 38,
+    "sku": "FNV-10",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Patates.jpg/960px-Patates.jpg"
+   },
+   {
+    "name": "Cauliflower",
+    "variantName": "1 pc",
+    "category": "Vegetables",
+    "brand": "Farm Fresh",
+    "costPrice": 25,
+    "sellingPrice": 35,
+    "mrp": 40,
+    "sku": "FNV-11",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2f/Chou-fleur_02.jpg/960px-Chou-fleur_02.jpg"
+   },
+   {
+    "name": "Okra (Bhindi)",
+    "variantName": "500 g",
+    "category": "Vegetables",
+    "brand": "Farm Fresh",
+    "costPrice": 25,
+    "sellingPrice": 35,
+    "mrp": 40,
+    "sku": "FNV-12",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/95/Hong_Kong_Okra_Aug_25_2012.JPG/960px-Hong_Kong_Okra_Aug_25_2012.JPG"
+   },
+   {
+    "name": "Carrot",
+    "variantName": "500 g",
+    "category": "Vegetables",
+    "brand": "Farm Fresh",
+    "costPrice": 20,
+    "sellingPrice": 30,
+    "mrp": 35,
+    "sku": "FNV-13",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a2/Vegetable-Carrot-Bundle-wStalks.jpg/960px-Vegetable-Carrot-Bundle-wStalks.jpg"
+   },
+   {
+    "name": "Cucumber",
+    "variantName": "500 g",
+    "category": "Vegetables",
+    "brand": "Farm Fresh",
+    "costPrice": 15,
+    "sellingPrice": 22,
+    "mrp": 25,
+    "sku": "FNV-14",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/96/ARS_cucumber.jpg/960px-ARS_cucumber.jpg"
+   }
+  ]
+ },
+ "fruitVegShopPhoto": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/97/Gourock_greengrocers_ext.jpg/960px-Gourock_greengrocers_ext.jpg"
+}

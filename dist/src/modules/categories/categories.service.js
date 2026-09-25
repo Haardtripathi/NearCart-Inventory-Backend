@@ -17,6 +17,7 @@ const json_1 = require("../../utils/json");
 const translations_1 = require("../../utils/translations");
 const autoTranslate_1 = require("../../utils/autoTranslate");
 const audit_service_1 = require("../audit/audit.service");
+const marketplace_metadata_cache_1 = require("../marketplace/marketplace-metadata.cache");
 function serializeCategory(category, localeContext) {
     const localizedCategory = (0, localization_1.serializeLocalizedEntity)(category, localeContext);
     return {
@@ -229,6 +230,12 @@ async function createCategory(organizationId, actorUserId, input, localeContext)
         entityId: category.id,
         after: category,
     });
+    // The marketplace bridge serves category/brand/unit display data to the customer app from a
+    // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+    // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+    // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+    // its own.
+    await (0, marketplace_metadata_cache_1.invalidateOrgCatalogMetadata)(organizationId);
     return serializeCategory(await getCategoryRecordById(organizationId, category.id), localeContext);
 }
 async function getCategoryById(organizationId, categoryId, localeContext) {
@@ -312,6 +319,12 @@ async function updateCategory(organizationId, categoryId, actorUserId, input, lo
         before: existing,
         after: updated,
     });
+    // The marketplace bridge serves category/brand/unit display data to the customer app from a
+    // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+    // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+    // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+    // its own.
+    await (0, marketplace_metadata_cache_1.invalidateOrgCatalogMetadata)(organizationId);
     return serializeCategory(updated, localeContext);
 }
 async function deleteCategory(organizationId, categoryId, actorUserId) {
@@ -355,5 +368,11 @@ async function deleteCategory(organizationId, categoryId, actorUserId) {
         before: category,
         after: deleted,
     });
+    // The marketplace bridge serves category/brand/unit display data to the customer app from a
+    // short-TTL cached per-organization snapshot (marketplace/marketplace-metadata.cache.ts). Drop it
+    // here so an edit shows up on the storefront immediately rather than after the TTL. Never throws
+    // and never blocks this mutation's result — a failed invalidation just means the entry expires on
+    // its own.
+    await (0, marketplace_metadata_cache_1.invalidateOrgCatalogMetadata)(organizationId);
     return deleted;
 }

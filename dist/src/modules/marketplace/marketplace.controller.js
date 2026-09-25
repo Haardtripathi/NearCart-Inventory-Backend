@@ -10,6 +10,8 @@ exports.createBridgedSalesOrderController = createBridgedSalesOrderController;
 exports.getSalesOrderByExternalIdController = getSalesOrderByExternalIdController;
 exports.cancelBridgedSalesOrderController = cancelBridgedSalesOrderController;
 exports.getBranchActiveOrderCountController = getBranchActiveOrderCountController;
+exports.sendShopOpenReminderController = sendShopOpenReminderController;
+exports.respondToPartialFulfilmentController = respondToPartialFulfilmentController;
 const ApiResponse_1 = require("../../utils/ApiResponse");
 const localization_1 = require("../../utils/localization");
 const marketplace_service_1 = require("./marketplace.service");
@@ -66,4 +68,16 @@ async function cancelBridgedSalesOrderController(req, res) {
 async function getBranchActiveOrderCountController(req, res) {
     const data = await (0, marketplace_service_1.getBranchActiveOrderCount)(req.params.organizationId, req.params.branchId);
     return (0, ApiResponse_1.sendSuccess)(res, 200, "Branch active order count fetched successfully", data);
+}
+async function sendShopOpenReminderController(req, res) {
+    const data = await (0, marketplace_service_1.sendShopOpenReminder)(req.params.organizationId);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, "Shop-open reminder sent", data);
+}
+async function respondToPartialFulfilmentController(req, res) {
+    const data = await (0, marketplace_service_1.respondToPartialFulfilment)(req.params.organizationId, req.params.externalOrderId, req.body);
+    return (0, ApiResponse_1.sendSuccess)(res, 200, data.applied
+        ? req.body.accepted
+            ? "Revised order accepted and confirmed"
+            : "Revised order declined and the order was cancelled"
+        : "This revised order has already been answered", data);
 }

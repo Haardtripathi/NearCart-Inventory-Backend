@@ -14,6 +14,8 @@ const ApiError_1 = require("../../utils/ApiError");
 const validation_1 = require("../../utils/validation");
 const driver_orders_controller_1 = require("./driver-orders.controller");
 const driver_orders_validation_1 = require("./driver-orders.validation");
+const driver_shop_controller_1 = require("../drivers/driver-shop.controller");
+const drivers_validation_1 = require("../drivers/drivers.validation");
 exports.driverOrdersRouter = (0, express_1.Router)();
 exports.driverOrdersRouter.use(driverAuth_middleware_1.authenticateDriver);
 // Same memoryStorage + image-only multer pattern as driver-verification.route.ts's photoUpload —
@@ -52,6 +54,10 @@ exports.driverOrdersRouter.post("/orders/:id/pickup", (0, asyncHandler_1.asyncHa
 exports.driverOrdersRouter.post("/orders/:id/decline", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.declineDriverOrderController));
 exports.driverOrdersRouter.post("/orders/:id/deliver", handleOptionalDeliveryProofUpload, (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.deliverDriverOrderController));
 exports.driverOrdersRouter.get("/earnings/summary", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.getDriverEarningsSummaryController));
+// Shop-owned drivers (2026-09-24): the shop this driver works for, if any.
+exports.driverOrdersRouter.get("/shop", (0, asyncHandler_1.asyncHandler)(driver_shop_controller_1.getDriverShopController));
+exports.driverOrdersRouter.post("/shop/join", (0, validate_middleware_1.validateRequest)({ body: drivers_validation_1.joinDriverShopSchema }), (0, asyncHandler_1.asyncHandler)(driver_shop_controller_1.joinDriverShopController));
+exports.driverOrdersRouter.post("/shop/leave", (0, asyncHandler_1.asyncHandler)(driver_shop_controller_1.leaveDriverShopController));
 exports.driverOrdersRouter.get("/performance/summary", (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.getDriverPerformanceSummaryController));
 exports.driverOrdersRouter.patch("/availability", (0, validate_middleware_1.validateRequest)({ body: driver_orders_validation_1.updateDriverAvailabilitySchema }), (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.updateDriverAvailabilityController));
 exports.driverOrdersRouter.patch("/location", (0, validate_middleware_1.validateRequest)({ body: driver_orders_validation_1.updateDriverLocationSchema }), (0, asyncHandler_1.asyncHandler)(driver_orders_controller_1.updateDriverLocationController));

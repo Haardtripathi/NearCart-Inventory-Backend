@@ -16,8 +16,16 @@ exports.salesOrdersRouter.post("/", (0, auth_middleware_1.requireRoles)(...roles
 exports.salesOrdersRouter.get("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.getSalesOrderController));
 exports.salesOrdersRouter.patch("/:id", (0, auth_middleware_1.requireRoles)(...roles_1.READ_WRITE_STAFF_ROLES), (0, validate_middleware_1.validateRequest)({ body: sales_orders_validation_1.updateSalesOrderSchema }), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.updateSalesOrderController));
 exports.salesOrdersRouter.post("/:id/confirm", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.confirmSalesOrderController));
+// Shop-side partial fulfilment: "I can only supply 3 of the 5 things they ordered". Same
+// MANAGER_ROLES gate and same branch-access check as confirm/reject, because it is the third
+// option in that same decision — and deliberately only available BEFORE confirming. Writes
+// nothing but the proposal itself: no stock moves and no item row changes until the customer
+// accepts (see sales-orders.service.ts).
+exports.salesOrdersRouter.post("/:id/propose-partial", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: sales_orders_validation_1.proposePartialFulfilmentSchema }), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.proposePartialFulfilmentController));
 exports.salesOrdersRouter.post("/:id/reject", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: sales_orders_validation_1.rejectSalesOrderSchema }), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.rejectSalesOrderController));
 exports.salesOrdersRouter.post("/:id/cancel", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.cancelSalesOrderController));
 exports.salesOrdersRouter.post("/:id/deliver", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.deliverSalesOrderController));
-exports.salesOrdersRouter.patch("/:id/mark-ready", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.markSalesOrderReadyController));
+exports.salesOrdersRouter.patch("/:id/mark-ready", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: sales_orders_validation_1.markReadySchema }), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.markSalesOrderReadyController));
+// Re-pick a driver for a packed order that has none (own driver declined, or switch to NearCart).
+exports.salesOrdersRouter.post("/:id/dispatch", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: sales_orders_validation_1.dispatchSalesOrderSchema }), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.dispatchSalesOrderController));
 exports.salesOrdersRouter.post("/:id/assign-driver", (0, auth_middleware_1.requireRoles)(...roles_1.MANAGER_ROLES), (0, validate_middleware_1.validateRequest)({ body: sales_orders_validation_1.assignDriverSchema }), (0, asyncHandler_1.asyncHandler)(sales_orders_controller_1.assignDriverToSalesOrderController));

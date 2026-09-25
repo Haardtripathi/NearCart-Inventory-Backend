@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.organizationBranchParamSchema = exports.organizationExternalOrderIdParamSchema = exports.externalOrderIdParamSchema = exports.createBridgedSalesOrderSchema = exports.marketplaceAvailabilitySchema = exports.marketplaceScopedQuerySchema = exports.marketplaceCatalogQuerySchema = exports.marketplaceOrganizationsQuerySchema = void 0;
+exports.partialFulfilmentResponseSchema = exports.organizationParamSchema = exports.organizationBranchParamSchema = exports.organizationExternalOrderIdParamSchema = exports.externalOrderIdParamSchema = exports.createBridgedSalesOrderSchema = exports.marketplaceAvailabilitySchema = exports.marketplaceScopedQuerySchema = exports.marketplaceCatalogQuerySchema = exports.marketplaceOrganizationsQuerySchema = void 0;
 const zod_1 = require("zod");
 const validation_1 = require("../../utils/validation");
 exports.marketplaceOrganizationsQuerySchema = zod_1.z.object({
@@ -58,6 +58,28 @@ const bridgedSalesOrderItemSchema = zod_1.z.object({
     quantity: validation_1.decimalInputSchema,
     unitPrice: validation_1.decimalInputSchema,
 });
+// Money facts NearCart charged the customer (delivery fee, discount, payment method/status, what
+// the customer actually owes). Persisted verbatim under `SalesOrder.deliveryAddress.payment` — see
+// utils/orderPayment.ts for why it rides in that Json column and how `amountToCollect` is derived
+// from it. Every field is optional so an older NearCart deployment that doesn't send (all of) it
+// keeps working; values that ARE sent are strictly typed (closed enums, finite non-negative
+// numbers — deliberately NOT z.coerce, which would turn a literal `null` into 0 rupees) so a
+// malformed money block fails the push loudly (NearCart marks the sync FAILED and retries) rather
+// than being stored as garbage a driver then collects against. Unknown keys are stripped, not
+// rejected, so a future NearCart adding a field can't start failing every order push.
+const moneyAmountSchema = zod_1.z.number().finite().nonnegative();
+const bridgedSalesOrderPaymentSchema = zod_1.z.object({
+    method: zod_1.z.enum(["COD", "ONLINE", "PAY_ON_PICKUP"]).optional(),
+    status: zod_1.z.enum(["PENDING", "PAID", "FAILED", "REFUNDED"]).optional(),
+    itemTotal: moneyAmountSchema.optional(),
+    deliveryFee: moneyAmountSchema.optional(),
+    weatherSurchargeFee: moneyAmountSchema.optional(),
+    discountTotal: moneyAmountSchema.optional(),
+    loyaltyDiscount: moneyAmountSchema.optional(),
+    couponCode: zod_1.z.string().trim().min(1).max(64).optional(),
+    amountPayable: moneyAmountSchema.optional(),
+    currency: zod_1.z.string().trim().min(1).max(8).optional(),
+});
 exports.createBridgedSalesOrderSchema = zod_1.z.object({
     branchId: validation_1.trimmedString,
     externalOrderId: validation_1.trimmedString,
@@ -67,6 +89,7 @@ exports.createBridgedSalesOrderSchema = zod_1.z.object({
     // Nullable: NearCart's Order.notes column is `String?` — a caller forwarding it verbatim would
     // send a literal `null` when no notes were given, which optionalTrimmedString would reject.
     notes: validation_1.nullableTrimmedString,
+    payment: bridgedSalesOrderPaymentSchema.nullable().optional(),
 });
 exports.externalOrderIdParamSchema = zod_1.z.object({
     externalOrderId: validation_1.trimmedString,
@@ -78,4 +101,25 @@ exports.organizationExternalOrderIdParamSchema = zod_1.z.object({
 exports.organizationBranchParamSchema = zod_1.z.object({
     organizationId: validation_1.trimmedString,
     branchId: validation_1.trimmedString,
+});
+exports.organizationParamSchema = zod_1.z.object({
+    organizationId: validation_1.trimmedString,
+});
+/**
+ * The customer's answer to a shop's partial-fulfilment proposal. `accepted` is the whole
+ * contract; `revisedPayment` is an optional correction from NearCart for the cases where its own
+ * coupon/loyalty rules change the bill beyond the pure item-total reduction this backend can
+ * compute on its own (most importantly: a coupon whose minimum spend no longer holds has to be
+ * dropped, which pushes the amount payable back UP). Without it we fall back to the proposal's
+ * own `proposedAmountPayable`, so an older NearCart keeps working.
+ */
+const revisedPaymentSchema = zod_1.z.object({
+    discountTotal: moneyAmountSchema.optional(),
+    loyaltyDiscount: moneyAmountSchema.optional(),
+    couponCode: zod_1.z.string().trim().min(1).max(64).nullable().optional(),
+    amountPayable: moneyAmountSchema.optional(),
+});
+exports.partialFulfilmentResponseSchema = zod_1.z.object({
+    accepted: zod_1.z.boolean(),
+    revisedPayment: revisedPaymentSchema.nullable().optional(),
 });

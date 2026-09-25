@@ -12,6 +12,7 @@ import {
   deliverSalesOrder,
   getSalesOrderById,
   listSalesOrders,
+  dispatchSalesOrder,
   markSalesOrderReady,
   proposePartialFulfilment,
   rejectSalesOrder,
@@ -108,8 +109,20 @@ export async function deliverSalesOrderController(req: Request, res: Response) {
 
 export async function markSalesOrderReadyController(req: Request, res: Response) {
   await assertCanAccessOrder(req, req.auth!.activeOrganizationId!, req.params.id!);
-  const data = await markSalesOrderReady(req.auth!.activeOrganizationId!, req.params.id!, req.auth!.userId);
+  const data = await markSalesOrderReady(req.auth!.activeOrganizationId!, req.params.id!, req.auth!.userId, {
+    mode: req.body?.dispatchMode,
+    driverId: req.body?.driverId,
+  });
   return sendSuccess(res, 200, "Sales order marked ready successfully", withOrderView(data));
+}
+
+export async function dispatchSalesOrderController(req: Request, res: Response) {
+  await assertCanAccessOrder(req, req.auth!.activeOrganizationId!, req.params.id!);
+  const data = await dispatchSalesOrder(req.auth!.activeOrganizationId!, req.params.id!, req.auth!.userId, {
+    mode: req.body.dispatchMode,
+    driverId: req.body.driverId,
+  });
+  return sendSuccess(res, 200, "Driver dispatch updated", withOrderView(data));
 }
 
 export async function assignDriverToSalesOrderController(req: Request, res: Response) {

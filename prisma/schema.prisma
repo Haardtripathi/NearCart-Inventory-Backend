@@ -167,6 +167,11 @@ enum AuditAction {
   // was previously no API-level way for a driver to decline an assignment at all, only a
   // manager manually re-calling assign-driver with someone else.
   ORDER_DRIVER_DECLINE
+  // Shop-owned drivers (2026-09-24): a manager issues a one-time branch code, a driver redeems it
+  // (at signup or later) to become that branch's own driver, and either side can end the link.
+  DRIVER_SHOP_CODE_CREATE
+  DRIVER_SHOP_JOIN
+  DRIVER_SHOP_LEAVE
   // Shop-photo verification (POST /branches/:id/verification/photo) and driver
   // vehicle/license verification (POST /driver/verification/*) — see ShopVerificationStatus /
   // DriverVerificationStatus below for the persisted result these audit entries summarize.
@@ -222,6 +227,15 @@ enum DriverStatus {
   PENDING_VERIFICATION
   VERIFIED
   SUSPENDED
+}
+
+// How a READY order gets its driver (2026-09-24). NEARCART: nearest free driver, general pool or
+// the branch's own drivers alike. OWN_DRIVER: a manager picks one of the branch's own drivers and
+// nothing is ever auto-assigned — declines/timeouts go back to the manager. Null on orders from
+// before this existed, treated as NEARCART.
+enum DriverDispatchMode {
+  NEARCART
+  OWN_DRIVER
 }
 
 enum UserActionTokenPurpose {
@@ -351,6 +365,7 @@ model Organization {
   auditLogs        AuditLog[]
   userActionTokens UserActionToken[]
   notificationLogs NotificationLog[]
+  driverShopCodes  DriverShopCode[]
 
   @@index([deletedAt])
 }
@@ -479,6 +494,8 @@ model Branch {
   salesOrders                  SalesOrder[]
   transfersFrom                StockTransfer[]        @relation("TransferFromBranch")
   transfersTo                  StockTransfer[]        @relation("TransferToBranch")
+  shopDrivers                  Driver[]               @relation("BranchShopDrivers")
+  driverShopCodes              DriverShopCode[]
 
   @@unique([organizationId, code])
   @@index([organizationId, deletedAt])
@@ -1113,18 +1130,18 @@ model PurchaseReceiptItem {
 }
 
 model SalesOrder {
-  id                     String           @id @default(cuid())
+  id                     String              @id @default(cuid())
   organizationId         String
   branchId               String
   customerId             String?
   orderNumber            String
   source                 OrderSource
-  status                 SalesOrderStatus @default(PENDING)
-  paymentStatus          PaymentStatus    @default(UNPAID)
-  subtotal               Decimal          @default(0)
-  taxTotal               Decimal          @default(0)
-  discountTotal          Decimal          @default(0)
-  total                  Decimal          @default(0)
+  status                 SalesOrderStatus    @default(PENDING)
+  paymentStatus          PaymentStatus       @default(UNPAID)
+  subtotal               Decimal             @default(0)
+  taxTotal               Decimal             @default(0)
+  discountTotal          Decimal             @default(0)
+  total                  Decimal             @default(0)
   notes                  String?
   rejectionReason        String?
   // Set at creation (createdAt + ORDER_CONFIRMATION_TIMEOUT_MINUTES). The order-confirmation
@@ -1141,7 +1158,7 @@ model SalesOrder {
   // Bridge fields: set when this order originated from NearCart's customer-facing app via the
   // marketplace bridge (see modules/marketplace). externalOrderId is NearCart's Order.id and is
   // unique so a replayed push is idempotent (see marketplace.service.ts createBridgedSalesOrder).
-  externalOrderId        String?          @unique
+  externalOrderId        String?             @unique
   externalOrderNumber    String?
   createdById            String?
   confirmedById          String?
@@ -1184,17 +1201,19 @@ model SalesOrder {
   // order's lifecycle only — never copied/reset onto a different order (a cancelled-then-recreated
   // order is a brand new SalesOrder row and starts with declinedByDriverIds: null).
   declinedByDriverIds    Json?
-  createdAt              DateTime         @default(now())
-  updatedAt              DateTime         @updatedAt
-  organization           Organization     @relation(fields: [organizationId], references: [id])
-  branch                 Branch           @relation(fields: [branchId], references: [id])
-  customer               Customer?        @relation(fields: [customerId], references: [id])
-  createdBy              User?            @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
-  confirmedBy            User?            @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id])
-  deliveredBy            User?            @relation("SalesOrderDeliveredBy", fields: [deliveredById], references: [id])
-  readyBy                User?            @relation("SalesOrderReadyBy", fields: [readyById], references: [id])
-  assignedBy             User?            @relation("SalesOrderAssignedBy", fields: [assignedById], references: [id])
-  assignedDriver         Driver?          @relation("SalesOrderAssignedDriver", fields: [assignedDriverId], references: [id])
+  // Chosen when the order is marked ready — see DriverDispatchMode.
+  driverDispatchMode     DriverDispatchMode?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  organization           Organization        @relation(fields: [organizationId], references: [id])
+  branch                 Branch              @relation(fields: [branchId], references: [id])
+  customer               Customer?           @relation(fields: [customerId], references: [id])
+  createdBy              User?               @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
+  confirmedBy            User?               @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id])
+  deliveredBy            User?               @relation("SalesOrderDeliveredBy", fields: [deliveredById], references: [id])
+  readyBy                User?               @relation("SalesOrderReadyBy", fields: [readyById], references: [id])
+  assignedBy             User?               @relation("SalesOrderAssignedBy", fields: [assignedById], references: [id])
+  assignedDriver         Driver?             @relation("SalesOrderAssignedDriver", fields: [assignedDriverId], references: [id])
   items                  SalesOrderItem[]
 
   @@unique([organizationId, orderNumber])
@@ -1273,6 +1292,12 @@ model Driver {
   onboardingVerificationStatus DriverVerificationStatus @default(NOT_SUBMITTED)
   createdAt                    DateTime                 @default(now())
   updatedAt                    DateTime                 @updatedAt
+  // Shop-owned driver (2026-09-24): set when the driver redeems a branch's store code
+  // (DriverShopCode). A shop driver only ever gets that branch's orders; null = general NearCart
+  // driver. Cleared when the manager removes them or they leave — they become general again.
+  shopBranchId                 String?
+  shopJoinedAt                 DateTime?
+  shopBranch                   Branch?                  @relation("BranchShopDrivers", fields: [shopBranchId], references: [id], onDelete: SetNull)
   assignedOrders               SalesOrder[]             @relation("SalesOrderAssignedDriver")
   refreshTokens                DriverRefreshToken[]
 
@@ -1282,6 +1307,26 @@ model Driver {
   // status + availability + location freshness together; neither single-column index above can
   // narrow more than one of those.
   @@index([status, isAvailableForAssignment, lastLocationAt])
+  @@index([shopBranchId])
+}
+
+// One-time code a manager generates so a driver can join a branch as its own driver. 6 chars from
+// an unambiguous alphabet, valid for 3 minutes, redeemable by exactly one driver (usedAt set on
+// redemption, atomically — see drivers.service.ts redeemDriverShopCode).
+model DriverShopCode {
+  id             String       @id @default(cuid())
+  code           String       @unique
+  organizationId String
+  branchId       String
+  createdById    String?
+  expiresAt      DateTime
+  usedAt         DateTime?
+  usedByDriverId String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  branch         Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId])
 }
 
 // Mirrors NearCart/backend's RefreshToken model/rotation design (rotate-on-use, hashed storage,

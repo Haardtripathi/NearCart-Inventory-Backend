@@ -141,6 +141,9 @@ async function updateIndustry(industryId, input, localeContext) {
 }
 function serializeDriver(driver) {
     return {
+        shop: driver.shopBranch
+            ? { branchName: driver.shopBranch.name, shopName: driver.shopBranch.organization.name }
+            : null,
         id: driver.id,
         fullName: driver.fullName,
         phone: driver.phone,
@@ -150,6 +153,18 @@ function serializeDriver(driver) {
         status: driver.status,
         createdAt: driver.createdAt,
         updatedAt: driver.updatedAt,
+        vehiclePhotoUrl: driver.vehiclePhotoUrl,
+        vehiclePlateNumber: driver.vehiclePlateNumber,
+        vehiclePlateVerified: driver.vehiclePlateVerified,
+        vehiclePhotoClarityOk: driver.vehiclePhotoClarityOk,
+        licensePhotoUrl: driver.licensePhotoUrl,
+        licenseNumber: driver.licenseNumber,
+        licenseHolderName: driver.licenseHolderName,
+        licenseDob: driver.licenseDob,
+        licenseExpiry: driver.licenseExpiry,
+        licenseVerified: driver.licenseVerified,
+        licenseMatchScore: driver.licenseMatchScore,
+        onboardingVerificationStatus: driver.onboardingVerificationStatus,
     };
 }
 async function listPlatformDrivers(query) {
@@ -161,6 +176,7 @@ async function listPlatformDrivers(query) {
             orderBy: { createdAt: "desc" },
             skip,
             take: limit,
+            include: { shopBranch: { select: { name: true, organization: { select: { name: true } } } } },
         }),
         prisma_1.prisma.driver.count({ where }),
     ]);

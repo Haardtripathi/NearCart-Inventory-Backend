@@ -196,8 +196,16 @@ async function updatePurchase(organizationId, purchaseId, actorUserId, input) {
     }
     const prepared = input.items ? await preparePurchaseItems(organizationId, input.items) : null;
     await prisma_1.prisma.$transaction(async (tx) => {
-        await tx.purchaseReceipt.update({
-            where: { id: purchaseId },
+        // Bug fix: this used to be a plain `tx.purchaseReceipt.update({where: {id: purchaseId}})` with
+        // no status predicate — a concurrent `postPurchase` that had already moved the receipt out of
+        // DRAFT between the check above and this write would be silently overridden, rewriting
+        // items/totals on a receipt that's already POSTED (with stock already credited for the OLD
+        // quantities). Guarded the same way `postPurchase` already guards its own DRAFT -> POSTED
+        // transition: atomic `updateMany` re-checking status at write time, conflict if it no longer
+        // matches. `postPurchase` additionally re-reads items fresh inside its own transaction after
+        // its claim (see below), so this and that fix close both directions of the same race.
+        const { count } = await tx.purchaseReceipt.updateMany({
+            where: { id: purchaseId, organizationId, status: client_1.PurchaseReceiptStatus.DRAFT },
             data: {
                 ...(input.branchId ? { branchId: input.branchId } : {}),
                 ...(input.supplierId !== undefined ? { supplierId: input.supplierId || null } : {}),
@@ -215,6 +223,9 @@ async function updatePurchase(organizationId, purchaseId, actorUserId, input) {
                     : {}),
             },
         });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Purchase receipt is no longer draft — it may have changed status concurrently and can no longer be edited");
+        }
         if (prepared) {
             await tx.purchaseReceiptItem.deleteMany({
                 where: {
@@ -272,22 +283,15 @@ async function postPurchase(organizationId, purchaseId, actorUserId) {
         if (count === 0) {
             throw ApiError_1.ApiError.conflict("Purchase receipt is no longer draft — it may have already been posted");
         }
-        for (const item of purchase.items) {
-            await (0, inventory_service_1.applyStockMovement)(tx, {
-                organizationId,
-                branchId: purchase.branchId,
-                variantId: item.variantId,
-                movementType: client_1.StockMovementType.PURCHASE,
-                referenceType: client_1.ReferenceType.PURCHASE_RECEIPT,
-                referenceId: purchase.id,
-                quantityDelta: item.quantity,
-                unitCost: item.unitCost,
-                note: purchase.notes ?? undefined,
-                batchNumber: item.batchNumber ?? undefined,
-                expiryDate: item.expiryDate ?? undefined,
-                createdById: actorUserId,
-            });
-        }
+        // Bug fix: re-read the receipt's CURRENT items/branch inside the transaction, right after the
+        // atomic claim above, instead of using `purchase` (read before this transaction started). If a
+        // concurrent PATCH /purchases/:id edited quantities/cost/branch between that outer read and
+        // this claim succeeding, `purchase.items`/`purchase.branchId` would be stale — crediting
+        // incoming stock for quantities that no longer match what PurchaseReceiptItem actually holds.
+        // See sales-orders.service.ts's confirmSalesOrder for the fuller rationale behind this same
+        // pattern; updatePurchase's own atomic CAS guard closes the other half of this race (an edit
+        // landing after this claim now correctly fails instead of overwriting an already-POSTED
+        // receipt's items post-hoc).
         const updated = await tx.purchaseReceipt.findUniqueOrThrow({
             where: { id: purchaseId },
             include: {
@@ -296,6 +300,22 @@ async function postPurchase(organizationId, purchaseId, actorUserId) {
                 items: true,
             },
         });
+        for (const item of updated.items) {
+            await (0, inventory_service_1.applyStockMovement)(tx, {
+                organizationId,
+                branchId: updated.branchId,
+                variantId: item.variantId,
+                movementType: client_1.StockMovementType.PURCHASE,
+                referenceType: client_1.ReferenceType.PURCHASE_RECEIPT,
+                referenceId: updated.id,
+                quantityDelta: item.quantity,
+                unitCost: item.unitCost,
+                note: updated.notes ?? undefined,
+                batchNumber: item.batchNumber ?? undefined,
+                expiryDate: item.expiryDate ?? undefined,
+                createdById: actorUserId,
+            });
+        }
         await (0, audit_service_1.createAuditLog)(tx, {
             organizationId,
             actorUserId,

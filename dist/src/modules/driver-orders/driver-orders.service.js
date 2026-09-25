@@ -11,6 +11,8 @@ exports.registerDriverDeviceTokenForDriver = registerDriverDeviceTokenForDriver;
 exports.listDriverOrderHistory = listDriverOrderHistory;
 exports.getDriverEarningsSummary = getDriverEarningsSummary;
 exports.getDriverPerformanceSummary = getDriverPerformanceSummary;
+exports.sweepStaleDriverAssignments = sweepStaleDriverAssignments;
+exports.sendNearTimeoutReminders = sendNearTimeoutReminders;
 const client_1 = require("@prisma/client");
 const env_1 = require("../../config/env");
 const prisma_1 = require("../../config/prisma");
@@ -21,6 +23,7 @@ const push_notification_service_1 = require("../../services/push-notification.se
 const device_tokens_service_1 = require("../../services/device-tokens.service");
 const uploads_service_1 = require("../uploads/uploads.service");
 const notifications_service_1 = require("../notifications/notifications.service");
+const orderPayment_1 = require("../../utils/orderPayment");
 const sales_orders_service_1 = require("../sales-orders/sales-orders.service");
 const DRIVER_VISIBLE_STATUSES = [client_1.SalesOrderStatus.READY, client_1.SalesOrderStatus.OUT_FOR_DELIVERY];
 function serializeDriverOrder(order) {
@@ -30,6 +33,16 @@ function serializeDriverOrder(order) {
         status: order.status,
         notes: order.notes,
         total: order.total,
+        // Lets the driver clients tell cash-to-collect (UNPAID/PARTIAL) from prepaid (PAID) — was
+        // omitted, so neither app could show a "Collect ₹X cash" prompt at the customer's door.
+        paymentStatus: order.paymentStatus,
+        // `total` above is GOODS value only. `amountToCollect` is what the driver must actually take
+        // from the customer at the door — for a NearCart order that's the customer's full payable
+        // amount incl. delivery fee minus discounts (COD), or 0 when prepaid online / paid at the
+        // shop. `payment` (nullable: walk-in/phone orders and older pushes have none) carries the
+        // method + breakdown behind it. Driver clients must show `amountToCollect`, never `total`.
+        // See utils/orderPayment.ts for the exact rules.
+        ...(0, orderPayment_1.buildOrderPaymentView)(order),
         // Distance-based driver fare for this specific delivery, computed at mark-ready time (see
         // computeDriverFare/markSalesOrderReady in sales-orders.service.ts). Both null for orders that
         // predate the feature or whose branch/deliveryAddress coordinates were missing — client apps
@@ -359,6 +372,11 @@ async function declineDriverOrder(driverId, orderId) {
                 assignedDriverId: null,
                 assignedById: null,
                 assignedAt: null,
+                // The arrival belonged to the driver being removed. Left set, the shop's timeline kept
+                // showing "Driver at your shop" with no driver assigned, and the NEXT driver's own
+                // arrival was swallowed by markArrivedForPickup's already-arrived no-op (found on-device
+                // 2026-09-20).
+                arrivedForPickupAt: null,
                 declinedByDriverIds,
             },
         });
@@ -380,6 +398,19 @@ async function declineDriverOrder(driverId, orderId) {
         });
         return result;
     });
+    // The shop chose its own driver for this order: never auto-reassign — the shop picks again.
+    if (updated.driverDispatchMode === client_1.DriverDispatchMode.OWN_DRIVER) {
+        if (updated.externalOrderId) {
+            void (0, order_event_webhook_service_1.notifyOrderEvent)({
+                externalOrderId: updated.externalOrderId,
+                status: updated.status,
+                eventType: "DRIVER_UNASSIGNED",
+            });
+        }
+        const decliner = await prisma_1.prisma.driver.findUnique({ where: { id: driverId }, select: { fullName: true } });
+        void (0, sales_orders_service_1.notifyStaffOwnDriverNeeded)(updated.organizationId, updated, "DECLINED", decliner?.fullName);
+        return serializeDriverOrder(updated);
+    }
     try {
         const nearestDriver = await (0, sales_orders_service_1.findNearestFreeDriver)(updated.branchId, (0, sales_orders_service_1.parseDeclinedDriverIds)(updated.declinedByDriverIds));
         if (nearestDriver) {
@@ -750,4 +781,246 @@ async function getDriverPerformanceSummary(driverId, range) {
         currentStreakDays,
         bestStreakDays,
     };
+}
+/**
+ * Periodic watchdog for a non-responsive driver — previously a confirmed, unaddressed gap: once
+ * `assignDriverToSalesOrder` sets a READY order's `assignedDriverId`, the ONLY thing that can move
+ * it off that driver pre-pickup is the driver's own explicit decline (`declineDriverOrder` above).
+ * If a driver never engages at all after being assigned — app killed, push never arrived/was
+ * silently swallowed, phone off, no signal — nothing, client or server, ever reassigned the order;
+ * it could sit assigned to that one non-responsive driver forever with no fallback.
+ *
+ * This sweep finds every READY order whose `assignedAt` is older than
+ * `env.DRIVER_ASSIGNMENT_STALE_MINUTES` and treats it exactly like a driver-initiated decline:
+ * unassigns the stale driver (recording them in `declinedByDriverIds` so they aren't immediately
+ * re-matched to the same order they just timed out on), then best-effort tries the same
+ * nearest-free-driver re-match `declineDriverOrder` uses. If a replacement is found, the order is
+ * reassigned and NearCart is notified of the new driver via `assignDriverToSalesOrder`'s own
+ * DRIVER_ASSIGNED webhook (unchanged). If not, the order is left unassigned-but-READY, NearCart is
+ * told via a DRIVER_UNASSIGNED event (so a stale driver's name/phone don't linger on the customer's
+ * order), and org staff get the same "needs manual attention" alert `markSalesOrderReady`'s
+ * auto-assign-failure path and `declineDriverOrder`'s own no-replacement fallback already use
+ * (`notifyStaffOfAutoAssignFailure`) — so a stuck order is escalated to a human either way, not
+ * left silent.
+ *
+ * Reuses the existing `ORDER_DRIVER_DECLINE` audit action (with `meta.reason: "WATCHDOG_TIMEOUT"`
+ * to distinguish it from a real driver decline) rather than adding a new `AuditAction` enum member
+ * — Prisma migrate/db push are known broken against this project's libsql:// connection, and this
+ * project's SQLite/Turso schema has no dedicated migration path available for a quick enum add, so
+ * reusing the closest existing, semantically-accurate value avoids a schema change entirely for
+ * what is functionally the same action (unassign-and-attempt-rematch), just triggered by a timeout
+ * instead of an explicit driver tap.
+ *
+ * Exported as a plain function (mirroring NearCart-Inventory's own order-confirmation-sweep
+ * pattern) so it can be invoked directly outside the schedule (manual runs, tests) as well as from
+ * the registered cron in jobs/driver-assignment-watchdog.ts.
+ */
+// Per-tick caps for the two watchdog sweeps below. Both are indexed lookups (SalesOrder
+// [status, assignedAt]) so finding the rows stays cheap at any table size, but each row then costs
+// a transaction and an outbound push. Unbounded, a backlog — the process was down, a deploy paused
+// the cron — would make one tick run for minutes and the next tick start on top of it. The caps
+// turn that into steady drainage per two-minute tick, well above any real assignment rate.
+const STALE_ASSIGNMENT_SWEEP_BATCH_SIZE = 100;
+const NEAR_TIMEOUT_REMINDER_BATCH_SIZE = 200;
+async function sweepStaleDriverAssignments() {
+    let reassigned = 0;
+    let unassigned = 0;
+    let failed = 0;
+    const staleThreshold = new Date(Date.now() - env_1.env.DRIVER_ASSIGNMENT_STALE_MINUTES * 60_000);
+    let staleOrders;
+    try {
+        // A DB error here must never crash the process — this job runs unattended on a schedule,
+        // forever (same reasoning as NearCart-Inventory's order-confirmation-sweep).
+        staleOrders = await prisma_1.prisma.salesOrder.findMany({
+            where: {
+                status: client_1.SalesOrderStatus.READY,
+                assignedDriverId: { not: null },
+                assignedAt: { lt: staleThreshold },
+                // A driver who has swiped "arrived at the shop" is demonstrably on the job — typically
+                // waiting at the counter while the shop packs. Timing them out here (seen on-device
+                // 2026-09-20: the delivery vanished from the driver's screen mid-pickup) punishes the
+                // driver for the shop's delay. Only a no-show (never arrived) assignment is stale.
+                arrivedForPickupAt: null,
+            },
+            select: {
+                id: true,
+                organizationId: true,
+                branchId: true,
+                orderNumber: true,
+                assignedDriverId: true,
+                declinedByDriverIds: true,
+                externalOrderId: true,
+            },
+            // Longest-stale first: those are the customers who have been waiting on a no-show driver
+            // the longest, so they are the ones to rematch first if a backlog ever forms.
+            orderBy: { assignedAt: "asc" },
+            take: STALE_ASSIGNMENT_SWEEP_BATCH_SIZE,
+        });
+    }
+    catch (error) {
+        console.warn("[driver-assignment-watchdog] Failed to query stale assignments — skipping this tick", error);
+        return { reassigned: 0, unassigned: 0, failed: 0 };
+    }
+    for (const order of staleOrders) {
+        const staleDriverId = order.assignedDriverId;
+        if (!staleDriverId) {
+            // Can't happen given the WHERE clause above — defensive only.
+            continue;
+        }
+        try {
+            const declinedByDriverIds = Array.from(new Set([...(0, sales_orders_service_1.parseDeclinedDriverIds)(order.declinedByDriverIds), staleDriverId]));
+            const updated = await prisma_1.prisma.$transaction(async (tx) => {
+                // Same atomic guard shape as declineDriverOrder above: only unassign if this exact
+                // driver is still the one assigned and the order is still READY — a genuine pickup or a
+                // real decline racing this same tick must win over the watchdog, not get clobbered by it.
+                const { count } = await tx.salesOrder.updateMany({
+                    where: { id: order.id, assignedDriverId: staleDriverId, status: client_1.SalesOrderStatus.READY },
+                    data: {
+                        assignedDriverId: null,
+                        assignedById: null,
+                        assignedAt: null,
+                        // See declineDriverOrder — a timed-out driver's arrival must not outlive them.
+                        arrivedForPickupAt: null,
+                        declinedByDriverIds,
+                    },
+                });
+                if (count === 0) {
+                    return null;
+                }
+                const result = await tx.salesOrder.findUniqueOrThrow({
+                    where: { id: order.id },
+                    include: { items: true, branch: true, customer: true, organization: true },
+                });
+                await (0, audit_service_1.createAuditLog)(tx, {
+                    organizationId: order.organizationId,
+                    action: client_1.AuditAction.ORDER_DRIVER_DECLINE,
+                    entityType: "SalesOrder",
+                    entityId: order.id,
+                    before: { status: client_1.SalesOrderStatus.READY, assignedDriverId: staleDriverId },
+                    after: { status: result.status, assignedDriverId: null },
+                    meta: { driverId: staleDriverId, declinedByDriverIds, reason: "WATCHDOG_TIMEOUT" },
+                });
+                return result;
+            });
+            if (!updated) {
+                // Raced with a genuine pickup/decline/cancel between the query above and this
+                // transaction — nothing to do, the order is no longer in the stale state this tick
+                // detected.
+                continue;
+            }
+            // Own-driver orders go back to the shop to pick again, never to the pool.
+            if (updated.driverDispatchMode === client_1.DriverDispatchMode.OWN_DRIVER) {
+                unassigned += 1;
+                if (updated.externalOrderId) {
+                    void (0, order_event_webhook_service_1.notifyOrderEvent)({
+                        externalOrderId: updated.externalOrderId,
+                        status: updated.status,
+                        eventType: "DRIVER_UNASSIGNED",
+                    });
+                }
+                const staleDriver = await prisma_1.prisma.driver.findUnique({ where: { id: staleDriverId }, select: { fullName: true } });
+                void (0, sales_orders_service_1.notifyStaffOwnDriverNeeded)(updated.organizationId, updated, "TIMED_OUT", staleDriver?.fullName);
+                continue;
+            }
+            try {
+                const nearestDriver = await (0, sales_orders_service_1.findNearestFreeDriver)(updated.branchId, (0, sales_orders_service_1.parseDeclinedDriverIds)(updated.declinedByDriverIds));
+                if (nearestDriver) {
+                    await (0, sales_orders_service_1.assignDriverToSalesOrder)(updated.organizationId, updated.id, null, nearestDriver.id);
+                    reassigned += 1;
+                    continue;
+                }
+            }
+            catch (error) {
+                console.warn(`[driver-assignment-watchdog] Re-assignment after timeout failed for order ${updated.id}`, error);
+            }
+            unassigned += 1;
+            // Without this, NearCart never learns the assignment was reversed and keeps showing the
+            // timed-out driver's stale name/phone on the order — same reasoning as the matching branch
+            // in declineDriverOrder above.
+            if (updated.externalOrderId) {
+                void (0, order_event_webhook_service_1.notifyOrderEvent)({
+                    externalOrderId: updated.externalOrderId,
+                    status: updated.status,
+                    eventType: "DRIVER_UNASSIGNED",
+                });
+            }
+            // No replacement driver found — escalate to org staff, same as markSalesOrderReady's
+            // auto-assign-failure path and declineDriverOrder's own no-replacement fallback, so a stuck
+            // order is never silent.
+            void (0, sales_orders_service_1.notifyStaffOfAutoAssignFailure)(updated.organizationId, updated);
+        }
+        catch (error) {
+            failed += 1;
+            console.warn(`[driver-assignment-watchdog] Failed to process stale assignment for order ${order.orderNumber}`, error);
+        }
+    }
+    if (reassigned || unassigned || failed) {
+        console.log(`[driver-assignment-watchdog] reassigned: ${reassigned}, unassigned (no replacement): ${unassigned}, failed: ${failed}.`);
+    }
+    return { reassigned, unassigned, failed };
+}
+/**
+ * NEW FEATURE: best-effort reminder push for a driver whose assignment is approaching — but
+ * hasn't yet hit — the watchdog's staleness threshold above. A driver who genuinely just forgot
+ * about a pickup benefits from a nudge before losing the order to reassignment, rather than only
+ * finding out after the fact. Fires once per order, at roughly the halfway point of
+ * `DRIVER_ASSIGNMENT_STALE_MINUTES`, using a time-window check (`assignedAt` falling inside a
+ * slice sized to this job's own tick interval) instead of a persisted "already reminded" flag —
+ * deliberately avoiding a schema change for a nice-to-have notification. A missed tick just means
+ * a driver doesn't get a reminder for that one order (silent degradation, not a resend/spam
+ * risk); the window is sized a little wider than the tick interval so an occasional delayed tick
+ * doesn't cause a false negative, at the cost of a rare, harmless double-send.
+ *
+ * Registered on the same schedule as `sweepStaleDriverAssignments` (see
+ * jobs/driver-assignment-watchdog.ts) — the coupling between `windowMinutes` below and that job's
+ * actual tick interval is real and intentional; if that schedule ever changes, this window should
+ * move with it.
+ */
+async function sendNearTimeoutReminders() {
+    const halfwayMinutes = env_1.env.DRIVER_ASSIGNMENT_STALE_MINUTES / 2;
+    const windowMinutes = 3; // comfortably straddles the every-2-minutes tick interval
+    const windowStart = new Date(Date.now() - (halfwayMinutes + windowMinutes) * 60_000);
+    const windowEnd = new Date(Date.now() - halfwayMinutes * 60_000);
+    let candidates;
+    try {
+        candidates = await prisma_1.prisma.salesOrder.findMany({
+            where: {
+                status: client_1.SalesOrderStatus.READY,
+                assignedDriverId: { not: null },
+                assignedAt: { gte: windowStart, lt: windowEnd },
+                // Same exemption as the unassign sweep above: no "you're about to lose this order" nag
+                // for a driver already standing at the shop.
+                arrivedForPickupAt: null,
+            },
+            select: { id: true, orderNumber: true, assignedDriverId: true },
+            orderBy: { assignedAt: "asc" },
+            take: NEAR_TIMEOUT_REMINDER_BATCH_SIZE,
+        });
+    }
+    catch (error) {
+        console.warn("[driver-assignment-watchdog] Failed to query near-timeout reminders — skipping this tick", error);
+        return { reminded: 0 };
+    }
+    let reminded = 0;
+    for (const order of candidates) {
+        if (!order.assignedDriverId) {
+            continue;
+        }
+        try {
+            await (0, push_notification_service_1.sendPushToDriver)(order.assignedDriverId, {
+                title: "Don't forget this pickup",
+                body: `Order #${order.orderNumber} is still waiting for pickup — confirm you're on your way, or decline so someone else can take it.`,
+                data: { salesOrderId: order.id },
+                channelId: "order_alert",
+            });
+            reminded += 1;
+        }
+        catch (error) {
+            console.warn(`[driver-assignment-watchdog] Failed to send near-timeout reminder for order ${order.orderNumber}`, error);
+        }
+    }
+    if (reminded > 0) {
+        console.log(`[driver-assignment-watchdog] Sent ${reminded} near-timeout reminder(s).`);
+    }
+    return { reminded };
 }

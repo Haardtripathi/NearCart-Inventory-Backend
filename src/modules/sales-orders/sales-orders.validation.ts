@@ -1,4 +1,4 @@
-import { OrderSource, PaymentStatus, SalesOrderStatus } from "@prisma/client";
+import { OrderSource, PaymentStatus, SalesOrderStatus, DriverDispatchMode } from "@prisma/client";
 import { z } from "zod";
 
 import {
@@ -59,6 +59,25 @@ export const rejectSalesOrderSchema = z.object({
 export const assignDriverSchema = z.object({
   driverId: trimmedString,
 });
+
+// Shop-owned drivers (2026-09-24). Both optional on mark-ready: no body = "Let NearCart choose",
+// exactly the old behaviour, so the web dashboard and older app builds are unaffected.
+const ownDriverRequired = (value: { dispatchMode?: DriverDispatchMode; driverId?: string }) =>
+  value.dispatchMode !== DriverDispatchMode.OWN_DRIVER || Boolean(value.driverId);
+
+export const markReadySchema = z
+  .object({
+    dispatchMode: z.nativeEnum(DriverDispatchMode).optional(),
+    driverId: trimmedString.optional(),
+  })
+  .refine(ownDriverRequired, { message: "Pick one of your drivers", path: ["driverId"] });
+
+export const dispatchSalesOrderSchema = z
+  .object({
+    dispatchMode: z.nativeEnum(DriverDispatchMode),
+    driverId: trimmedString.optional(),
+  })
+  .refine(ownDriverRequired, { message: "Pick one of your drivers", path: ["driverId"] });
 
 /**
  * Shop-side partial fulfilment: "of what this customer ordered, here is what I can actually

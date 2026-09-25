@@ -1,4 +1,4 @@
-import { DriverStatus, SalesOrderStatus } from "@prisma/client";
+import { DriverStatus, Prisma, SalesOrderStatus } from "@prisma/client";
 
 import { env } from "../../config/env";
 import { prisma } from "../../config/prisma";
@@ -10,15 +10,25 @@ import { prisma } from "../../config/prisma";
  * PHASE1_REQUIREMENTS.md's contract, not the full Driver record (no email/vehicleNumber/etc).
  */
 export async function listAssignableDrivers(
-  query: { status?: DriverStatus; branchId?: string },
+  query: { status?: DriverStatus; branchId?: string; shopOnly?: boolean },
   organizationId?: string,
 ) {
+  // Shop-owned drivers (2026-09-24) belong to one branch: they're listed for that branch only —
+  // never for another shop — and `shopOnly` narrows to them (the "My own driver" picker).
+  const shopFilter: Prisma.DriverWhereInput = query.shopOnly
+    ? { shopBranchId: query.branchId ?? "__none__" }
+    : query.branchId
+      ? { OR: [{ shopBranchId: null }, { shopBranchId: query.branchId }] }
+      : { OR: [{ shopBranchId: null }, { shopBranch: { organizationId } }] };
+
   const drivers = await prisma.driver.findMany({
     where: {
       status: query.status ?? DriverStatus.VERIFIED,
+      ...shopFilter,
     },
     select: {
       id: true,
+      shopBranchId: true,
       fullName: true,
       phone: true,
       vehicleType: true,
@@ -78,6 +88,7 @@ export async function listAssignableDrivers(
       // distance in km, never raw coordinates (same privacy stance as the rest of this endpoint).
       isOnline: driver.isAvailableForAssignment && hasFreshLocation,
       isBusy: driver._count.assignedOrders > 0,
+      isShopDriver: driver.shopBranchId != null,
       distanceKm,
     };
   });

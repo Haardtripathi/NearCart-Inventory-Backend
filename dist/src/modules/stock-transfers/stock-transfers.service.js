@@ -163,8 +163,17 @@ async function updateStockTransfer(organizationId, transferId, actorUserId, inpu
     }
     const items = input.items ? await prepareTransferItems(organizationId, input.items) : null;
     await prisma_1.prisma.$transaction(async (tx) => {
-        await tx.stockTransfer.update({
-            where: { id: transferId },
+        // Bug fix: this used to be a plain `tx.stockTransfer.update({where: {id: transferId}})` with no
+        // status predicate — a concurrent `approveStockTransfer` that had already moved the transfer out
+        // of DRAFT between the check above and this write would be silently overridden, rewriting
+        // items/branches on a transfer that's already APPROVED (with stock already moved for the OLD
+        // quantities/branches). Guarded the same way `approveStockTransfer` already guards its own
+        // DRAFT -> APPROVED transition: atomic `updateMany` re-checking status at write time, conflict
+        // if it no longer matches. `approveStockTransfer` additionally re-reads items fresh inside its
+        // own transaction after its claim (see below), so this and that fix close both directions of
+        // the same race.
+        const { count } = await tx.stockTransfer.updateMany({
+            where: { id: transferId, organizationId, status: client_1.StockTransferStatus.DRAFT },
             data: {
                 ...(input.fromBranchId ? { fromBranchId: input.fromBranchId } : {}),
                 ...(input.toBranchId ? { toBranchId: input.toBranchId } : {}),
@@ -172,6 +181,9 @@ async function updateStockTransfer(organizationId, transferId, actorUserId, inpu
                 ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
             },
         });
+        if (count === 0) {
+            throw ApiError_1.ApiError.conflict("Stock transfer is no longer draft — it may have changed status concurrently and can no longer be edited");
+        }
         if (items) {
             await tx.stockTransferItem.deleteMany({
                 where: {
@@ -234,33 +246,43 @@ async function approveStockTransfer(organizationId, transferId, actorUserId) {
         if (count === 0) {
             throw ApiError_1.ApiError.conflict("Stock transfer is no longer draft — it may have already been approved or cancelled");
         }
-        for (const item of transfer.items) {
+        // Bug fix: re-read the transfer's CURRENT items/branches inside the transaction, right after
+        // the atomic claim above, instead of using `transfer` (read before this transaction started).
+        // If a concurrent PATCH /stock-transfers/:id edited quantities/branches between that outer read
+        // and this claim succeeding, `transfer.items`/`fromBranchId`/`toBranchId` would be stale —
+        // moving stock for quantities/branches that no longer match what StockTransferItem actually
+        // holds. See sales-orders.service.ts's confirmSalesOrder for the fuller rationale behind this
+        // same pattern; updateStockTransfer's own atomic CAS guard closes the other half of this race.
+        const updated = await tx.stockTransfer.findUniqueOrThrow({
+            where: { id: transferId },
+            include: { items: true },
+        });
+        for (const item of updated.items) {
             await (0, inventory_service_1.applyStockMovement)(tx, {
                 organizationId,
-                branchId: transfer.fromBranchId,
+                branchId: updated.fromBranchId,
                 variantId: item.variantId,
                 movementType: client_1.StockMovementType.TRANSFER_OUT,
                 referenceType: client_1.ReferenceType.STOCK_TRANSFER,
-                referenceId: transfer.id,
+                referenceId: updated.id,
                 quantityDelta: (0, decimal_1.toDecimal)(item.quantity).negated(),
                 unitCost: item.unitCost ?? undefined,
-                note: transfer.notes ?? undefined,
+                note: updated.notes ?? undefined,
                 createdById: actorUserId,
             });
             await (0, inventory_service_1.applyStockMovement)(tx, {
                 organizationId,
-                branchId: transfer.toBranchId,
+                branchId: updated.toBranchId,
                 variantId: item.variantId,
                 movementType: client_1.StockMovementType.TRANSFER_IN,
                 referenceType: client_1.ReferenceType.STOCK_TRANSFER,
-                referenceId: transfer.id,
+                referenceId: updated.id,
                 quantityDelta: item.quantity,
                 unitCost: item.unitCost ?? undefined,
-                note: transfer.notes ?? undefined,
+                note: updated.notes ?? undefined,
                 createdById: actorUserId,
             });
         }
-        const updated = await tx.stockTransfer.findUniqueOrThrow({ where: { id: transferId } });
         await (0, audit_service_1.createAuditLog)(tx, {
             organizationId,
             actorUserId,

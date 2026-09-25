@@ -16,8 +16,12 @@ const driver_auth_service_1 = require("./driver-auth.service");
  * backend uses the normal envelope.
  */
 async function registerDriverController(req, res) {
-    const driver = await (0, driver_auth_service_1.registerDriver)(req.body);
-    return res.status(201).json({ driver });
+    // `verificationToken` is additive to the locked `{ driver }` shape (see this file's top
+    // comment) — see driver-auth.service.ts's registerDriver: it's what lets a freshly-registered,
+    // still-PENDING_VERIFICATION driver submit vehicle/license evidence before a SUPER_ADMIN
+    // approves them, since login won't issue a real session until then.
+    const { driver, verificationToken, shop } = await (0, driver_auth_service_1.registerDriver)(req.body);
+    return res.status(201).json({ driver, verificationToken, shop });
 }
 async function loginDriverController(req, res) {
     try {
@@ -26,7 +30,13 @@ async function loginDriverController(req, res) {
     }
     catch (error) {
         if (error instanceof driver_auth_service_1.DriverStatusError) {
-            return res.status(403).json({ error: { code: error.code, message: error.message } });
+            // `verificationToken` (only ever set for DRIVER_NOT_VERIFIED, see DriverStatusError's own
+            // doc comment) is additive to the locked `{ error: {code,message} }` shape — an older client
+            // that doesn't know this field exists just ignores it, same "login rejected" UX as before.
+            return res.status(403).json({
+                error: { code: error.code, message: error.message },
+                ...(error.verificationToken ? { verificationToken: error.verificationToken } : {}),
+            });
         }
         throw error;
     }

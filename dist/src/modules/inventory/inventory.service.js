@@ -219,11 +219,19 @@ async function applyStockMovement(db, input) {
             const title = "Low stock alert";
             const body = `${productLabel} (${variant.sku}) is down to ${afterOnHand.toString()} — below its reorder level.`;
             const notificationData = { type: "low_stock", variantId: variant.id, productId: variant.productId };
+            // sendPushToOrgStaff's own membership/device-token lookups run before its internal
+            // try/catch (see push-notification.service.ts), so this call itself can still reject —
+            // unlike every other fire-and-forget push call site in this codebase, this one was missing
+            // its own `.catch()`, which on Node turns a transient DB error here into an unhandled
+            // promise rejection that crashes the whole process, well after the stock movement above has
+            // already committed. Matches the `.catch()` pattern used at every other call site.
             void (0, push_notification_service_1.sendPushToOrgStaff)(input.organizationId, {
                 title,
                 body,
                 data: notificationData,
                 channelId: "order_alert",
+            }).catch((error) => {
+                console.warn(`[inventory] Failed to send low-stock push for variant ${variant.id}`, error);
             });
             // Persisted alongside the fire-and-forget push above so the mobile app's alerts-history
             // screen has something to show beyond a transient OS notification — see

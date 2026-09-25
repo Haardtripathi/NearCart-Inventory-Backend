@@ -22,6 +22,12 @@ import {
   updateDriverLocationController,
 } from "./driver-orders.controller";
 import { updateDriverAvailabilitySchema, updateDriverLocationSchema } from "./driver-orders.validation";
+import {
+  getDriverShopController,
+  joinDriverShopController,
+  leaveDriverShopController,
+} from "../drivers/driver-shop.controller";
+import { joinDriverShopSchema } from "../drivers/drivers.validation";
 
 export const driverOrdersRouter = Router();
 
@@ -70,6 +76,11 @@ driverOrdersRouter.post(
 );
 
 driverOrdersRouter.get("/earnings/summary", asyncHandler(getDriverEarningsSummaryController));
+
+// Shop-owned drivers (2026-09-24): the shop this driver works for, if any.
+driverOrdersRouter.get("/shop", asyncHandler(getDriverShopController));
+driverOrdersRouter.post("/shop/join", validateRequest({ body: joinDriverShopSchema }), asyncHandler(joinDriverShopController));
+driverOrdersRouter.post("/shop/leave", asyncHandler(leaveDriverShopController));
 driverOrdersRouter.get("/performance/summary", asyncHandler(getDriverPerformanceSummaryController));
 
 driverOrdersRouter.patch(

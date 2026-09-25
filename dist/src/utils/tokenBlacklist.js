@@ -26,6 +26,24 @@ async function isTokenBlacklisted(jti) {
     if (!redis) {
         return false;
     }
-    const value = await redis.get(blacklistKey(jti));
-    return value !== null;
+    // BUG FIX (found live on-device 2026-09-20): this used to let a Redis failure propagate into
+    // `authenticate`, whose catch answers 401 — so a transient Upstash blip turned every valid
+    // token into "unauthorized" and the mobile apps' 401 handling logged the shopkeeper out
+    // mid-shift. Observed on the shop app twice: four concurrent requests each took exactly
+    // 5004ms (the REST client's AbortSignal.timeout) and returned 401, while a genuinely bad
+    // token rejects in ~4ms.
+    //
+    // The blacklist is a revocation *optimisation* on top of a cryptographically verified JWT,
+    // not the source of truth for whether the token is valid. When it can't be consulted, failing
+    // open keeps sessions alive; the cost is that a token revoked in the last few minutes may stay
+    // usable until its own expiry, which is a far smaller harm than logging out every shop
+    // whenever Redis hiccups.
+    try {
+        const value = await redis.get(blacklistKey(jti));
+        return value !== null;
+    }
+    catch (error) {
+        console.warn("[auth] Token blacklist unavailable — allowing the request through", error);
+        return false;
+    }
 }

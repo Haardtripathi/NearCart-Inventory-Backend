@@ -1,5 +1,6 @@
 import {
   AuditAction,
+  DriverDispatchMode,
   DriverStatus,
   NotificationLogType,
   OrderSource,
@@ -985,6 +986,9 @@ export async function findNearestFreeDriver(
       // the single most recent decliner, so a small pool of drivers can't get bounced the same
       // order back and forth indefinitely.
       ...(excludeDriverIds.length > 0 ? { id: { notIn: excludeDriverIds } } : {}),
+      // Shop-owned drivers (2026-09-24) only ever carry their own branch's orders; for that branch
+      // they compete with general drivers on distance like anyone else.
+      OR: [{ shopBranchId: null }, { shopBranchId: branchId }],
       assignedOrders: {
         none: {
           status: { in: ACTIVE_DRIVER_ORDER_STATUSES },
@@ -1039,10 +1043,16 @@ export async function findNearestUnassignedOrderForDriver(
   driverId: string,
   driverLocation: { latitude: number; longitude: number },
 ): Promise<{ id: string } | null> {
+  const driver = await prisma.driver.findUnique({ where: { id: driverId }, select: { shopBranchId: true } });
+
   const candidates = await prisma.salesOrder.findMany({
     where: {
       status: SalesOrderStatus.READY,
       assignedDriverId: null,
+      // OWN_DRIVER orders wait for the shop to pick; nothing is auto-assigned to them.
+      OR: [{ driverDispatchMode: null }, { driverDispatchMode: DriverDispatchMode.NEARCART }],
+      // A shop-owned driver only ever gets their own branch's orders.
+      ...(driver?.shopBranchId ? { branchId: driver.shopBranchId } : {}),
       // Hyperlocal orders are same-day. Without an age cap, a READY order nobody ever collected
       // was pushed to whichever driver next came online — on-device 2026-09-20 a driver going
       // online was handed a 5-week-old order. Older ones need a human (shop cancels/reassigns).
@@ -1173,6 +1183,95 @@ export async function notifyStaffOfAutoAssignFailure(
   }
 }
 
+export type OwnDriverNeededReason = "UNAVAILABLE" | "DECLINED" | "TIMED_OUT";
+
+/**
+ * OWN_DRIVER orders are never auto-reassigned: when the picked driver can't take it, declines, or
+ * times out, the order goes back to the shop to choose again (owner's rule, 2026-09-24). Same
+ * audit + push + NotificationLog trail as notifyStaffOfAutoAssignFailure, so the partner app's
+ * existing alert (which opens the order) just works. Best-effort, never throws.
+ */
+export async function notifyStaffOwnDriverNeeded(
+  organizationId: string,
+  order: { id: string; orderNumber: string },
+  reason: OwnDriverNeededReason,
+  driverName?: string | null,
+): Promise<void> {
+  try {
+    await createAuditLog(prisma, {
+      organizationId,
+      action: AuditAction.ORDER_AUTOASSIGN_FAILED,
+      entityType: "SalesOrder",
+      entityId: order.id,
+      meta: { reason: `OWN_DRIVER_${reason}` },
+    });
+
+    const who = driverName ?? "Your driver";
+    const title = "Pick a driver";
+    const body =
+      reason === "DECLINED"
+        ? `${who} declined order #${order.orderNumber}. Pick another of your drivers or let NearCart choose.`
+        : reason === "TIMED_OUT"
+          ? `${who} didn't respond to order #${order.orderNumber}. Pick another of your drivers or let NearCart choose.`
+          : `Order #${order.orderNumber} is packed but your driver couldn't take it. Pick another driver or let NearCart choose.`;
+    const data = { salesOrderId: order.id, reason: `OWN_DRIVER_${reason}` };
+
+    void sendPushToOrgStaff(organizationId, { title, body, data, channelId: "order_alert" }).catch((error) => {
+      console.warn(`[sales-orders] Failed to push own-driver alert for order ${order.id}`, error);
+    });
+
+    await recordNotificationLog(prisma, {
+      organizationId,
+      type: NotificationLogType.ORDER_AUTOASSIGN_FAILED,
+      title,
+      body,
+      data,
+    });
+  } catch (error) {
+    console.warn(`[sales-orders] Failed to record own-driver notification for order ${order.id}`, error);
+  }
+}
+
+/**
+ * The shop's pick for an OWN_DRIVER order must be one of that branch's own drivers, approved, and
+ * online and free right now — the same things the picker greys out, re-checked here because the
+ * list can be seconds stale. Checked BEFORE any state change so a bad pick leaves the order as-is.
+ */
+async function assertOwnDriverAvailable(branchId: string, driverId: string) {
+  const driver = await prisma.driver.findUnique({
+    where: { id: driverId },
+    select: {
+      fullName: true,
+      status: true,
+      shopBranchId: true,
+      isAvailableForAssignment: true,
+      lastLocationAt: true,
+      _count: { select: { assignedOrders: { where: { status: { in: ACTIVE_DRIVER_ORDER_STATUSES } } } } },
+    },
+  });
+
+  if (!driver || driver.shopBranchId !== branchId) {
+    throw ApiError.badRequest("That driver isn't one of this branch's drivers.");
+  }
+  if (driver.status !== DriverStatus.VERIFIED) {
+    throw ApiError.badRequest(`${driver.fullName} hasn't been approved by NearCart yet.`);
+  }
+  const isFresh =
+    driver.lastLocationAt != null &&
+    driver.lastLocationAt.getTime() >= Date.now() - env.DRIVER_LOCATION_STALE_MINUTES * 60_000;
+  if (!driver.isAvailableForAssignment || !isFresh) {
+    throw ApiError.conflict(`${driver.fullName} is offline right now. Pick another driver or let NearCart choose.`);
+  }
+  if (driver._count.assignedOrders > 0) {
+    throw ApiError.conflict(`${driver.fullName} is already on a delivery. Pick another driver or let NearCart choose.`);
+  }
+}
+
+export interface DispatchChoice {
+  mode?: DriverDispatchMode;
+  driverId?: string;
+}
+
 /**
  * Transitions CONFIRMED -> READY, the first of the two previously-dead SalesOrderStatus
  * transitions to get wired up. Separate step from assign-driver (below) since the shop may mark
@@ -1180,11 +1279,27 @@ export async function notifyStaffOfAutoAssignFailure(
  * PHASE1_REQUIREMENTS.md contract (`PATCH /:id/mark-ready` is distinct from
  * `POST /:id/assign-driver`).
  */
-export async function markSalesOrderReady(organizationId: string, orderId: string, actorUserId: string) {
+export async function markSalesOrderReady(
+  organizationId: string,
+  orderId: string,
+  actorUserId: string,
+  dispatch: DispatchChoice = {},
+) {
   const order = await getSalesOrderById(organizationId, orderId);
 
   if (order.status !== SalesOrderStatus.CONFIRMED) {
     throw ApiError.badRequest("Only confirmed orders can be marked ready");
+  }
+
+  // "Let NearCart choose" is the default, so callers that send no choice (the web dashboard, older
+  // app builds) keep today's behaviour exactly.
+  const dispatchMode = dispatch.mode ?? DriverDispatchMode.NEARCART;
+
+  if (dispatchMode === DriverDispatchMode.OWN_DRIVER) {
+    if (!dispatch.driverId) {
+      throw ApiError.badRequest("Pick one of your drivers.");
+    }
+    await assertOwnDriverAvailable(order.branchId, dispatch.driverId);
   }
 
   // Distance-based driver fare (branch pickup-point <-> delivery address), computed here — before
@@ -1215,6 +1330,7 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
         readyById: actorUserId,
         estimatedDistanceKm,
         driverDeliveryFee: driverDeliveryFee != null ? toDecimal(driverDeliveryFee) : null,
+        driverDispatchMode: dispatchMode,
       },
     });
 
@@ -1243,6 +1359,18 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
       status: updated.status,
       eventType: "READY",
     });
+  }
+
+  if (dispatchMode === DriverDispatchMode.OWN_DRIVER) {
+    try {
+      return await assignDriverToSalesOrder(organizationId, updated.id, actorUserId, dispatch.driverId!);
+    } catch (error) {
+      // Lost a race since the pre-check (the driver just took another order or went offline).
+      // The order is packed either way; leave it READY and ask the shop to pick again.
+      console.warn(`[sales-orders] Own-driver assignment failed for order ${updated.id}`, error);
+      void notifyStaffOwnDriverNeeded(organizationId, updated, "UNAVAILABLE");
+      return updated;
+    }
   }
 
   // Nearest-free-driver auto-assignment: fires right after the READY transition commits, on a
@@ -1279,6 +1407,59 @@ export async function markSalesOrderReady(organizationId: string, orderId: strin
 }
 
 /**
+ * Re-dispatch a READY order that has no driver — after an own driver declined/timed out, or when
+ * the shop changes its mind. OWN_DRIVER assigns the picked driver (or fails with the reason, order
+ * untouched); NEARCART runs the same nearest-free-driver match as mark-ready.
+ */
+export async function dispatchSalesOrder(
+  organizationId: string,
+  orderId: string,
+  actorUserId: string,
+  dispatch: { mode: DriverDispatchMode; driverId?: string },
+) {
+  const order = await getSalesOrderById(organizationId, orderId);
+
+  if (order.status !== SalesOrderStatus.READY) {
+    throw ApiError.badRequest("Only packed orders waiting for a driver can be dispatched");
+  }
+  if (order.assignedDriverId) {
+    throw ApiError.conflict("This order already has a driver");
+  }
+
+  if (dispatch.mode === DriverDispatchMode.OWN_DRIVER) {
+    if (!dispatch.driverId) {
+      throw ApiError.badRequest("Pick one of your drivers.");
+    }
+    await assertOwnDriverAvailable(order.branchId, dispatch.driverId);
+  }
+
+  await prisma.salesOrder.updateMany({
+    where: { id: orderId, organizationId, status: SalesOrderStatus.READY, assignedDriverId: null },
+    data: { driverDispatchMode: dispatch.mode },
+  });
+
+  if (dispatch.mode === DriverDispatchMode.OWN_DRIVER) {
+    return assignDriverToSalesOrder(organizationId, orderId, actorUserId, dispatch.driverId!);
+  }
+
+  try {
+    const nearestDriver = await findNearestFreeDriver(
+      order.branchId,
+      parseDeclinedDriverIds(order.declinedByDriverIds),
+    );
+    if (nearestDriver) {
+      return await assignDriverToSalesOrder(organizationId, orderId, null, nearestDriver.id);
+    }
+  } catch (error) {
+    console.warn(`[sales-orders] Nearest-free-driver match on re-dispatch failed for order ${orderId}`, error);
+  }
+
+  const current = await getSalesOrderById(organizationId, orderId);
+  void notifyStaffOfAutoAssignFailure(organizationId, current);
+  return current;
+}
+
+/**
  * Assigns a driver to a READY order. Drivers are a platform-wide pool (a standalone `Driver`
  * model, not an OrganizationMembership) — see PHASE1_REQUIREMENTS.md's locked 2026-07-24 decision
  * — so any org's staff may assign any VERIFIED driver, without an organization-membership check
@@ -1306,7 +1487,7 @@ export async function assignDriverToSalesOrder(
 
   const driver = await prisma.driver.findUnique({
     where: { id: driverId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, shopBranchId: true },
   });
 
   if (!driver) {
@@ -1315,6 +1496,15 @@ export async function assignDriverToSalesOrder(
 
   if (driver.status !== DriverStatus.VERIFIED) {
     throw ApiError.badRequest("Only verified drivers can be assigned to orders");
+  }
+
+  // Shop-owned drivers (2026-09-24): never another shop's orders; and an OWN_DRIVER order only
+  // ever goes to the branch's own drivers.
+  if (driver.shopBranchId && driver.shopBranchId !== order.branchId) {
+    throw ApiError.badRequest("This driver works only for another shop");
+  }
+  if (order.driverDispatchMode === DriverDispatchMode.OWN_DRIVER && driver.shopBranchId !== order.branchId) {
+    throw ApiError.badRequest("This order is set to use your own drivers. Pick one of them or let NearCart choose.");
   }
 
   const updated = await prisma.$transaction(async (tx) => {

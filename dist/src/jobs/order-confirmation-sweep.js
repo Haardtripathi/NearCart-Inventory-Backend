@@ -6,7 +6,27 @@ const node_cron_1 = require("node-cron");
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../config/prisma");
 const sales_orders_service_1 = require("../modules/sales-orders/sales-orders.service");
+const partialFulfilment_1 = require("../utils/partialFulfilment");
 const AUTO_CANCEL_REASON = "Shop did not confirm in time (auto-cancelled)";
+/**
+ * Hard cap on how many overdue orders one tick will touch.
+ *
+ * The query below is indexed (SalesOrder [status, confirmationDeadlineAt]) so FINDING the rows is
+ * cheap at any table size, but each row is then processed one at a time, each doing its own
+ * transaction, audit write and outbound notification. Unbounded, a backlog — the process was down
+ * for a few hours, a deploy paused the cron, an incident left thousands of orders past their
+ * deadline — would make a single tick run for minutes while the next tick starts on top of it. The
+ * cap turns that into steady drainage at CONFIRMATION_SWEEP_BATCH_SIZE per minute instead, which
+ * for a deadline measured in minutes is far more than real traffic ever produces.
+ */
+const CONFIRMATION_SWEEP_BATCH_SIZE = 200;
+/**
+ * Guards against overlapping ticks. node-cron fires on the wall clock regardless of whether the
+ * previous run has finished, so a slow tick (a sluggish database, a large batch) would otherwise
+ * have a second run select the same rows and race it — every one of those duplicates then failing
+ * its status guard and being counted as an error.
+ */
+let sweepInFlight = false;
 /**
  * Finds every PENDING SalesOrder whose confirmationDeadlineAt has passed and auto-rejects it,
  * routing through the existing staff-facing rejectSalesOrder (actorUserId: null — same nullable-
@@ -16,6 +36,17 @@ const AUTO_CANCEL_REASON = "Shop did not confirm in time (auto-cancelled)";
  * eventType "REJECTED") all fire identically to a staff-initiated reject — the customer is
  * notified immediately either way, per the confirmed product decision that auto-cancels notify
  * the customer.
+ *
+ * PARTIAL FULFILMENT (see utils/partialFulfilment.ts): an order the shop has asked the customer
+ * to approve a REDUCED version of deliberately stays PENDING while the customer decides, which
+ * means it lands squarely in this sweep's query. Auto-rejecting it here would silently kill a
+ * live order the shop is actively negotiating — so a proposal still inside its own `expiresAt`
+ * window is skipped outright, and one that has run out is routed to `expirePartialFulfilment`
+ * (cancel, reason "Customer did not respond…", shop notified) instead of the shop-didn't-confirm
+ * auto-reject, which would blame the wrong party. Proposing also pushes the order's
+ * `confirmationDeadlineAt` out to the proposal's `expiresAt`, so in practice this sweep only sees
+ * such an order at exactly the moment it should act on it; the state check below is belt-and-
+ * braces for rows where that write and this read disagree.
  *
  * Exported as a plain function (not just the cron registration) so it can be invoked directly in
  * tests/manual verification without waiting for the schedule to tick.
@@ -35,7 +66,11 @@ async function sweepExpiredPendingOrders() {
                 status: client_1.SalesOrderStatus.PENDING,
                 confirmationDeadlineAt: { lt: new Date() },
             },
-            select: { id: true, organizationId: true },
+            select: { id: true, organizationId: true, deliveryAddress: true },
+            // Oldest deadline first, so a backlog drains in the order customers have been waiting
+            // rather than in whatever order the storage engine happens to return.
+            orderBy: { confirmationDeadlineAt: "asc" },
+            take: CONFIRMATION_SWEEP_BATCH_SIZE,
         });
     }
     catch (error) {
@@ -44,8 +79,21 @@ async function sweepExpiredPendingOrders() {
     }
     let processed = 0;
     let failed = 0;
+    const now = Date.now();
     for (const order of overdue) {
         try {
+            const proposal = (0, partialFulfilment_1.parsePartialFulfilment)(order.deliveryAddress);
+            if (proposal?.state === "AWAITING_CUSTOMER") {
+                const expiresAt = Date.parse(proposal.expiresAt);
+                // Still inside the customer's window — leave it alone. This is the check that stops the
+                // sweep from killing orders mid-negotiation.
+                if (Number.isFinite(expiresAt) && expiresAt > now) {
+                    continue;
+                }
+                await (0, sales_orders_service_1.expirePartialFulfilment)(order.organizationId, order.id);
+                processed += 1;
+                continue;
+            }
             await (0, sales_orders_service_1.rejectSalesOrder)(order.organizationId, order.id, null, AUTO_CANCEL_REASON);
             processed += 1;
         }
@@ -64,10 +112,22 @@ async function sweepExpiredPendingOrders() {
 /** Registers the every-minute sweep. Called once at server startup (see server.ts). */
 function registerOrderConfirmationSweep() {
     (0, node_cron_1.schedule)("* * * * *", () => {
+        // node-cron fires on the wall clock whether or not the previous tick has finished. Skipping
+        // rather than queueing keeps two runs from selecting and racing the same overdue orders; the
+        // batch the in-flight run is already working through covers them.
+        if (sweepInFlight) {
+            console.warn("[order-confirmation-sweep] Previous tick still running — skipping this one.");
+            return;
+        }
+        sweepInFlight = true;
         // Defense in depth on top of the internal try/catch above — a scheduled job must never be
         // able to produce an unhandled rejection that takes the whole process down with it.
-        sweepExpiredPendingOrders().catch((error) => {
+        sweepExpiredPendingOrders()
+            .catch((error) => {
             console.warn("[order-confirmation-sweep] Unexpected error during sweep tick", error);
+        })
+            .finally(() => {
+            sweepInFlight = false;
         });
     });
     console.log("[order-confirmation-sweep] Registered (runs every minute).");

@@ -23,8 +23,8 @@ export async function registerDriverController(req: Request, res: Response) {
   // comment) — see driver-auth.service.ts's registerDriver: it's what lets a freshly-registered,
   // still-PENDING_VERIFICATION driver submit vehicle/license evidence before a SUPER_ADMIN
   // approves them, since login won't issue a real session until then.
-  const { driver, verificationToken } = await registerDriver(req.body);
-  return res.status(201).json({ driver, verificationToken });
+  const { driver, verificationToken, shop } = await registerDriver(req.body);
+  return res.status(201).json({ driver, verificationToken, shop });
 }
 
 export async function loginDriverController(req: Request, res: Response) {

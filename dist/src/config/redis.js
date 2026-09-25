@@ -8,6 +8,7 @@ exports.connectRedis = connectRedis;
 exports.disconnectRedis = disconnectRedis;
 const ioredis_1 = __importDefault(require("ioredis"));
 const env_1 = require("./env");
+const REDIS_COMMAND_TIMEOUT_MS = 1500;
 class UpstashRestRedisClient {
     restUrl;
     restToken;
@@ -30,7 +31,10 @@ class UpstashRestRedisClient {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(5000),
+            // 5s was far too long for a call that sits on the auth hot path (every authenticated
+            // request consults the token blacklist): a slow Upstash stalled every request for a full
+            // 5s before failing. Callers already degrade gracefully, so give up quickly instead.
+            signal: AbortSignal.timeout(REDIS_COMMAND_TIMEOUT_MS),
         });
         const data = (await response.json().catch(() => null));
         if (!response.ok) {
@@ -69,6 +73,14 @@ class UpstashRestRedisClient {
     async ttl(key) {
         const result = await this.runCommand("TTL", [this.normalizeKey(key)]);
         return Number(result);
+    }
+    async eval(script, keys, args) {
+        const prefixedKeys = keys.map((key) => this.normalizeKey(key));
+        return this.runCommand("EVAL", [script, keys.length, ...prefixedKeys, ...args]);
+    }
+    async setIfNotExists(key, value, ttlSeconds) {
+        const result = await this.runCommand("SET", [this.normalizeKey(key), value, "EX", ttlSeconds, "NX"]);
+        return result === "OK";
     }
     async connect() {
         this.status = "connecting";
@@ -110,6 +122,17 @@ class IoredisClientAdapter {
     }
     async ttl(key) {
         return this.client.ttl(key);
+    }
+    async eval(script, keys, args) {
+        // ioredis's built-in `keyPrefix` option (configured where this client is constructed below)
+        // transparently prefixes the key arguments of `eval`/`evalsha` calls — it inspects `numkeys`
+        // to know how many of the following arguments are keys, same mechanism that already prefixes
+        // plain get/set/del/ttl above without this adapter doing it manually.
+        return this.client.eval(script, keys.length, ...keys, ...args.map((value) => String(value)));
+    }
+    async setIfNotExists(key, value, ttlSeconds) {
+        const result = await this.client.set(key, value, "EX", ttlSeconds, "NX");
+        return result === "OK";
     }
     async connect() {
         await this.client.connect();

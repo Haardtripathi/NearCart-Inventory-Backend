@@ -13,6 +13,7 @@ import {
   deliverSalesOrderController,
   getSalesOrderController,
   listSalesOrdersController,
+  dispatchSalesOrderController,
   markSalesOrderReadyController,
   proposePartialFulfilmentController,
   rejectSalesOrderController,
@@ -20,6 +21,8 @@ import {
 } from "./sales-orders.controller";
 import {
   assignDriverSchema,
+  dispatchSalesOrderSchema,
+  markReadySchema,
   createSalesOrderSchema,
   proposePartialFulfilmentSchema,
   rejectSalesOrderSchema,
@@ -50,7 +53,19 @@ salesOrdersRouter.post(
 salesOrdersRouter.post("/:id/reject", requireRoles(...MANAGER_ROLES), validateRequest({ body: rejectSalesOrderSchema }), asyncHandler(rejectSalesOrderController));
 salesOrdersRouter.post("/:id/cancel", requireRoles(...MANAGER_ROLES), asyncHandler(cancelSalesOrderController));
 salesOrdersRouter.post("/:id/deliver", requireRoles(...MANAGER_ROLES), asyncHandler(deliverSalesOrderController));
-salesOrdersRouter.patch("/:id/mark-ready", requireRoles(...MANAGER_ROLES), asyncHandler(markSalesOrderReadyController));
+salesOrdersRouter.patch(
+  "/:id/mark-ready",
+  requireRoles(...MANAGER_ROLES),
+  validateRequest({ body: markReadySchema }),
+  asyncHandler(markSalesOrderReadyController),
+);
+// Re-pick a driver for a packed order that has none (own driver declined, or switch to NearCart).
+salesOrdersRouter.post(
+  "/:id/dispatch",
+  requireRoles(...MANAGER_ROLES),
+  validateRequest({ body: dispatchSalesOrderSchema }),
+  asyncHandler(dispatchSalesOrderController),
+);
 salesOrdersRouter.post(
   "/:id/assign-driver",
   requireRoles(...MANAGER_ROLES),

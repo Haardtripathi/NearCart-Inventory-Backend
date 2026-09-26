@@ -173,7 +173,9 @@ async function listPlatformDrivers(query) {
     const [items, totalItems] = await prisma_1.prisma.$transaction([
         prisma_1.prisma.driver.findMany({
             where,
-            orderBy: { createdAt: "desc" },
+            // `id` tie-breaker: seeded/bulk drivers share a createdAt, and offset paging over ties skips
+            // or repeats rows between pages.
+            orderBy: [{ createdAt: "desc" }, { id: "asc" }],
             skip,
             take: limit,
             include: { shopBranch: { select: { name: true, organization: { select: { name: true } } } } },

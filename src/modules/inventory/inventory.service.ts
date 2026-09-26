@@ -370,9 +370,11 @@ export async function listBalances(
       product: true,
       variant: true,
     },
-    orderBy: {
-      updatedAt: "desc" as const,
-    },
+    // updatedAt changes on every stock movement, so offset paging over it alone skips/repeats rows
+    // whenever a sale lands between page fetches, and ties (bulk imports, one transaction touching
+    // many rows) have no defined order at all. `id` is a stable tiebreaker so equal timestamps at
+    // least page deterministically.
+    orderBy: [{ updatedAt: "desc" as const }, { id: "asc" as const }],
   };
 
   if (query.lowStock) {
@@ -470,9 +472,9 @@ export async function listLedger(
           },
         },
       },
-      orderBy: {
-        createdAt: "desc",
-      },
+      // `id` breaks createdAt ties (one transaction writes several ledger rows) so pages don't
+      // overlap or drop rows.
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       skip,
       take: limit,
     }),

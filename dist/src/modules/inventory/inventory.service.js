@@ -292,9 +292,11 @@ async function listBalances(organizationId, query) {
             product: true,
             variant: true,
         },
-        orderBy: {
-            updatedAt: "desc",
-        },
+        // updatedAt changes on every stock movement, so offset paging over it alone skips/repeats rows
+        // whenever a sale lands between page fetches, and ties (bulk imports, one transaction touching
+        // many rows) have no defined order at all. `id` is a stable tiebreaker so equal timestamps at
+        // least page deterministically.
+        orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
     };
     if (query.lowStock) {
         const rows = await prisma_1.prisma.inventoryBalance.findMany(baseQuery);
@@ -373,9 +375,9 @@ async function listLedger(organizationId, query) {
                     },
                 },
             },
-            orderBy: {
-                createdAt: "desc",
-            },
+            // `id` breaks createdAt ties (one transaction writes several ledger rows) so pages don't
+            // overlap or drop rows.
+            orderBy: [{ createdAt: "desc" }, { id: "asc" }],
             skip,
             take: limit,
         }),

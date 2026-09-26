@@ -313,7 +313,7 @@ export async function getReorderSuggestions(organizationId: string, branchId?: s
     }
   }
 
-  const suggestions = balances
+  const qualifying = balances
     .map((balance) => {
       const sales = velocityByVariant.get(balance.variantId);
       if (!sales) return null;
@@ -346,11 +346,14 @@ export async function getReorderSuggestions(organizationId: string, branchId?: s
       };
     })
     .filter((row): row is NonNullable<typeof row> => row !== null)
-    .sort((a, b) => a.daysOfStockLeft - b.daysOfStockLeft)
-    .slice(0, REORDER_SUGGESTIONS_LIMIT);
+    .sort((a, b) => a.daysOfStockLeft - b.daysOfStockLeft);
+  const suggestions = qualifying.slice(0, REORDER_SUGGESTIONS_LIMIT);
 
   return {
     items: suggestions,
+    // How many variants qualified before the REORDER_SUGGESTIONS_LIMIT cap, so clients can say
+    // "showing 30 of N" instead of silently presenting a truncated list as the whole picture.
+    totalCount: qualifying.length,
     windowDays: REORDER_VELOCITY_WINDOW_DAYS,
   };
 }

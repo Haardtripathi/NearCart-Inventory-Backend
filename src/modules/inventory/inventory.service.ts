@@ -330,6 +330,7 @@ export async function listBalances(
     variantId?: string;
     lowStock?: boolean;
     search?: string;
+    sort?: "recent" | "id";
   },
 ) {
   const { page, limit, skip } = getPagination(query.page, query.limit);
@@ -374,7 +375,10 @@ export async function listBalances(
     // whenever a sale lands between page fetches, and ties (bulk imports, one transaction touching
     // many rows) have no defined order at all. `id` is a stable tiebreaker so equal timestamps at
     // least page deterministically.
-    orderBy: [{ updatedAt: "desc" as const }, { id: "asc" as const }],
+    orderBy:
+      query.sort === "id"
+        ? [{ id: "asc" as const }]
+        : [{ updatedAt: "desc" as const }, { id: "asc" as const }],
   };
 
   if (query.lowStock) {

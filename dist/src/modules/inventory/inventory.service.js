@@ -296,7 +296,9 @@ async function listBalances(organizationId, query) {
         // whenever a sale lands between page fetches, and ties (bulk imports, one transaction touching
         // many rows) have no defined order at all. `id` is a stable tiebreaker so equal timestamps at
         // least page deterministically.
-        orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+        orderBy: query.sort === "id"
+            ? [{ id: "asc" }]
+            : [{ updatedAt: "desc" }, { id: "asc" }],
     };
     if (query.lowStock) {
         const rows = await prisma_1.prisma.inventoryBalance.findMany(baseQuery);

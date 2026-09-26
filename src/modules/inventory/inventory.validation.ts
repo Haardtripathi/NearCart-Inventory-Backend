@@ -18,6 +18,10 @@ export const inventoryBalanceQuerySchema = paginationQuerySchema.extend({
   // strictBooleanQueryParam (not z.coerce.boolean()): the latter treats the query string
   // "false" as truthy, silently inverting an explicit ?lowStock=false filter.
   lowStock: strictBooleanQueryParam,
+  // "id" = stable order for bulk reads that page through every row (the Partner app's stock map):
+  // the default most-recently-moved order shifts while stock changes, so a row moved to page 1
+  // after page 1 was read would be skipped. Defaults to "recent" (unchanged behaviour).
+  sort: z.enum(["recent", "id"]).optional(),
 });
 
 export const inventoryLedgerQuerySchema = paginationQuerySchema.extend({

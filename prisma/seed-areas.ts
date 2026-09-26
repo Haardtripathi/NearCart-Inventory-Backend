@@ -62,19 +62,19 @@ const SHOP_TYPES: Record<ShopType, { label: string; category: string; names: str
     label: "Kirana",
     category: "Grocery",
     names: ["Shree Krishna Kirana", "Patel Provision Store", "Jay Ambe Kirana", "Om Sai General Store"],
-    photo: "https://images.unsplash.com/photo-1759197894183-ffffa3c7fcd4?w=800&auto=format&fit=crop&q=80",
+    photo: "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362733/nearcart-inventory/seed/demo-catalog/file_tnolsl.jpg",
   },
   pharmacy: {
     label: "Pharmacy",
     category: "Pharmacy",
     names: ["Satellite Medical Store", "Sanjivani Chemist", "Arogya Pharmacy", "Shiv Medical & General"],
-    photo: "https://images.unsplash.com/photo-1696861286643-341a8d7a79e9?w=800&auto=format&fit=crop&q=80",
+    photo: "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362734/nearcart-inventory/seed/demo-catalog/file_fzn8kl.jpg",
   },
   dairy: {
     label: "Dairy & Bakery",
     category: "Dairy & Bakery",
     names: ["Gokul Dairy & Bakery", "Amrut Dairy Parlour", "Krishna Milk & Bakes", "Nandan Dairy Corner"],
-    photo: "https://images.unsplash.com/photo-1774669081553-4ef841520c05?w=800&auto=format&fit=crop&q=80",
+    photo: "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362735/nearcart-inventory/seed/demo-catalog/file_bdgqes.jpg",
   },
   fruitveg: {
     label: "Fruits & Vegetables",

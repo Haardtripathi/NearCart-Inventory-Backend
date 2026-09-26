@@ -10,7 +10,7 @@
     "sellingPrice": 265,
     "mrp": 285,
     "sku": "GRO-01",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/908/100/1567/front_en.7.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362629/nearcart-inventory/seed/demo-catalog/file_b2xchv.jpg"
    },
    {
     "name": "Tata Salt",
@@ -21,7 +21,7 @@
     "sellingPrice": 27,
     "mrp": 28,
     "sku": "GRO-02",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/404/390/1015/front_en.10.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362631/nearcart-inventory/seed/demo-catalog/file_t8o85b.jpg"
    },
    {
     "name": "Fortune Sunflower Oil",
@@ -32,7 +32,7 @@
     "sellingPrice": 145,
     "mrp": 160,
     "sku": "GRO-03",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/600/728/0280/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362632/nearcart-inventory/seed/demo-catalog/file_nqwimd.jpg"
    },
    {
     "name": "India Gate Basmati Rice",
@@ -43,7 +43,7 @@
     "sellingPrice": 135,
     "mrp": 150,
     "sku": "GRO-04",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/069/022/510/1134/front_en.16.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362633/nearcart-inventory/seed/demo-catalog/file_ykvclb.jpg"
    },
    {
     "name": "Tata Sampann Chana Dal",
@@ -54,7 +54,7 @@
     "sellingPrice": 165,
     "mrp": 180,
     "sku": "GRO-05",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/404/392/6629/front_en.5.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362635/nearcart-inventory/seed/demo-catalog/file_biocp7.jpg"
    },
    {
     "name": "Maggi 2-Minute Masala Noodles",
@@ -65,7 +65,7 @@
     "sellingPrice": 52,
     "mrp": 56,
     "sku": "GRO-06",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/105/800/4144/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362636/nearcart-inventory/seed/demo-catalog/file_kq4zya.jpg"
    },
    {
     "name": "Parle-G Biscuits",
@@ -76,7 +76,7 @@
     "sellingPrice": 82,
     "mrp": 90,
     "sku": "GRO-07",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/171/910/0956/front_en.8.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362637/nearcart-inventory/seed/demo-catalog/file_gqiolt.jpg"
    },
    {
     "name": "Britannia Good Day Choco Chip Cookies",
@@ -87,7 +87,7 @@
     "sellingPrice": 42,
     "mrp": 45,
     "sku": "GRO-08",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/106/300/4207/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362639/nearcart-inventory/seed/demo-catalog/file_zlhwvx.jpg"
    },
    {
     "name": "Tata Tea Premium",
@@ -98,7 +98,7 @@
     "sellingPrice": 270,
     "mrp": 290,
     "sku": "GRO-09",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/105/201/0417/front_fr.7.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362640/nearcart-inventory/seed/demo-catalog/file_t69oph.jpg"
    },
    {
     "name": "Nescafe Classic Coffee",
@@ -109,7 +109,7 @@
     "sellingPrice": 175,
     "mrp": 190,
     "sku": "GRO-10",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/105/890/4338/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362641/nearcart-inventory/seed/demo-catalog/file_dnucc7.jpg"
    },
    {
     "name": "Kissan Fresh Tomato Ketchup",
@@ -120,7 +120,7 @@
     "sellingPrice": 135,
     "mrp": 150,
     "sku": "GRO-11",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/103/089/7542/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362699/nearcart-inventory/seed/demo-catalog/file_cdq2wx.jpg"
    },
    {
     "name": "Haldiram's Aloo Bhujia",
@@ -131,7 +131,7 @@
     "sellingPrice": 102,
     "mrp": 110,
     "sku": "GRO-12",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/406/321/8124/front_en.4.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362700/nearcart-inventory/seed/demo-catalog/file_pkxg35.jpg"
    },
    {
     "name": "Kellogg's Corn Flakes",
@@ -142,7 +142,7 @@
     "sellingPrice": 190,
     "mrp": 210,
     "sku": "GRO-13",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/149/900/9661/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362702/nearcart-inventory/seed/demo-catalog/file_pz3ysc.jpg"
    },
    {
     "name": "Cadbury Dairy Milk Silk",
@@ -153,7 +153,7 @@
     "sellingPrice": 175,
     "mrp": 190,
     "sku": "GRO-14",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/123/303/4300/front_en.6.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362721/nearcart-inventory/seed/demo-catalog/file_gduikb.jpg"
    }
   ],
   "pharmacy": [
@@ -166,7 +166,7 @@
     "sellingPrice": 52,
     "mrp": 56,
     "sku": "PHA-01",
-    "imageUrl": "https://images.openbeautyfacts.org/images/products/000/005/015/8980/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362644/nearcart-inventory/seed/demo-catalog/file_mmngzn.jpg"
    },
    {
     "name": "Vicks VapoRub",
@@ -177,7 +177,7 @@
     "sellingPrice": 155,
     "mrp": 165,
     "sku": "PHA-02",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1c/Vicks_VapoRub_%2851013600352%29_%28cropped%29.jpg/960px-Vicks_VapoRub_%2851013600352%29_%28cropped%29.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362647/nearcart-inventory/seed/demo-catalog/file_sype8i.jpg"
    },
    {
     "name": "Dabur Chyawanprash",
@@ -188,7 +188,7 @@
     "sellingPrice": 375,
     "mrp": 399,
     "sku": "PHA-03",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/120/700/6241/front_en.5.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362649/nearcart-inventory/seed/demo-catalog/file_f9tfec.jpg"
    },
    {
     "name": "Dabur Honey",
@@ -199,7 +199,7 @@
     "sellingPrice": 215,
     "mrp": 235,
     "sku": "PHA-04",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/cc/Runny_hunny.jpg/960px-Runny_hunny.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362651/nearcart-inventory/seed/demo-catalog/file_miylcx.jpg"
    },
    {
     "name": "Himalaya Purifying Neem Face Wash",
@@ -210,7 +210,7 @@
     "sellingPrice": 175,
     "mrp": 190,
     "sku": "PHA-05",
-    "imageUrl": "https://images.openbeautyfacts.org/images/products/890/113/885/1248/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362653/nearcart-inventory/seed/demo-catalog/file_muaelj.jpg"
    },
    {
     "name": "Glucon-D Instant Energy Drink",
@@ -221,7 +221,7 @@
     "sellingPrice": 195,
     "mrp": 210,
     "sku": "PHA-06",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/154/201/3140/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362655/nearcart-inventory/seed/demo-catalog/file_myllau.jpg"
    },
    {
     "name": "Horlicks Health Drink",
@@ -232,7 +232,7 @@
     "sellingPrice": 275,
     "mrp": 290,
     "sku": "PHA-07",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/157/100/1354/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362656/nearcart-inventory/seed/demo-catalog/file_rl2rzo.jpg"
    },
    {
     "name": "Vaseline Petroleum Jelly",
@@ -243,7 +243,7 @@
     "sellingPrice": 99,
     "mrp": 110,
     "sku": "PHA-08",
-    "imageUrl": "https://images.openbeautyfacts.org/images/products/000/004/218/2634/front_en.88.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362658/nearcart-inventory/seed/demo-catalog/file_jloaxj.jpg"
    },
    {
     "name": "Colgate Total Toothpaste",
@@ -254,7 +254,7 @@
     "sellingPrice": 128,
     "mrp": 140,
     "sku": "PHA-09",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/871/478/955/4273/front_de.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362659/nearcart-inventory/seed/demo-catalog/file_jwkimn.jpg"
    },
    {
     "name": "Dettol Liquid Handwash",
@@ -265,7 +265,7 @@
     "sellingPrice": 99,
     "mrp": 105,
     "sku": "PHA-10",
-    "imageUrl": "https://images.openbeautyfacts.org/images/products/890/139/632/4584/front_en.9.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362660/nearcart-inventory/seed/demo-catalog/file_rheen2.jpg"
    },
    {
     "name": "Nivea Soft Moisturising Cream",
@@ -276,7 +276,7 @@
     "sellingPrice": 199,
     "mrp": 215,
     "sku": "PHA-11",
-    "imageUrl": "https://images.openbeautyfacts.org/images/products/400/580/889/0507/front_en.19.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362704/nearcart-inventory/seed/demo-catalog/file_lntjnl.jpg"
    },
    {
     "name": "Himalaya Baby Lotion",
@@ -287,7 +287,7 @@
     "sellingPrice": 175,
     "mrp": 189,
     "sku": "PHA-12",
-    "imageUrl": "https://images.openbeautyfacts.org/images/products/890/113/851/1463/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362705/nearcart-inventory/seed/demo-catalog/file_pjiedk.jpg"
    },
    {
     "name": "Complan Nutrition Drink",
@@ -298,7 +298,7 @@
     "sellingPrice": 299,
     "mrp": 320,
     "sku": "PHA-13",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/154/200/3158/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362708/nearcart-inventory/seed/demo-catalog/file_agppu0.jpg"
    },
    {
     "name": "Savlon Antiseptic Cream",
@@ -309,7 +309,7 @@
     "sellingPrice": 48,
     "mrp": 52,
     "sku": "PHA-14",
-    "imageUrl": "https://images.openbeautyfacts.org/images/products/501/130/901/8110/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362725/nearcart-inventory/seed/demo-catalog/file_lytsid.jpg"
    }
   ],
   "dairy": [
@@ -322,7 +322,7 @@
     "sellingPrice": 275,
     "mrp": 285,
     "sku": "DAI-01",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/201/0153/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362661/nearcart-inventory/seed/demo-catalog/file_ojksue.jpg"
    },
    {
     "name": "Amul Taaza Toned Milk",
@@ -333,7 +333,7 @@
     "sellingPrice": 66,
     "mrp": 68,
     "sku": "DAI-02",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/215/0088/front_en.19.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362663/nearcart-inventory/seed/demo-catalog/file_yadis3.jpg"
    },
    {
     "name": "Amul Masti Dahi",
@@ -344,7 +344,7 @@
     "sellingPrice": 35,
     "mrp": 37,
     "sku": "DAI-03",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/220/1124/front_en.4.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362664/nearcart-inventory/seed/demo-catalog/file_ywverc.jpg"
    },
    {
     "name": "Amul Cheese Slices",
@@ -355,7 +355,7 @@
     "sellingPrice": 145,
     "mrp": 150,
     "sku": "DAI-04",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/202/0305/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362665/nearcart-inventory/seed/demo-catalog/file_srotzf.jpg"
    },
    {
     "name": "Amul Pure Ghee",
@@ -366,7 +366,7 @@
     "sellingPrice": 620,
     "mrp": 650,
     "sku": "DAI-05",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/203/1059/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362667/nearcart-inventory/seed/demo-catalog/file_oimsjz.jpg"
    },
    {
     "name": "Amul Kool Café",
@@ -377,7 +377,7 @@
     "sellingPrice": 25,
     "mrp": 25,
     "sku": "DAI-06",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/215/1429/front_en.7.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362668/nearcart-inventory/seed/demo-catalog/file_ffvjqm.jpg"
    },
    {
     "name": "Amul Lassi",
@@ -388,7 +388,7 @@
     "sellingPrice": 20,
     "mrp": 20,
     "sku": "DAI-07",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/220/2046/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362669/nearcart-inventory/seed/demo-catalog/file_zwsj5j.jpg"
    },
    {
     "name": "Britannia Milk Bread",
@@ -399,7 +399,7 @@
     "sellingPrice": 48,
     "mrp": 50,
     "sku": "DAI-08",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2c/Wei%C3%9Fbrot-1.jpg/960px-Wei%C3%9Fbrot-1.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362673/nearcart-inventory/seed/demo-catalog/file_xe3t7q.jpg"
    },
    {
     "name": "Britannia Toastea Rusk",
@@ -410,7 +410,7 @@
     "sellingPrice": 55,
     "mrp": 60,
     "sku": "DAI-09",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/106/316/5861/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362675/nearcart-inventory/seed/demo-catalog/file_ybdnry.jpg"
    },
    {
     "name": "Britannia Gobbles Cake",
@@ -421,7 +421,7 @@
     "sellingPrice": 45,
     "mrp": 50,
     "sku": "DAI-10",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/106/336/3779/front_en.4.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362677/nearcart-inventory/seed/demo-catalog/file_qqrlid.jpg"
    },
    {
     "name": "Nestle Milkmaid",
@@ -432,7 +432,7 @@
     "sellingPrice": 145,
     "mrp": 155,
     "sku": "DAI-11",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/400/349/009/5101/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362710/nearcart-inventory/seed/demo-catalog/file_wjcp7h.jpg"
    },
    {
     "name": "Amul Cheese Spread",
@@ -443,7 +443,7 @@
     "sellingPrice": 110,
     "mrp": 115,
     "sku": "DAI-12",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/206/0097/front_en.3.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362711/nearcart-inventory/seed/demo-catalog/file_iorran.jpg"
    },
    {
     "name": "Mother Dairy Classic Dahi",
@@ -454,7 +454,7 @@
     "sellingPrice": 38,
     "mrp": 40,
     "sku": "DAI-13",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/164/809/7983/front_en.12.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362712/nearcart-inventory/seed/demo-catalog/file_ekct18.jpg"
    },
    {
     "name": "Amul Fresh Cream",
@@ -465,7 +465,7 @@
     "sellingPrice": 67,
     "mrp": 70,
     "sku": "DAI-14",
-    "imageUrl": "https://images.openfoodfacts.org/images/products/890/126/215/1863/front_en.6.400.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362728/nearcart-inventory/seed/demo-catalog/file_baan3z.jpg"
    }
   ],
   "fruitveg": [
@@ -478,7 +478,7 @@
     "sellingPrice": 60,
     "mrp": 70,
     "sku": "FNV-01",
-    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/de/Bananavarieties.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362679/nearcart-inventory/seed/demo-catalog/file_cy7nvu.jpg"
    },
    {
     "name": "Apple (Shimla)",
@@ -489,7 +489,7 @@
     "sellingPrice": 180,
     "mrp": 200,
     "sku": "FNV-02",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a6/Pink_lady_and_cross_section.jpg/960px-Pink_lady_and_cross_section.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362681/nearcart-inventory/seed/demo-catalog/file_izwgoy.jpg"
    },
    {
     "name": "Alphonso Mango",
@@ -500,7 +500,7 @@
     "sellingPrice": 280,
     "mrp": 320,
     "sku": "FNV-03",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/74/Mangos_-_single_and_halved.jpg/960px-Mangos_-_single_and_halved.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362683/nearcart-inventory/seed/demo-catalog/file_d6cqqi.jpg"
    },
    {
     "name": "Orange (Nagpur)",
@@ -511,7 +511,7 @@
     "sellingPrice": 95,
     "mrp": 110,
     "sku": "FNV-04",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e3/Oranges_-_whole-halved-segment.jpg/960px-Oranges_-_whole-halved-segment.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362685/nearcart-inventory/seed/demo-catalog/file_gc58v1.jpg"
    },
    {
     "name": "Pomegranate",
@@ -522,7 +522,7 @@
     "sellingPrice": 190,
     "mrp": 220,
     "sku": "FNV-05",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/6a/Pomegranate_Juice_%282019%29.jpg/960px-Pomegranate_Juice_%282019%29.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362687/nearcart-inventory/seed/demo-catalog/file_mb4ia6.jpg"
    },
    {
     "name": "Green Grapes",
@@ -533,7 +533,7 @@
     "sellingPrice": 70,
     "mrp": 80,
     "sku": "FNV-06",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/53/Grapes%2C_Rostov-on-Don%2C_Russia.jpg/960px-Grapes%2C_Rostov-on-Don%2C_Russia.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362688/nearcart-inventory/seed/demo-catalog/file_tkjykf.jpg"
    },
    {
     "name": "Guava (Amrood)",
@@ -544,7 +544,7 @@
     "sellingPrice": 45,
     "mrp": 50,
     "sku": "FNV-07",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/88/Guava_pink_fruit.jpg/960px-Guava_pink_fruit.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362691/nearcart-inventory/seed/demo-catalog/file_yzc4w0.jpg"
    },
    {
     "name": "Tomato",
@@ -555,7 +555,7 @@
     "sellingPrice": 35,
     "mrp": 40,
     "sku": "FNV-08",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/89/Tomato_je.jpg/960px-Tomato_je.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362692/nearcart-inventory/seed/demo-catalog/file_esngzc.jpg"
    },
    {
     "name": "Onion",
@@ -566,7 +566,7 @@
     "sellingPrice": 38,
     "mrp": 45,
     "sku": "FNV-09",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a2/Mixed_onions.jpg/960px-Mixed_onions.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362695/nearcart-inventory/seed/demo-catalog/file_der3ke.jpg"
    },
    {
     "name": "Potato",
@@ -577,7 +577,7 @@
     "sellingPrice": 32,
     "mrp": 38,
     "sku": "FNV-10",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Patates.jpg/960px-Patates.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362697/nearcart-inventory/seed/demo-catalog/file_bx8hsn.jpg"
    },
    {
     "name": "Cauliflower",
@@ -588,7 +588,7 @@
     "sellingPrice": 35,
     "mrp": 40,
     "sku": "FNV-11",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2f/Chou-fleur_02.jpg/960px-Chou-fleur_02.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362715/nearcart-inventory/seed/demo-catalog/file_jpdlxr.jpg"
    },
    {
     "name": "Okra (Bhindi)",
@@ -599,7 +599,7 @@
     "sellingPrice": 35,
     "mrp": 40,
     "sku": "FNV-12",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/95/Hong_Kong_Okra_Aug_25_2012.JPG/960px-Hong_Kong_Okra_Aug_25_2012.JPG"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362717/nearcart-inventory/seed/demo-catalog/file_buztho.jpg"
    },
    {
     "name": "Carrot",
@@ -610,7 +610,7 @@
     "sellingPrice": 30,
     "mrp": 35,
     "sku": "FNV-13",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a2/Vegetable-Carrot-Bundle-wStalks.jpg/960px-Vegetable-Carrot-Bundle-wStalks.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362718/nearcart-inventory/seed/demo-catalog/file_jcbqvb.jpg"
    },
    {
     "name": "Cucumber",
@@ -621,9 +621,9 @@
     "sellingPrice": 22,
     "mrp": 25,
     "sku": "FNV-14",
-    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/96/ARS_cucumber.jpg/960px-ARS_cucumber.jpg"
+    "imageUrl": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362732/nearcart-inventory/seed/demo-catalog/file_slbplw.jpg"
    }
   ]
  },
- "fruitVegShopPhoto": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/97/Gourock_greengrocers_ext.jpg/960px-Gourock_greengrocers_ext.jpg"
+ "fruitVegShopPhoto": "https://res.cloudinary.com/dy1fforu1/image/upload/v1790362739/nearcart-inventory/seed/demo-catalog/file_uchtaf.jpg"
 }

@@ -632,11 +632,22 @@ export async function listMarketplaceCatalog(
   // rather than one after another — this endpoint's cost is round-trip latency, not row count.
   // The candidate query resolves filter + sort + page + total in the database (see
   // marketplace-catalog.query.ts) instead of loading the whole catalog and slicing it in JS.
-  const [branch, candidates, preloadedMetadata] = await Promise.all([
+  const [branch, candidates, preloadedMetadata, categoryCounts] = await Promise.all([
     getMarketplaceBranch(organizationId, query.branchId, localeContext),
     selectCatalogCandidates(organizationId, query, localeContext, { skip, take: limit }),
     getOrgCatalogMetadata(organizationId),
+    // Customer-facing category rail (2026-09-26): only categories that actually hold active
+    // products, with how many. The org's category list includes every seeded industry default and
+    // parent category, so a new shop's rail was mostly "No products here" dead ends.
+    prisma.product.groupBy({
+      by: ["categoryId"],
+      where: { organizationId, deletedAt: null, status: ProductStatus.ACTIVE, categoryId: { not: null } },
+      _count: { _all: true },
+    }),
   ]);
+  const productCountByCategory = new Map(
+    categoryCounts.flatMap((row) => (row.categoryId ? [[row.categoryId, row._count._all] as const] : [])),
+  );
 
   // Only the ids on this page get the full per-product read, so the hydrate cost is bounded by
   // `limit` rather than by how many products the shop sells.
@@ -662,7 +673,9 @@ export async function listMarketplaceCatalog(
       // Served from the same cached snapshot as the product rows above — previously these were two
       // more awaited calls that each re-fetched the organization and then its categories/brands,
       // eight further round trips on every catalog page view.
-      categories: serializeCatalogCategories(metadata, localeContext),
+      categories: serializeCatalogCategories(metadata, localeContext)
+        .filter((category) => productCountByCategory.has(category.id))
+        .map((category) => ({ ...category, productCount: productCountByCategory.get(category.id) ?? 0 })),
       brands: serializeCatalogBrands(metadata, localeContext),
     },
     shopInventory: {

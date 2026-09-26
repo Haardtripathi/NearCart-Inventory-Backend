@@ -45,7 +45,13 @@ app.use(
     credentials: true,
   }),
 );
-app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+// Only log API traffic. The server is on a public IP, so internet-wide scanners (e.g. bots
+// brute-forcing Synology NAS logins at /webapi/entry.cgi) flood the log with 404s.
+app.use(
+  morgan(env.NODE_ENV === "production" ? "combined" : "dev", {
+    skip: (request) => !request.originalUrl.startsWith("/api"),
+  }),
+);
 app.use(express.json({ limit: "2mb" }));
 app.use(apiRateLimiter);
 
